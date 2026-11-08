@@ -51,7 +51,9 @@ Recovery is scoped to the same selected headset:
 ./scripts/restore-windows.ps1 -DeviceAddress <local-address>
 ```
 
-The INF installs the codec service as demand-start with a device-interface trigger and runs it from Driver Store. Recovery uses SetupAPI and Windows' inbox A2DP INF directly, without executing any native-package binary or requiring its catalog, service registration or local backup. It selects one present A2DP service by address across device classes (the Microsoft driver uses MEDIA), and refuses absent or ambiguous targets. The installer stops the codec service when no present native headset uses it. Pairing, radio ownership, cached package files and the local backup are retained. No automatic reboot or broad `restore all` is performed.
+The INF installs the codec service as demand-start with a device-interface trigger and runs it from Driver Store. Recovery uses SetupAPI and Windows' inbox A2DP INF directly, without executing any native-package binary or requiring its catalog, service registration or local backup. It selects one present A2DP service by address across device classes (the Microsoft driver uses MEDIA), and refuses absent or ambiguous targets.
+
+Recovery first checks the compatible Microsoft driver. If the codec service exists and is active, recovery waits for it to stop before rebinding, so its PCM mapping is released before the audio child is removed. Failure to confirm service shutdown aborts the rebind. A previously running service is resumed afterward, including after a failed bind, to serve other native headsets; when replacement requires a reboot it stays stopped until that reboot. Missing service registration does not block recovery. `-CheckOnly` does not inspect or change the service. Pairing, radio ownership, cached package files and the local backup are retained. No automatic reboot or broad `restore all` is performed.
 
 ## Still required before calling native complete
 

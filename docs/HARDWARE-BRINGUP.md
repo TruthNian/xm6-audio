@@ -19,6 +19,10 @@ The exact allocation-free parser used by the miniport is exercised in a user-mod
 
 Reference: [Microsoft's proposed-format and attribute handling sample](https://github.com/microsoft/Windows-driver-samples/blob/main/audio/simpleaudiosample/Source/Main/minwavert.cpp).
 
+## Offline recovery lifecycle correction
+
+The standalone recovery source also coordinates codec-service shutdown before rebinding the selected headset. Offline tests exercise the actual script with fake service/PnP/install APIs, including stop failures/timeouts, binding failure, service absence, restart failure and pending reboot. This reduces the recovery-time mapping teardown race; it does not establish safety for unexpected PnP removal during playback, which remains a lifecycle acceptance item.
+
 ## Do not load candidate 0.3.5
 
 A local crash dump identified a descriptor ABI error introduced in 0.3.5: its stream data-range pointer table used a serialized `KSMULTIPLE_ITEM` where PortCls expects a pointer-based `KSATTRIBUTE_LIST`. The kernel interpreted a length as a pointer while enumerating the attributes. The developer trial was rolled back to the Windows inbox driver.

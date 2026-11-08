@@ -102,11 +102,51 @@ namespace Xm6Audio {
 }
 '@
 }
-$reboot = [Xm6Audio.InboxRecovery]::Run($headset[0].InstanceId, $inboxInf, -not $CheckOnly)
 if ($CheckOnly) {
+    [void][Xm6Audio.InboxRecovery]::Run($headset[0].InstanceId, $inboxInf, $false)
     Write-Host 'Microsoft inbox A2DP recovery is available. No device binding was changed.'
-} else {
+    return
+}
+
+# Validate the compatible inbox driver before interrupting the codec service.
+# Do not depend on its registration, executable path or an intact native package.
+[void][Xm6Audio.InboxRecovery]::Run($headset[0].InstanceId, $inboxInf, $false)
+$codecService = $null
+$resumeCodecService = $false
+$reboot = $false
+try {
+    # An absent service is valid during recovery from a broken installation.
+    # Enumeration errors must propagate rather than look like service absence.
+    $codecService = Get-Service -ErrorAction Stop | Where-Object Name -eq 'oa2dpsvc' | Select-Object -First 1
+    if ($codecService -and $codecService.Status -ne 'Stopped') {
+        if ($codecService.Status -ne 'StopPending') {
+            $resumeCodecService = $true
+            $codecService.Stop()
+        }
+        $codecService.WaitForStatus([System.ServiceProcess.ServiceControllerStatus]::Stopped,
+            [TimeSpan]::FromSeconds(15))
+    }
+
+    # The service has released its mapping before PnP tears down the audio child.
+    $reboot = [Xm6Audio.InboxRecovery]::Run($headset[0].InstanceId, $inboxInf, $true)
     $service = (Get-PnpDeviceProperty -InstanceId $headset[0].InstanceId -KeyName DEVPKEY_Device_Service).Data
     if ($service -ne 'BthA2dp' -and -not $reboot) { throw 'Recovery did not select BthA2dp; inspect the device installation log.' }
     Write-Host "Microsoft inbox A2DP selected. Reboot required: $reboot"
+} finally {
+    # Preserve the previously running service for any other native headsets,
+    # including when rebinding fails. Do not reopen a driver pending replacement.
+    if ($resumeCodecService -and -not $reboot) {
+        try {
+            $codecService.Refresh()
+            if ($codecService.Status -eq 'Stopped') {
+                $codecService.Start()
+                $codecService.WaitForStatus([System.ServiceProcess.ServiceControllerStatus]::Running,
+                    [TimeSpan]::FromSeconds(15))
+            }
+        } catch {
+            Write-Warning "Could not resume the native codec service: $_"
+        }
+    } elseif ($resumeCodecService -and $reboot) {
+        Write-Warning 'The native codec service remains stopped until restart because driver replacement is pending.'
+    }
 }
