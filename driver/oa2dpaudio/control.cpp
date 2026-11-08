@@ -45,9 +45,7 @@ extern "C" VOID Oa2dpUnlock(_Inout_ PKEVENT lock)
 
 static BOOLEAN FormatValid(_In_ const OA2DP_FORMAT *f)
 {
-    return f->SampleRate >= 8000 && f->SampleRate <= 192000 && f->Channels >= 1 &&
-           f->Channels <= OA2DP_RING_MAX_CHANNELS &&
-           (f->BitsPerSample == 16 || f->BitsPerSample == 24 || f->BitsPerSample == 32);
+    return oa2dp_pcm_format_valid(f);
 }
 
 static BOOLEAN ListValid(_In_ const OA2DP_FORMAT_LIST *list)
@@ -62,8 +60,7 @@ static BOOLEAN ListValid(_In_ const OA2DP_FORMAT_LIST *list)
 
 static BOOLEAN SameFormat(_In_ const OA2DP_FORMAT *a, _In_ const OA2DP_FORMAT *b)
 {
-    return a->SampleRate == b->SampleRate && a->Channels == b->Channels &&
-           a->BitsPerSample == b->BitsPerSample;
+    return oa2dp_pcm_format_same(a, b);
 }
 
 /* Same set of formats (the preferred index may differ). */
@@ -87,15 +84,22 @@ static VOID DefaultFormats(_Out_ OA2DP_FORMAT_LIST *list)
     list->Formats[0].SampleRate = 48000;
     list->Formats[0].Channels = 2;
     list->Formats[0].BitsPerSample = 32;
+    list->Formats[0].ValidBitsPerSample = 32;
+    list->Formats[0].Encoding = OA2DP_PCM_FLOAT;
     list->Formats[1].SampleRate = 44100;
     list->Formats[1].Channels = 2;
     list->Formats[1].BitsPerSample = 32;
+    list->Formats[1].ValidBitsPerSample = 32;
+    list->Formats[1].Encoding = OA2DP_PCM_FLOAT;
 }
 
 extern "C" BOOLEAN Oa2dpFormatListed(_In_ const OA2DP_FORMAT_LIST *list, _In_ const OA2DP_FORMAT *f)
 {
     for (ULONG i = 0; i < list->Count && i < OA2DP_MAX_FORMATS; i++)
-        if (SameFormat(&list->Formats[i], f))
+        if (FormatValid(f) && list->Formats[i].SampleRate == f->SampleRate &&
+            list->Formats[i].Channels == f->Channels &&
+            list->Formats[i].BitsPerSample == f->BitsPerSample &&
+            list->Formats[i].Encoding == f->Encoding)
             return TRUE;
     return FALSE;
 }

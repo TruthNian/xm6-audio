@@ -1,8 +1,8 @@
 # Third-party components
 
-The default XM6 build pins libldac and FindWDK as git submodules; exact
-revisions are recorded in the tree and package manifest. The optional SBC
-and aptX adapters inherited from upstream are not fetched by default.
+The default XM6 build pins libldac, libsbc and FindWDK as git submodules;
+exact revisions are recorded in the tree and package manifest. The optional
+aptX adapters inherited from upstream are not fetched by default.
 Verify the licence of the exact revision you ship.
 
 | Component | Used for | Licence | Notes |

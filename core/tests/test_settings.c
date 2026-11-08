@@ -9,8 +9,10 @@ void test_settings(void)
     int bad = 0;
 
     oa2dp_settings_default(&s);
-    CHECK_EQ(s.priority_count, 1);
+    CHECK_EQ(s.priority_count, 3);
     CHECK_EQ(s.priority[0], OA2DP_CODEC_LDAC);
+    CHECK_EQ(s.priority[1], OA2DP_CODEC_AAC);
+    CHECK_EQ(s.priority[2], OA2DP_CODEC_SBC);
     CHECK_EQ(s.sample_rate, 0);
     CHECK_EQ(s.bits, 0);
     CHECK_EQ(s.chmode, OA2DP_CHMODE_STEREO);

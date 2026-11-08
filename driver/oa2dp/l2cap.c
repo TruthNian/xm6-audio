@@ -134,7 +134,7 @@ static void AcceptIncoming(OA2DP_DEVICE_CONTEXT *dev, PINDICATION_PARAMETERS p)
         brb->Callback = IndicationCallback;
     }
 
-    WDF_OBJECT_ATTRIBUTES_INIT(&attrs);
+    WDF_OBJECT_ATTRIBUTES_INIT_CONTEXT_TYPE(&attrs, OA2DP_REQUEST_CONTEXT);
     attrs.ParentObject = dev->Device;
     if (!NT_SUCCESS(WdfRequestCreate(&attrs, dev->IoTarget, &req)))
         goto fail_brb;
@@ -330,7 +330,7 @@ VOID Oa2dpOpenChannel(_In_ OA2DP_DEVICE_CONTEXT *dev, _In_ WDFREQUEST request,
     FillChannelConfig(brb, ch, mtu);
     brb->Callback = IndicationCallback;
 
-    WDF_OBJECT_ATTRIBUTES_INIT(&attrs);
+    WDF_OBJECT_ATTRIBUTES_INIT_CONTEXT_TYPE(&attrs, OA2DP_REQUEST_CONTEXT);
     attrs.ParentObject = dev->Device;
     status = WdfRequestCreate(&attrs, dev->IoTarget, &lower);
     if (!NT_SUCCESS(status)) {

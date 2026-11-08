@@ -101,8 +101,8 @@ VOID Oa2dpRingSetRunning(_Inout_ OA2DP_AUDIO_RING *r, _In_ BOOLEAN running);
  * `pos`, into the ring. `bits` is the container: 32 = IEEE float, 16/24 =
  * PCM (converted to 24-bit values in int32, OA2DP_RING_FMT_S32). */
 VOID Oa2dpRingPump(_Inout_ OA2DP_AUDIO_RING *r, _In_reads_bytes_(cyclicBytes) const UCHAR *cyclic,
-                   _In_ ULONG cyclicBytes, _In_ ULONG pos, _In_ ULONG frames, _In_ USHORT channels,
-                   _In_ USHORT bits);
+                   _In_ ULONG cyclicBytes, _In_ ULONG pos, _In_ ULONG frames,
+                   _In_ const OA2DP_FORMAT *format);
 
 /* ---- control.cpp ----------------------------------------------------------- */
 

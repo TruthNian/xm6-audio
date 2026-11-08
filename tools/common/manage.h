@@ -69,6 +69,9 @@ struct LiveStatus {
     DWORD sample_rate = 0;
     DWORD channels = 0;
     DWORD bits = 0;
+    DWORD input_container_bits = 0;
+    DWORD input_valid_bits = 0;
+    DWORD input_encoding = 0;
     DWORD bitrate = 0;  // bit/s
     DWORD abr_level = 0;
     DWORD delay_us = 0;

@@ -11,6 +11,7 @@ int main(void)
     test_media();
     test_settings();
     test_ring();
+    test_pcm_format();
     printf("%d checks, %d failures\n", g_checks, g_failures);
     return g_failures ? 1 : 0;
 }

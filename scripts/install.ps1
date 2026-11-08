@@ -29,7 +29,7 @@ if ($RestoreWindows) {
 if (-not $PackageDirectory) { throw 'PackageDirectory is required.' }
 $package = (Resolve-Path -LiteralPath $PackageDirectory).Path
 & "$PSScriptRoot\verify-package.ps1" -PackageDirectory $package
-foreach ($file in @('oa2dpsvc.exe','oa2dpctl.exe','ldac.dll')) {
+foreach ($file in @('oa2dpsvc.exe','oa2dpctl.exe','ldac.dll','sbc.dll')) {
     if (-not (Test-Path -LiteralPath "$package\user-mode\$file")) { throw "Missing $file." }
 }
 if ($CheckOnly) { return }
@@ -56,7 +56,7 @@ New-Item -ItemType Directory -Path $stateDir -Force | Out-Null
     previousInf = (Get-PnpDeviceProperty -InstanceId $headset[0].InstanceId -KeyName DEVPKEY_Device_DriverInfPath).Data
 } | ConvertTo-Json | Set-Content -LiteralPath "$stateDir\install.local.json" -Encoding UTF8
 New-Item -ItemType Directory -Path $install | Out-Null
-foreach ($file in @('oa2dpsvc.exe','oa2dpctl.exe','ldac.dll')) {
+foreach ($file in @('oa2dpsvc.exe','oa2dpctl.exe','ldac.dll','sbc.dll')) {
     Copy-Item -LiteralPath "$package\user-mode\$file" -Destination $install
 }
 $bindingAttempted = $false
@@ -64,7 +64,7 @@ try {
     foreach ($driver in @('oa2dpaudio','oa2dp')) {
         Invoke-Checked pnputil.exe @('/add-driver',"$package\drivers\$driver\$driver.inf")
     }
-    Invoke-Checked $ctl @('set',$address,'codecs=ldac','sample_rate=0','bits=0',
+    Invoke-Checked $ctl @('set',$address,'codecs=ldac,aac,sbc','sample_rate=0','bits=0',
         'channel_mode=stereo','ldac_quality=hq','adaptive_bitrate=false','follow_source_rate=true')
     New-Service -Name oa2dpsvc -BinaryPathName ('"' + (Join-Path $install 'oa2dpsvc.exe') + '"') `
         -StartupType Automatic -DisplayName 'XM6 Audio Native Codec Service' `

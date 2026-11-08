@@ -76,7 +76,7 @@ static ULONG ChannelMask(_In_ ULONG Channels)
 #pragma code_seg()
 VOID Oa2dpBuildWaveFormat(_In_ const OA2DP_FORMAT *Format, _Out_ PKSDATAFORMAT_WAVEFORMATEXTENSIBLE Out)
 {
-    BOOLEAN isFloat = Format->BitsPerSample == 32;
+    BOOLEAN isFloat = Format->Encoding == OA2DP_PCM_FLOAT;
     USHORT blockAlign = (USHORT)(Format->Channels * (Format->BitsPerSample / 8));
 
     RtlZeroMemory(Out, sizeof(*Out));
@@ -95,7 +95,7 @@ VOID Oa2dpBuildWaveFormat(_In_ const OA2DP_FORMAT *Format, _Out_ PKSDATAFORMAT_W
     Out->WaveFormatExt.Format.nAvgBytesPerSec = Format->SampleRate * blockAlign;
     Out->WaveFormatExt.Format.wBitsPerSample = Format->BitsPerSample;
     Out->WaveFormatExt.Format.cbSize = sizeof(WAVEFORMATEXTENSIBLE) - sizeof(WAVEFORMATEX);
-    Out->WaveFormatExt.Samples.wValidBitsPerSample = Format->BitsPerSample;
+    Out->WaveFormatExt.Samples.wValidBitsPerSample = Format->ValidBitsPerSample;
     Out->WaveFormatExt.dwChannelMask = ChannelMask(Format->Channels);
     Out->WaveFormatExt.SubFormat = Out->DataFormat.SubFormat;
 }
@@ -189,7 +189,7 @@ Routine Description:
         // Preferred first, then the others in list order.
         ULONG i = n == 0 ? list.Preferred : (n <= list.Preferred ? n - 1 : n);
         const OA2DP_FORMAT *f = &list.Formats[i];
-        if ((f->BitsPerSample == 32) != wantFloat) continue;
+        if ((f->Encoding == OA2DP_PCM_FLOAT) != wantFloat) continue;
         if (f->Channels > maxChannels) continue;
         if (f->BitsPerSample < minBits || f->BitsPerSample > maxBits) continue;
         if (f->SampleRate < minRate || f->SampleRate > maxRate) continue;
@@ -370,6 +370,7 @@ CMiniportWaveRT::IsFormatSupported
 
     PWAVEFORMATEX       pWaveFormat;
     BOOLEAN             isFloat;
+    USHORT              validBits;
     OA2DP_FORMAT        f;
     OA2DP_FORMAT_LIST   list;
 
@@ -380,6 +381,7 @@ CMiniportWaveRT::IsFormatSupported
 
     // WAVEFORMATEX VALIDATION
     pWaveFormat = reinterpret_cast<PWAVEFORMATEX>(_pDataFormat + 1);
+    validBits = pWaveFormat->wBitsPerSample;
     switch (pWaveFormat->wFormatTag)
     {
     case WAVE_FORMAT_PCM:
@@ -397,7 +399,7 @@ CMiniportWaveRT::IsFormatSupported
         if (IsEqualGUIDAligned(pWaveFormatExt->SubFormat, KSDATAFORMAT_SUBTYPE_PCM)) { isFloat = FALSE; }
         else if (IsEqualGUIDAligned(pWaveFormatExt->SubFormat, KSDATAFORMAT_SUBTYPE_IEEE_FLOAT)) { isFloat = TRUE; }
         else { return STATUS_NO_MATCH; }
-        if (pWaveFormatExt->Samples.wValidBitsPerSample != pWaveFormat->wBitsPerSample) { return STATUS_NO_MATCH; }
+        validBits = pWaveFormatExt->Samples.wValidBitsPerSample;
         if (pWaveFormatExt->dwChannelMask != 0 &&
             pWaveFormatExt->dwChannelMask != ChannelMask(pWaveFormat->nChannels)) { return STATUS_NO_MATCH; }
         break;
@@ -406,7 +408,6 @@ CMiniportWaveRT::IsFormatSupported
         return STATUS_NO_MATCH;
     }
 
-    if (isFloat != (pWaveFormat->wBitsPerSample == 32)) { return STATUS_NO_MATCH; }
     if (pWaveFormat->nChannels == 0) { return STATUS_NO_MATCH; }
     if (pWaveFormat->nBlockAlign != pWaveFormat->nChannels * (pWaveFormat->wBitsPerSample / 8)) { return STATUS_NO_MATCH; }
     if (pWaveFormat->nAvgBytesPerSec != pWaveFormat->nSamplesPerSec * pWaveFormat->nBlockAlign) { return STATUS_NO_MATCH; }
@@ -414,6 +415,8 @@ CMiniportWaveRT::IsFormatSupported
     f.SampleRate = pWaveFormat->nSamplesPerSec;
     f.Channels = pWaveFormat->nChannels;
     f.BitsPerSample = pWaveFormat->wBitsPerSample;
+    f.ValidBitsPerSample = validBits;
+    f.Encoding = isFloat ? OA2DP_PCM_FLOAT : OA2DP_PCM_INTEGER;
 
     Oa2dpGetFormats(m_Device, &list);
     if (!Oa2dpFormatListed(&list, &f))

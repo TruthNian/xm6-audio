@@ -209,8 +209,10 @@ bool Transport::send_media(const uint8_t *data, size_t len)
     next_slot_ = (next_slot_ + 1) % kSlots;
     // Oldest send must finish before its slot is reused; 1 s is far beyond
     // any healthy link and means the headset is gone.
-    if (!finish_slot(s, 1000))
-        LOGD("media send completed with error");
+    if (!finish_slot(s, 1000)) {
+        LOGE("media send completed with error");
+        return false;
+    }
 
     static OA2DP_SEND_IN in = {Oa2dpChannelMedia};
     s.data.assign(data, data + len);

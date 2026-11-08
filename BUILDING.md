@@ -6,7 +6,7 @@ Clone with `--recurse-submodules`, or run:
 git submodule update --init --recursive
 ```
 
-The gitlinks pin Sony/AOSP libldac and FindWDK. The default Windows build requires LDAC and does not silently produce a codec-less service. SBC/aptX dependencies are not downloaded. The optional developer GUI is off by default.
+The gitlinks pin Sony/AOSP libldac, BlueZ libsbc and FindWDK. The default Windows build provides LDAC, SBC and Windows Media Foundation AAC. aptX dependencies are not downloaded (XM6 does not support aptX). The optional developer GUI is off by default.
 
 ## Windows user mode
 
@@ -20,7 +20,7 @@ ctest --test-dir build/native -C Release --output-on-failure
 
 For VS2019 use `-G "Visual Studio 16 2019"`. The pinned libldac has two MSVC portability adaptations outside the submodule: an unused-parameter annotation and an otherwise unused POSIX include. No codec algorithm is changed.
 
-Outputs include `oa2dpsvc.exe`, `oa2dpctl.exe`, and `ldac.dll`. Keep the DLL alongside the service. User-mode CMake builds with MSVC; the older optional Zig script is retained for upstream development but is not the release pipeline.
+Outputs include `oa2dpsvc.exe`, `oa2dpctl.exe`, `ldac.dll` and `sbc.dll`. Keep both replaceable codec DLLs alongside the service. User-mode CMake builds with MSVC; the older optional Zig script is retained for upstream development but is not the release pipeline.
 
 ## Kernel drivers and unsigned candidate
 
@@ -35,7 +35,7 @@ ctest --test-dir build/native -C Release --output-on-failure
 
 The packager requires InfVerif and Inf2Cat to pass; includes both SYS/INF/CAT/PDB sets, user-mode files and licenses; and records source/dependency commits and SHA-256 hashes. Its CAT files are **unsigned**. The manifest proves integrity relative to that build, not Microsoft trust or hardware compatibility. Symbols are included for the signing provider and crash analysis.
 
-The two drivers and service must come from the same build: IOCTL version 2 expands the native format list to support integer 16/24 and float32 at supported rates. Kernel compile success does not establish hardware correctness.
+The two drivers and service must come from the same build: IOCTL version 3 distinguishes integer/float, container width and valid bits, including integer 32 and 24-in-32 PCM. Kernel compile success does not establish hardware correctness.
 
 ## Deployment and recovery
 

@@ -47,7 +47,7 @@ static KSDATARANGE_AUDIO Oa2dpPinDataRangesStream[] =
         OA2DP_MIN_SAMPLE_RATE,
         OA2DP_MAX_SAMPLE_RATE
     },
-    { // 1: integer PCM, 16 or 24-bit packed
+    { // 1: signed integer PCM, 16/24/32-bit containers
         {
             sizeof(KSDATARANGE_AUDIO),
             0,
@@ -59,7 +59,7 @@ static KSDATARANGE_AUDIO Oa2dpPinDataRangesStream[] =
         },
         OA2DP_RING_MAX_CHANNELS,
         16,
-        24,
+        32,
         OA2DP_MIN_SAMPLE_RATE,
         OA2DP_MAX_SAMPLE_RATE
     }

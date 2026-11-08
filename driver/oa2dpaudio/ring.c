@@ -180,12 +180,14 @@ static VOID ConvertToS24(_Out_writes_(samples) int32_t *dst, _In_ const UCHAR *s
  * match the ring header, which only happens while a format change races a
  * closing stream. */
 VOID Oa2dpRingPump(_Inout_ OA2DP_AUDIO_RING *r, _In_reads_bytes_(cyclicBytes) const UCHAR *cyclic,
-                   _In_ ULONG cyclicBytes, _In_ ULONG pos, _In_ ULONG frames, _In_ USHORT channels,
-                   _In_ USHORT bits)
+                   _In_ ULONG cyclicBytes, _In_ ULONG pos, _In_ ULONG frames,
+                   _In_ const OA2DP_FORMAT *format)
 {
     KIRQL irql;
+    USHORT channels = format->Channels;
+    USHORT bits = format->BitsPerSample;
     ULONG frameBytes = (ULONG)channels * (bits / 8);
-    USHORT want = bits == 32 ? OA2DP_RING_FMT_FLOAT32 : OA2DP_RING_FMT_S32;
+    USHORT want = oa2dp_pcm_format_ring_type(format);
 
     if (frameBytes == 0 || cyclicBytes < frameBytes || channels > OA2DP_RING_MAX_CHANNELS ||
         (bits != 16 && bits != 24 && bits != 32))

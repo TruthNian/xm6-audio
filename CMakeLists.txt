@@ -21,6 +21,7 @@ add_library(oa2dp_core STATIC
     core/src/avdtp.c
     core/src/media.c
     core/src/pcm_ring.c
+    core/src/pcm_format.c
     core/src/settings.c)
 target_include_directories(oa2dp_core PUBLIC core/include)
 if(MSVC)
@@ -33,7 +34,8 @@ if(OA2DP_BUILD_TESTS)
     enable_testing()
     add_executable(oa2dp_tests
         core/tests/test_main.c core/tests/test_avdtp.c core/tests/test_codecs.c
-        core/tests/test_media.c core/tests/test_ring.c core/tests/test_settings.c)
+        core/tests/test_media.c core/tests/test_ring.c core/tests/test_settings.c
+        core/tests/test_pcm_format.c)
     target_link_libraries(oa2dp_tests PRIVATE oa2dp_core)
     add_test(NAME core COMMAND oa2dp_tests)
 endif()
@@ -62,6 +64,8 @@ if(EXISTS ${OA2DP_THIRD_PARTY}/sbc/sbc/sbc.c)
     set_target_properties(sbc PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
     if(MSVC)  # libsbc's public header uses POSIX ssize_t
         target_compile_definitions(sbc PUBLIC ssize_t=intptr_t)
+        target_compile_definitions(sbc PRIVATE __BYTE_ORDER=1234 __LITTLE_ENDIAN=1234 __BIG_ENDIAN=4321)
+        target_compile_options(sbc PRIVATE /FI${CMAKE_CURRENT_SOURCE_DIR}/codecs/msvc-compat.h)
     endif()
     target_compile_definitions(oa2dp_codecs PUBLIC OA2DP_WITH_LIBSBC)
     target_link_libraries(oa2dp_codecs PUBLIC sbc)
@@ -146,6 +150,7 @@ if(OA2DP_BUILD_DRIVERS)
         driver/oa2dpaudio/mintopo.cpp
         driver/oa2dpaudio/newdelete.cpp
         driver/oa2dpaudio/ring.c
+        core/src/pcm_format.c
         core/src/pcm_ring.c)
     target_include_directories(oa2dpaudio PRIVATE core/include driver/common)
     # _NEW_DELETE_OPERATORS_: we supply new/delete (newdelete.cpp), so the

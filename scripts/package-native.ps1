@@ -33,7 +33,7 @@ foreach ($driver in @('oa2dp','oa2dpaudio')) {
 }
 $user = Join-Path $output 'user-mode'
 New-Item -ItemType Directory -Path $user | Out-Null
-foreach ($file in @('oa2dpsvc.exe','oa2dpctl.exe','ldac.dll')) {
+foreach ($file in @('oa2dpsvc.exe','oa2dpctl.exe','ldac.dll','sbc.dll')) {
     Copy-Item -LiteralPath "$build\Release\$file" -Destination $user
 }
 $licenses = Join-Path $output 'licenses'
@@ -42,6 +42,7 @@ Copy-Item -LiteralPath "$repo\LICENSE" -Destination "$licenses\XM6Audio-MIT.txt"
 Copy-Item -LiteralPath "$repo\driver\oa2dpaudio\LICENSE.MS-PL" -Destination "$licenses\SYSVAD-MS-PL.txt"
 Copy-Item -LiteralPath "$repo\third_party\libldac\LICENSE" -Destination "$licenses\libldac-Apache-2.0.txt"
 Copy-Item -LiteralPath "$repo\third_party\libldac\NOTICE" -Destination "$licenses\libldac-NOTICE.txt"
+Copy-Item -LiteralPath "$repo\third_party\sbc\COPYING.LIB" -Destination "$licenses\libsbc-LGPL-2.1.txt"
 Copy-Item -LiteralPath "$repo\THIRD_PARTY.md" -Destination $licenses
 Copy-Item -LiteralPath "$PSScriptRoot\verify-package.ps1" -Destination $output
 $files = @{}
@@ -54,6 +55,7 @@ $manifest = [ordered]@{
     commit = (& git -C $repo rev-parse HEAD)
     upstream = 'RafiMota/open-a2dp@167ebc0e2c89fec570eec535fefdade72bd9e416'
     libldac = (& git -C "$repo\third_party\libldac" rev-parse HEAD)
+    libsbc = (& git -C "$repo\third_party\sbc" rev-parse HEAD)
     findwdk = (& git -C "$repo\third_party\FindWDK" rev-parse HEAD)
     signing = 'UNSIGNED: development/submission candidate, not host-installable'
     files = $files

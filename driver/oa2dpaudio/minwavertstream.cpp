@@ -142,7 +142,7 @@ CMiniportWaveRTStream::Init
     // allocation never moves, so only its header changes; the service learns
     // about it from WAIT_FORMAT and reconfigures the headset.
     if (Oa2dpRingSetFormat(&m_Device->Ring, m_Format.SampleRate, m_Format.Channels,
-                           m_Format.BitsPerSample == 32 ? OA2DP_RING_FMT_FLOAT32 : OA2DP_RING_FMT_S32))
+                           oa2dp_pcm_format_ring_type(&m_Format)))
     {
         Oa2dpReportStream(m_Device, &m_Format, FALSE);
     }
@@ -525,7 +525,7 @@ VOID CMiniportWaveRTStream::Pump(_In_ ULONGLONG ToFrame)
     }
     Oa2dpRingPump(&m_Device->Ring, m_pDmaBuffer, m_ulDmaBufferSize,
                   (ULONG)((start % bufferFrames) * m_ulBlockAlign), (ULONG)(end - start),
-                  m_Format.Channels, m_Format.BitsPerSample);
+                  &m_Format);
     m_ullPumpedFrames = end;
 }
 

@@ -493,7 +493,7 @@ InitDevice
     dev->Current = *f;
 
     ntStatus = Oa2dpRingCreate(&dev->Ring, f->SampleRate, f->Channels,
-                               f->BitsPerSample == 32 ? OA2DP_RING_FMT_FLOAT32 : OA2DP_RING_FMT_S32);
+                               oa2dp_pcm_format_ring_type(f));
     if (!NT_SUCCESS(ntStatus))
     {
         IoFreeWorkItem(dev->WorkItem);

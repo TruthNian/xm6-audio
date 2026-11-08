@@ -97,6 +97,9 @@ void publish_status(uint64_t bt_addr, const LiveStatus &st)
     set_dw(k, L"SampleRate", st.sample_rate);
     set_dw(k, L"Channels", st.channels);
     set_dw(k, L"Bits", st.bits);
+    set_dw(k, L"InputContainerBits", st.input_container_bits);
+    set_dw(k, L"InputValidBits", st.input_valid_bits);
+    set_dw(k, L"InputEncoding", st.input_encoding);
     set_dw(k, L"Bitrate", st.bitrate);
     set_dw(k, L"AbrLevel", st.abr_level);
     set_dw(k, L"DelayReportUs", st.delay_report_us);

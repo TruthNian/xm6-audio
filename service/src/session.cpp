@@ -396,15 +396,20 @@ bool Session::setup_audio_endpoint()
                    oa2dp_codec_set_rate(&probe, &remote_caps_, rate) == OA2DP_OK);
         if (!ok)
             continue;
-        static const USHORT depths[] = {32, 24, 16};
-        for (USHORT depth : depths) {
+        static const OA2DP_FORMAT representations[] = {
+            {0, 0, 32, 32, OA2DP_PCM_FLOAT}, {0, 0, 32, 32, OA2DP_PCM_INTEGER},
+            {0, 0, 24, 24, OA2DP_PCM_INTEGER}, {0, 0, 16, 16, OA2DP_PCM_INTEGER}};
+        for (const OA2DP_FORMAT &representation : representations) {
+            USHORT depth = representation.BitsPerSample;
             if (settings_.bits && depth != settings_.bits)
                 continue;
             if (list.Count >= OA2DP_MAX_FORMATS)
                 break;
-            if (rate == current && depth == (settings_.bits ? settings_.bits : 32))
+            if (rate == current &&
+                (settings_.bits ? depth == settings_.bits : representation.Encoding == OA2DP_PCM_FLOAT))
                 list.Preferred = list.Count;
             OA2DP_FORMAT &f = list.Formats[list.Count++];
+            f = representation;
             f.SampleRate = rate;
             f.Channels = oa2dp_codec_channels(&config_);
             f.BitsPerSample = depth;
@@ -533,9 +538,7 @@ void Session::handle(const Command &c)
         SetEvent(stop_event_);
         break;
     case Cmd::AudioFormat:
-        if (streaming_ && (audio_format_.SampleRate != c.format.Format.SampleRate ||
-                          audio_format_.BitsPerSample != c.format.Format.BitsPerSample ||
-                          audio_format_.Channels != c.format.Format.Channels))
+        if (streaming_ && !oa2dp_pcm_format_same(&audio_format_, &c.format.Format))
             suspend_stream();
         audio_format_ = c.format.Format;
         audio_running_ = c.format.Running != 0;
@@ -560,13 +563,16 @@ void Session::publish(const char *state)
 {
     std::lock_guard<std::mutex> lock(status_mu_);
     status_.state = state;
+    status_.input_container_bits = audio_format_.BitsPerSample;
+    status_.input_valid_bits = audio_format_.ValidBitsPerSample;
+    status_.input_encoding = audio_format_.Encoding;
     if (local_seid_) {
         status_.codec = codec_label(config_);
         status_.sample_rate = oa2dp_codec_sample_rate(&config_);
         status_.channels = oa2dp_codec_channels(&config_);
         oa2dp_settings effective = settings_;
         if (!effective.bits)
-            effective.bits = audio_format_.BitsPerSample == 16 ? 16 : 24;
+            effective.bits = oa2dp_pcm_format_ldac_bits(&audio_format_);
         status_.bits = oa2dp_codec_pcm_bits(&config_, &effective);
     }
     status_.delay_report_us = delay_report_us_;
@@ -720,7 +726,7 @@ void Session::stream_loop()
     const oa2dp_codec_caps cfg = config_;
     oa2dp_settings set = settings_;
     if (!set.bits)
-        set.bits = audio_format_.BitsPerSample == 16 ? 16 : 24;
+        set.bits = oa2dp_pcm_format_ldac_bits(&audio_format_);
     oa2dp_pcm_ring *ring = audio_.ring();
 
     oa2dp_encoder *enc = nullptr;
@@ -731,6 +737,7 @@ void Session::stream_loop()
         return;
     }
     const oa2dp_encoder_info info = enc->info;
+    const uint8_t encoder_bits = oa2dp_codec_pcm_bits(&cfg, &set);
     const uint32_t spc = info.samples_per_call;
     const uint32_t spf = info.samples_per_frame ? info.samples_per_frame : spc;
     oa2dp_ring_discard(ring);
@@ -783,9 +790,12 @@ void Session::stream_loop()
         // Ring -> int32 24-bit -> codec channel layout.
         if (ring->format == OA2DP_RING_FMT_FLOAT32) {
             oa2dp_ring_read(ring, fbuf.data(), spc);
-            oa2dp_pcm_float_to_s24(fbuf.data(), pcm.data(), fbuf.size());
+            oa2dp_pcm_float_to_quantized24(fbuf.data(), pcm.data(), fbuf.size(), encoder_bits);
         } else {
             oa2dp_ring_read(ring, pcm.data(), spc);
+            if (ring->format == OA2DP_RING_FMT_S32_FULL)
+                oa2dp_pcm_s32_to_quantized24(pcm.data(), pcm.data(), static_cast<size_t>(spc) * ring_ch,
+                                            encoder_bits);
         }
         if (ch == 1 && ring_ch == 2) {
             oa2dp_pcm_downmix_to_mono(pcm.data(), pcm.data(), spc);

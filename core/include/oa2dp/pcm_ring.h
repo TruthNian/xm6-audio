@@ -23,6 +23,7 @@ extern "C" {
 
 #define OA2DP_RING_FMT_FLOAT32 0 /* interleaved IEEE float, [-1, 1] */
 #define OA2DP_RING_FMT_S32 1     /* interleaved int32, 24-bit values */
+#define OA2DP_RING_FMT_S32_FULL 2 /* signed full-scale int32, converted only at encoder boundary */
 
 #define OA2DP_RING_FLAG_RUNNING 0x1        /* endpoint is rendering */
 #define OA2DP_RING_FLAG_FORMAT_CHANGED 0x2 /* consumer must re-read format */
@@ -70,6 +71,9 @@ uint32_t oa2dp_ring_discard(oa2dp_pcm_ring *r);
 
 /* Sample conversion for the consumer. */
 void oa2dp_pcm_float_to_s24(const float *in, int32_t *out, size_t n);
+/* Quantize once to encoder precision (16/24), in the adapters' 24-bit scale. */
+void oa2dp_pcm_float_to_quantized24(const float *in, int32_t *out, size_t n, uint8_t bits);
+void oa2dp_pcm_s32_to_quantized24(const int32_t *in, int32_t *out, size_t n, uint8_t bits);
 /* Interleaved stereo -> mono average, in place allowed (out may == in). */
 void oa2dp_pcm_downmix_to_mono(const int32_t *in, int32_t *out, size_t frames);
 

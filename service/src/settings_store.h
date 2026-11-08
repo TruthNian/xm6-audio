@@ -23,6 +23,9 @@ struct LiveStatus {
     uint32_t sample_rate = 0;
     uint32_t channels = 0;
     uint32_t bits = 0;
+    uint32_t input_container_bits = 0;
+    uint32_t input_valid_bits = 0;
+    uint32_t input_encoding = 0;
     uint32_t bitrate = 0;  // bit/s, measured
     uint32_t abr_level = 0;
     uint32_t delay_report_us = 0;

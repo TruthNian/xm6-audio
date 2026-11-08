@@ -37,7 +37,7 @@ int oa2dp_ring_init(oa2dp_pcm_ring *r, uint32_t capacity, uint32_t sample_rate,
                     uint16_t channels, uint16_t format)
 {
     if (!r || capacity == 0 || (capacity & (capacity - 1)) || channels == 0 ||
-        channels > 8 || format > OA2DP_RING_FMT_S32)
+        channels > 8 || format > OA2DP_RING_FMT_S32_FULL)
         return OA2DP_ERR_INVAL;
     memset(r, 0, sizeof(*r));
     r->magic = OA2DP_RING_MAGIC;
@@ -56,7 +56,7 @@ int oa2dp_ring_validate(const oa2dp_pcm_ring *r, size_t mapped)
     if (r->magic != OA2DP_RING_MAGIC || r->version != OA2DP_RING_VERSION)
         return OA2DP_ERR_PROTO;
     if (r->capacity == 0 || (r->capacity & (r->capacity - 1)) || r->channels == 0 ||
-        r->channels > 8 || r->format > OA2DP_RING_FMT_S32)
+        r->channels > 8 || r->format > OA2DP_RING_FMT_S32_FULL)
         return OA2DP_ERR_PROTO;
     if (oa2dp_ring_bytes(r->capacity, r->channels) > mapped)
         return OA2DP_ERR_PROTO;
@@ -143,6 +143,13 @@ uint32_t oa2dp_ring_read(oa2dp_pcm_ring *r, void *data, uint32_t frames)
 #if !defined(_KERNEL_MODE)
 void oa2dp_pcm_float_to_s24(const float *in, int32_t *out, size_t n)
 {
+    oa2dp_pcm_float_to_quantized24(in, out, n, 24);
+}
+
+void oa2dp_pcm_float_to_quantized24(const float *in, int32_t *out, size_t n, uint8_t bits)
+{
+    const int32_t scale = bits == 16 ? 32768 : 8388608;
+    const int32_t expand = bits == 16 ? 256 : 1;
     for (size_t i = 0; i < n; i++) {
         float v = in[i];
         if (!(v == v))
@@ -151,11 +158,25 @@ void oa2dp_pcm_float_to_s24(const float *in, int32_t *out, size_t n)
             v = 1.0f;
         if (v < -1.0f)
             v = -1.0f;
-        float s = v * 8388608.0f;
+        double s = (double)v * scale;
         int32_t x = (int32_t)(s >= 0 ? s + 0.5f : s - 0.5f);
-        if (x > 8388607)
-            x = 8388607;
-        out[i] = x;
+        if (x >= scale)
+            x = scale - 1;
+        out[i] = x * expand;
+    }
+}
+
+void oa2dp_pcm_s32_to_quantized24(const int32_t *in, int32_t *out, size_t n, uint8_t bits)
+{
+    const int64_t step = bits == 16 ? 65536 : 256;
+    const int32_t limit = bits == 16 ? 32768 : 8388608;
+    const int32_t expand = bits == 16 ? 256 : 1;
+    for (size_t i = 0; i < n; i++) {
+        int64_t value = in[i];
+        int64_t rounded = value < 0 ? -((-value + step / 2) / step) : (value + step / 2) / step;
+        if (rounded >= limit)
+            rounded = limit - 1;
+        out[i] = (int32_t)rounded * expand;
     }
 }
 #endif

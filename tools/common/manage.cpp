@@ -276,6 +276,9 @@ bool read_status(unsigned long long addr, LiveStatus *st)
     dw(L"SampleRate", st->sample_rate);
     dw(L"Channels", st->channels);
     dw(L"Bits", st->bits);
+    dw(L"InputContainerBits", st->input_container_bits);
+    dw(L"InputValidBits", st->input_valid_bits);
+    dw(L"InputEncoding", st->input_encoding);
     dw(L"Bitrate", st->bitrate);
     dw(L"AbrLevel", st->abr_level);
     dw(L"DelayReportUs", st->delay_us);

@@ -224,6 +224,12 @@ static void best(void)
     CHECK_EQ(oa2dp_codec_choose_best(list, 4, &s, &cfg), 3);
     CHECK_EQ(cfg.codec, OA2DP_CODEC_LDAC);
 
+    /* Automatic selection still works with a peer lacking LDAC. */
+    CHECK_EQ(oa2dp_codec_choose_best(list, 3, &s, &cfg), 1);
+    CHECK_EQ(cfg.codec, OA2DP_CODEC_AAC);
+    CHECK_EQ(oa2dp_codec_choose_best(list, 1, &s, &cfg), 0);
+    CHECK_EQ(cfg.codec, OA2DP_CODEC_SBC);
+
     s.priority[0] = OA2DP_CODEC_AAC;
     s.priority[1] = OA2DP_CODEC_SBC;
     s.priority_count = 2;
@@ -254,6 +260,7 @@ void test_codecs(void)
     config.u.ldac.chmode = OA2DP_LDAC_CH_MONO;
     CHECK_EQ(oa2dp_codec_check_settings(&config, &policy), OA2DP_A2DP_NOT_SUPPORTED_CHANNEL_MODE);
     config.codec = OA2DP_CODEC_SBC;
+    policy.priority_count = 1; /* explicit LDAC-only profile */
     CHECK_EQ(oa2dp_codec_check_settings(&config, &policy), OA2DP_A2DP_NOT_SUPPORTED_CODEC_TYPE);
     sbc();
     aac();

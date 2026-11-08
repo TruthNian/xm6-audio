@@ -19,7 +19,8 @@ Windows AVRCP → 系统媒体控制
 ## 音频策略
 
 - 默认跟随 Windows 实际送达端点的 PCM 采样率；不把 44.1 kHz 无理由升至 48/96 kHz。
-- 16-bit 端点流使用 LDAC S16 输入；24-bit/浮点流保留最多 24 个有用位。零扩展不会恢复原音源中不存在的信息，浮点混音也不应因原文件是 16-bit 而再次截短。
+- 接收整数 16/24/32-bit 和 float32 PCM；分别记录容器位宽、有效位数、整数/浮点，包含 24-in-32。完整整数 32-bit 在环形缓冲区保留，送入编码器时按其能力一次量化；LDAC 最多保留 24 个有用位。16-bit 实际精度使用 S16 输入，浮点混音不会因原文件是 16-bit 而被猜测为 16-bit。
+- 默认按耳机能力优先协商 LDAC，其次 AAC、SBC；状态显示实际编码和端点格式。固定 LDAC 配置仍可显式选择，协商降级不算达到固定 LDAC 的目标。
 - 默认使用固定 LDAC **HQ**：44.1/88.2 kHz 为标称 909 kbps，48/96 kHz 为 990 kbps。SQ 为 606/660，MQ 为 303/330。名称取自 Sony 的 libldac，不按名称猜质量。
 - 默认关闭 ABR；如需按链路稳定性降档，必须明确配置，不将降档报告成最高品质。
 - 独占流可以让驱动接收播放器选择的原格式。共享模式收到的是 Windows 混音格式，驱动无法从中还原每个文件的原始采样率或位深，也不会逐首改系统默认格式干扰其他应用。
@@ -27,11 +28,13 @@ Windows AVRCP → 系统媒体控制
 
 来源：[Sony libldac API](https://android.googlesource.com/platform/external/libldac/+/eeee1a3f5f8df1282e3a6d297085885fd886737b/inc/ldacBT.h)、[Windows 共享/独占设备格式](https://learn.microsoft.com/en-us/windows/win32/coreaudio/device-formats)。
 
+MP3、FLAC、ALAC、AAC、Opus、WAV 等文件由播放器/Windows 解码为 PCM 后进入相同端点，不要求在蓝牙驱动里重新实现文件解码器。XM6 的经典蓝牙实际支持 SBC/AAC/LDAC；LC3 属于 LE Audio，不能列成这个 Windows 10 A2DP 实现的可用模式。参见 [Sony 编码支持列表](https://helpguide.sony.net/mdr/2984/v1/en/contents/TP1001856790.html)。
+
 ## 开发状态
 
 | 项目 | 状态 |
 |---|---|
-| 协议、配置及 LDAC 编码器检查 | 可在本机快速构建运行；包含 44.1/16、48/24、88.2/24、96/24 |
+| 协议、PCM 格式及编码器检查 | 整数/浮点及有效位数检查；SBC、AAC、LDAC 编码；LDAC 包含 44.1/16、48/24、88.2/24、96/24 |
 | MSVC 原生服务、命令行工具 | 本机已构建；内核驱动由 WDK CI 构建 |
 | 可追溯依赖、哈希清单、INF/CAT 包装 | 固定 git submodule 提交；CI 只生成未签名候选包 |
 | 微软内核签名 | 未取得；[免费渠道核实记录](docs/SIGNING.md) |

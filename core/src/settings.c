@@ -39,7 +39,7 @@ oa2dp_codec_id oa2dp_codec_from_key(const char *key, size_t len)
 void oa2dp_settings_default(oa2dp_settings *s)
 {
     static const oa2dp_codec_id order[] = {
-        OA2DP_CODEC_LDAC};
+        OA2DP_CODEC_LDAC, OA2DP_CODEC_AAC, OA2DP_CODEC_SBC};
     memset(s, 0, sizeof(*s));
     memcpy(s->priority, order, sizeof(order));
     s->priority_count = (uint8_t)(sizeof(order) / sizeof(order[0]));

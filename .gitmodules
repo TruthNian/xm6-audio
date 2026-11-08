@@ -4,3 +4,6 @@
 [submodule "xm6-native-findwdk"]
 	path = third_party/FindWDK
 	url = https://github.com/SergiusTheBest/FindWDK.git
+[submodule "third_party/sbc"]
+	path = third_party/sbc
+	url = https://git.kernel.org/pub/scm/bluetooth/sbc.git

@@ -36,5 +36,6 @@ void test_avdtp(void);
 void test_media(void);
 void test_settings(void);
 void test_ring(void);
+void test_pcm_format(void);
 
 #endif
