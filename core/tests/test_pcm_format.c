@@ -15,8 +15,15 @@ void test_pcm_format(void)
     CHECK_EQ(oa2dp_pcm_format_ring_type(&float32), OA2DP_RING_FMT_FLOAT32);
     CHECK_EQ(oa2dp_pcm_format_ldac_bits(&integer32), 24);
     CHECK_EQ(oa2dp_pcm_format_ldac_bits(&float32), 24);
+    oa2dp_pcm_format listed = integer32;
+    CHECK(oa2dp_pcm_format_same(&listed, &integer32));
     integer32.ValidBitsPerSample = 24;
     CHECK(oa2dp_pcm_format_valid(&integer32)); /* 24-in-32 */
+    CHECK(!oa2dp_pcm_format_same(&listed, &integer32));
+    listed = integer32;
+    integer32.SampleRate = 48000;
+    CHECK(!oa2dp_pcm_format_same(&listed, &integer32));
+    integer32.SampleRate = 44100;
     CHECK_EQ(oa2dp_pcm_format_ldac_bits(&integer32), 24);
     integer32.ValidBitsPerSample = 16;
     CHECK(oa2dp_pcm_format_valid(&integer32));

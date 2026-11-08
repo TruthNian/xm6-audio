@@ -10,6 +10,9 @@ The repository contains a buildable native prototype. The initial hardware targe
 - LDAC HQ frame-size/rate checks at 44.1, 48, 88.2 and 96 kHz.
 - Buffered connection events, persistent overlapped signalling, service/device cleanup and stale-PCM discard.
 - INF-owned, device-triggered codec service with Driver Store payload and signed-catalog deployment gate.
+- Ring producer rejects a stale sample rate under the format-change spin lock; endpoint format matching includes valid bits through the shared PCM comparator.
+- MMCSS Audio scheduling with thread-scoped cleanup. Ring consumption still polls; this is not a measured jitter guarantee.
+- Standalone inbox A2DP recovery, independent of native service registration and package integrity, with class-independent address-scoped selection.
 - Public CMake/MSVC/WDK CI, pinned dependencies, license bundle and source/hash manifest.
 
 ## Required before native deployment is accepted
@@ -23,5 +26,7 @@ The repository contains a buildable native prototype. The initial hardware targe
 ## Future work, after the initial native path is validated
 
 Improve measured latency and queue behavior, broaden tested headset/radio combinations, and evaluate additional Windows/architecture targets. LE Audio/LC3 requires a separate supported platform/transport path; an A2DP capability parser is not an LE Audio implementation.
+
+Replace PCM polling with driver-to-service data-ready notification only after validating wakeup, cancellation and teardown ordering. Use ETW to correlate ring occupancy/overruns, wakeup delay and L2CAP completion latency under load. Neither event-driven consumption nor this timing evidence is implemented yet. The ring's stale-rate guard and portable format checks do not constitute a concurrent hardware format-switch test.
 
 The inherited [SPEC.md](SPEC.md) is a protocol requirement catalogue, not proof of current hardware compatibility. The status table in the README and this acceptance list describe the current fork.

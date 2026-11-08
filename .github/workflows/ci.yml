@@ -28,6 +28,9 @@ jobs:
         run: cmake --build build/native --config Release --parallel 2
       - name: Protocol and source format LDAC HQ encoder checks
         run: ctest --test-dir build/native -C Release --output-on-failure
+      - name: Recovery entry point checks without changing devices
+        shell: powershell
+        run: ./scripts/tests/recovery.ps1
       - name: Package unsigned submission candidate
         shell: pwsh
         run: ./scripts/package-native.ps1 -BuildDirectory build/native -OutputDirectory out/native

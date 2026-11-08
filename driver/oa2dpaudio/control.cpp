@@ -95,11 +95,10 @@ static VOID DefaultFormats(_Out_ OA2DP_FORMAT_LIST *list)
 
 extern "C" BOOLEAN Oa2dpFormatListed(_In_ const OA2DP_FORMAT_LIST *list, _In_ const OA2DP_FORMAT *f)
 {
+    if (!FormatValid(f))
+        return FALSE;
     for (ULONG i = 0; i < list->Count && i < OA2DP_MAX_FORMATS; i++)
-        if (FormatValid(f) && list->Formats[i].SampleRate == f->SampleRate &&
-            list->Formats[i].Channels == f->Channels &&
-            list->Formats[i].BitsPerSample == f->BitsPerSample &&
-            list->Formats[i].Encoding == f->Encoding)
+        if (SameFormat(&list->Formats[i], f))
             return TRUE;
     return FALSE;
 }

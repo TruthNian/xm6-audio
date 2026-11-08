@@ -111,7 +111,7 @@ add_executable(oa2dpsvc
     service/src/settings_store.cpp service/src/log.cpp)
 target_include_directories(oa2dpsvc PRIVATE driver/common)
 target_compile_definitions(oa2dpsvc PRIVATE UNICODE _UNICODE)
-target_link_libraries(oa2dpsvc PRIVATE oa2dp_codecs cfgmgr32 bthprops shell32 advapi32)
+target_link_libraries(oa2dpsvc PRIVATE oa2dp_codecs cfgmgr32 bthprops shell32 advapi32 avrt)
 
 # --- tools: shared device/settings logic, command line, graphical manager ------
 add_library(oa2dp_manage STATIC tools/common/manage.cpp)

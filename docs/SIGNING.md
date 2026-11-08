@@ -46,9 +46,12 @@ Recovery is scoped to the same selected headset:
 
 ```powershell
 ./scripts/install.ps1 -DeviceAddress <local-address> -RestoreWindows
+# Standalone fallback if the codec service or native package is missing/damaged:
+./scripts/restore-windows.ps1 -DeviceAddress <local-address> -CheckOnly
+./scripts/restore-windows.ps1 -DeviceAddress <local-address>
 ```
 
-The INF installs the codec service as demand-start with a device-interface trigger and runs it from Driver Store. Recovery verifies the installed catalog and switches only the selected headset back to Microsoft A2DP; the service is stopped when no other headset uses it. Pairing, radio ownership, cached package files and the local backup are retained. No automatic reboot or broad `restore all` is performed.
+The INF installs the codec service as demand-start with a device-interface trigger and runs it from Driver Store. Recovery uses SetupAPI and Windows' inbox A2DP INF directly, without executing any native-package binary or requiring its catalog, service registration or local backup. It selects one present A2DP service by address across device classes (the Microsoft driver uses MEDIA), and refuses absent or ambiguous targets. The installer stops the codec service when no present native headset uses it. Pairing, radio ownership, cached package files and the local backup are retained. No automatic reboot or broad `restore all` is performed.
 
 ## Still required before calling native complete
 

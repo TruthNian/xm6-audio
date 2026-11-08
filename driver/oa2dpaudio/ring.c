@@ -195,7 +195,8 @@ VOID Oa2dpRingPump(_Inout_ OA2DP_AUDIO_RING *r, _In_reads_bytes_(cyclicBytes) co
     if (pos >= cyclicBytes)
         pos = 0;
     KeAcquireSpinLock(&r->Lock, &irql);
-    if (r->Ring && r->Ring->channels == channels && r->Ring->format == want) {
+    if (r->Ring && r->Ring->sample_rate == format->SampleRate &&
+        r->Ring->channels == channels && r->Ring->format == want) {
         while (frames) {
             ULONG untilWrap = (cyclicBytes - pos) / frameBytes;
             ULONG n = frames < untilWrap ? frames : untilWrap;

@@ -20,27 +20,18 @@ function Assert-Administrator {
         throw 'Run deployment or recovery as administrator.'
     }
 }
-function Get-InstalledTransport {
-    $serviceKey = 'HKLM:\SYSTEM\CurrentControlSet\Services\oa2dpsvc'
-    $image = [Environment]::ExpandEnvironmentVariables((Get-ItemPropertyValue -LiteralPath $serviceKey -Name ImagePath))
-    $image = $image.Trim('"')
-    if ([IO.Path]::GetFileName($image) -ne 'oa2dpsvc.exe') { throw 'Unexpected registered codec service path.' }
-    return [IO.Path]::GetDirectoryName($image)
-}
 function Get-NativeDevices {
-    foreach ($device in (Get-PnpDevice -Class Bluetooth | Where-Object { $_.InstanceId -match '^BTHENUM\\\{0000110b-' })) {
+    foreach ($device in (Get-PnpDevice -PresentOnly | Where-Object { $_.InstanceId -match '^BTHENUM\\\{0000110b-' })) {
         $service = (Get-PnpDeviceProperty -InstanceId $device.InstanceId -KeyName DEVPKEY_Device_Service -ErrorAction Stop).Data
         if ($service -eq 'oa2dp') { $device }
     }
 }
 if ($RestoreWindows) {
-    $transport = Get-InstalledTransport
-    & "$PSScriptRoot\verify-package.ps1" -TransportDirectory $transport
+    # Recovery must work even if the service, native package or verifier is gone.
+    & "$PSScriptRoot\restore-windows.ps1" -DeviceAddress $address -CheckOnly:$CheckOnly
     if ($CheckOnly) { return }
-    Assert-Administrator
-    Invoke-Checked (Join-Path $transport 'oa2dpctl.exe') @('restore',$address)
-    if (@(Get-NativeDevices).Count -eq 0 -and (Get-Service oa2dpsvc).Status -ne 'Stopped') {
-        Stop-Service oa2dpsvc
+    if (@(Get-NativeDevices).Count -eq 0 -and (Get-Service oa2dpsvc -ErrorAction SilentlyContinue)) {
+        Stop-Service oa2dpsvc -ErrorAction SilentlyContinue
     }
     Write-Host 'Selected headset restored to Windows. Pairing and radio ownership were retained.'
     return
@@ -48,9 +39,9 @@ if ($RestoreWindows) {
 if (-not $PackageDirectory) { throw 'PackageDirectory is required.' }
 $package = (Resolve-Path -LiteralPath $PackageDirectory).Path
 & "$PSScriptRoot\verify-package.ps1" -PackageDirectory $package
-$headset = @(Get-PnpDevice -Class Bluetooth | Where-Object {
+$headset = @(Get-PnpDevice -PresentOnly | Where-Object {
     $_.InstanceId -match '^BTHENUM\\\{0000110b-' -and
-    $_.InstanceId -match "_$($address)_C" -and $_.FriendlyName -match 'WH-1000XM6'
+    $_.InstanceId -match "(?:_|&)$($address)_C[0-9A-F]+$" -and $_.FriendlyName -match 'WH-1000XM6'
 })
 if ($headset.Count -ne 1) { throw 'Exactly one paired XM6 A2DP service must match the selected address.' }
 $nativeArchitecture = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }
@@ -112,9 +103,12 @@ try {
     $service.WaitForStatus('Running',[TimeSpan]::FromSeconds(30))
 } catch {
     $failure = $_
-    if ($bindingAttempted -and $ctl) {
-        & $ctl restore $address
-        if ($LASTEXITCODE -ne 0) { Write-Warning 'Automatic restore failed; select the Microsoft A2DP driver for the saved device instance.' }
+    if ($bindingAttempted) {
+        try {
+            & "$PSScriptRoot\restore-windows.ps1" -DeviceAddress $address
+        } catch {
+            Write-Warning "Automatic restore failed: $_. Use restore-windows.ps1 or select the Microsoft A2DP driver for the saved device instance."
+        }
     }
     if (@(Get-NativeDevices).Count -eq 0 -and (Get-Service oa2dpsvc -ErrorAction SilentlyContinue)) {
         Stop-Service oa2dpsvc -ErrorAction SilentlyContinue

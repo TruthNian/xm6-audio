@@ -2,6 +2,7 @@
 #include "session.h"
 
 #include <bluetoothapis.h>
+#include <avrt.h>
 
 #include <algorithm>
 #include <cstring>
@@ -23,6 +24,27 @@ constexpr uint32_t kAbrDownHoldMs = 300;
 constexpr uint32_t kAbrUpHoldMs = 5000;
 
 bool is_after(DWORD now, DWORD deadline) { return static_cast<LONG>(now - deadline) >= 0; }
+
+// Register and release on the streaming thread, including error returns.
+class AudioScheduling {
+public:
+    AudioScheduling()
+    {
+        DWORD index = 0;
+        task_ = AvSetMmThreadCharacteristicsW(L"Audio", &index);
+        if (!task_)
+            LOGE("MMCSS Audio registration failed (%lu); using normal thread scheduling", GetLastError());
+    }
+    ~AudioScheduling()
+    {
+        if (task_)
+            AvRevertMmThreadCharacteristics(task_);
+    }
+    AudioScheduling(const AudioScheduling &) = delete;
+    AudioScheduling &operator=(const AudioScheduling &) = delete;
+private:
+    HANDLE task_ = nullptr;
+};
 
 oa2dp_avdtp_caps make_config_caps(const oa2dp_codec_caps &cfg, bool delay_reporting)
 {
@@ -708,7 +730,7 @@ void Session::end_streaming()
 
 void Session::stream_loop()
 {
-    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
+    AudioScheduling scheduling;
     const oa2dp_codec_caps cfg = config_;
     oa2dp_settings set = settings_;
     if (!set.bits)

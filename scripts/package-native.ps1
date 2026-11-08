@@ -46,6 +46,7 @@ Copy-Item -LiteralPath "$repo\third_party\sbc\COPYING.LIB" -Destination "$licens
 Copy-Item -LiteralPath "$repo\THIRD_PARTY.md" -Destination $licenses
 Copy-Item -LiteralPath "$PSScriptRoot\verify-package.ps1" -Destination $output
 Copy-Item -LiteralPath "$PSScriptRoot\install.ps1" -Destination $output
+Copy-Item -LiteralPath "$PSScriptRoot\restore-windows.ps1" -Destination $output
 $files = @{}
 Get-ChildItem -LiteralPath $output -Recurse -File | ForEach-Object {
     $relative = $_.FullName.Substring($output.Length + 1).Replace('\','/')
