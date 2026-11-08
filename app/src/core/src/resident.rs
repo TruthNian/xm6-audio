@@ -206,6 +206,9 @@ fn link_sample(
 /// HCI capture's size
 async fn sampler(state: Arc<CoreState>) {
     let stats = state.service.stats();
+    let mut startup = crate::startup::StartupResume::new(state.with_snapshot(|s| {
+        s.settings.auto_reconnect.then(|| s.active_profile.clone()).flatten()
+    }));
     let mut tick = tokio::time::interval(SAMPLE);
     let mut last_link: Option<SampleCounters> = None;
     let mut last_rates: Option<(Instant, LinkTotals)> = None;
@@ -214,6 +217,16 @@ async fn sampler(state: Arc<CoreState>) {
         tick.tick().await;
         n += 1;
         let now = Instant::now();
+        let resume = state.with_snapshot(|s| {
+            let exists = s.active_profile.as_ref().is_some_and(|name| s.profiles.iter().any(|p| &p.name == name));
+            startup.poll(state.started.elapsed(), s.stream.state, s.active_profile.as_deref(), exists, s.settings.auto_reconnect)
+        });
+        if let Some(name) = resume {
+            tracing::info!("startup: restoring the saved audio profile");
+            if let Err(e) = state.start_profile(&name) {
+                tracing::warn!("startup: {}", e.message.key);
+            }
+        }
         if n.is_multiple_of(RATE_TICKS) {
             let (total, _, _) = crate::state::link_totals(&stats);
             if let Some((t, prev)) = last_rates {

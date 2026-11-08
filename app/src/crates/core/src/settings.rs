@@ -156,14 +156,12 @@ pub struct Settings {
     /// another device, set in developer mode); off for every stream
     #[serde(default = "default_true")]
     pub volume_sync: bool,
-    /// The default output device is muted while streaming, while debug_mode
-    /// is on too (issues #86, #223). A key of its own: the `mute_output` of
+    /// The default output device is muted while streaming. A key of its own: the `mute_output` of
     /// earlier versions was on by default.
     #[serde(rename = "output_mute")]
     pub mute_output: bool,
     /// Developer > "Volume Mixer" (off by default, issue #86): the mixer
-    /// screen, the flyout's app list and the output mute above are there
-    /// only with this on as well as debug_mode
+    /// screen and the flyout's app list are there only with this on as well as debug_mode
     pub volume_mixer: bool,
 
     pub debug_mode: bool,
@@ -413,7 +411,7 @@ impl Settings {
 
     /// Whether a stream mutes the default output device
     pub fn mutes_output(&self) -> bool {
-        self.mute_output && self.volume_mixer && self.debug_mode
+        self.mute_output
     }
 
     /// The SBC frame setup a stream takes from its profile: the fixed one
@@ -447,6 +445,17 @@ impl Settings {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn output_mute_is_independent_of_developer_controls() {
+        let mut s = Settings { mute_output: true, ..Settings::default() };
+        assert!(s.mutes_output());
+        s.debug_mode = true;
+        s.volume_mixer = true;
+        assert!(s.mutes_output());
+        s.mute_output = false;
+        assert!(!s.mutes_output());
+    }
 
     #[test]
     fn language_from_the_windows_display_languages() {

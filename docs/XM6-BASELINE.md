@@ -1,0 +1,39 @@
+# XM6 integration baseline
+
+## Objective
+
+Ordinary Windows playback through WH-1000XM6: 48 kHz, stereo, 24-bit input to LDAC, fixed 990 kbps, ABR off. Startup, connection recovery and volume control belong to the existing BlueCaster core. No QQ-specific executable, runtime PowerShell loop, extra watchdog or terminal window.
+
+## Evidence and scope
+
+The initial baseline is upstream `v3.0.0-beta.3`, commit `e4d254d4a867b84071b91c9478846087d58c9428`, on Windows 10 build 19045 with an Intel 8087:0AAA adapter and WH-1000XM6. The user confirmed audible, stable QQ Music using process capture. Encoder negotiation reported 48 kHz / 24 bit / LDAC 990 kbps with ABR disabled. Short observed intervals recorded no send errors or media drops. This establishes feasibility, not universal stability.
+
+THX endpoint loopback previously produced silence despite active application meters and packet counters. Its cause has not been established. It is not the default integration source.
+
+## Native changes
+
+1. Restore the saved active profile from the resident core's existing sampler. Retry initial failures with bounded backoff while the device is unavailable; hand a successful stream to existing reconnect behavior. Respect Disconnect, a changed/removed profile and disabled auto-reconnect.
+2. Honor `output_mute` in ordinary mode, without requiring developer mode or the developer volume mixer. Existing output-mute, mute-key and volume-sync code remains responsible for interaction with Windows.
+3. Configure system loopback with a real 48 kHz render endpoint, a fixed LDAC profile and the core's own Windows startup registration. Setup is one-time; the installed core is the only runtime.
+
+## Acceptance status
+
+| Case | Evidence required |
+|---|---|
+| QQ application capture at fixed 48 kHz / LDAC 990 | User confirmed audible and stable on the baseline |
+| Whole-system capture | Audible shared-mode audio through the native system source; not inferred from packets |
+| Native startup restore | Restart core, inspect profile/codec state, confirm audible playback |
+| Headphones off at sign-in | Initial failures retry, later power-on connects |
+| User Disconnect | No unwanted reconnect caused by startup recovery |
+| Sleep/resume, cold boot | Hardware verification pending until actually performed |
+| Video synchronization | Measure/observe separately; do not equate high bitrate with low delay |
+
+## Constraints that remain real
+
+Fixed 990 kbps requires sufficient usable radio airtime. No software can guarantee it at arbitrary distance or interference. DRM-protected or exclusive hardware paths may not be available to WASAPI loopback. Application-specific output selection can bypass the default system endpoint. Video has sink buffering and transport delay; universal automatic lip-sync is not established by the audible music result.
+
+This implementation uses WinUSB and a userspace Bluetooth stack. Windows does not own that radio while it is assigned. It does not install a signed native Windows A2DP codec driver or create a Windows headphone render endpoint. Those would be distinct integration work with driver/signing and latency-reporting requirements.
+
+## Improvement order
+
+Question every requirement and proposed mechanism. Delete the QQ-only capture dependency and runtime launcher. Reuse the native core. Stabilize whole-system capture and startup first. Then measure video delay, sleep/resume and cold-start firmware behavior. Add a driver, virtual endpoint or extra process only after demonstrating a gap that cannot be solved in the current path.

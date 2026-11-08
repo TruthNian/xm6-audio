@@ -1,0 +1,39 @@
+name: Native core
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-core-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Restore libopus version tags
+        run: git -C extern/opus fetch --depth 1 --tags origin
+      - name: Verify startup recovery policy
+        run: cargo test --release --locked -p bluecaster-core-exe startup_
+      - name: Verify normal-mode output mute
+        run: cargo test --release --locked -p bluecaster-core output_mute_is_independent_of_developer_controls
+      - name: Build the existing native core and driver helper
+        run: cargo build --release --locked -p bluecaster-core-exe -p bluecaster-driver
+      - uses: actions/upload-artifact@v4
+        with:
+          name: xm6-audio-native-win64
+          path: |
+            target/release/bluecaster-core.exe
+            target/release/bluecaster-driver.exe
+          retention-days: 14
