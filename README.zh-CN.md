@@ -51,6 +51,6 @@ MP3、FLAC、ALAC、AAC、Opus、WAV 等文件由播放器/Windows 解码为 PCM
 
 ## 来源与许可
 
-原生实现基于 [RafiMota/open-a2dp](https://github.com/RafiMota/open-a2dp)，固定源码提交 `167ebc0e2c89fec570eec535fefdade72bd9e416`。本项目保留其 MIT 许可和 clean-room 规则；WaveRT 衍生代码另保留 Microsoft SYSVAD 的 MS-PL 许可和原始版权。Sony libldac 使用 Apache-2.0，FindWDK 使用 BSD-3-Clause。参见 [THIRD_PARTY.md](THIRD_PARTY.md)。本项目与 Sony、Microsoft、Alternative A2DP 厂商无隶属关系。
+原生实现基于 [RafiMota/open-a2dp](https://github.com/RafiMota/open-a2dp)，固定源码提交 `167ebc0e2c89fec570eec535fefdade72bd9e416`。本项目保留其 MIT 许可和 clean-room 规则；WaveRT 衍生代码另保留 Microsoft SYSVAD 的 MS-PL 许可和原始版权。Sony libldac 使用 Apache-2.0，BlueZ libsbc 使用 LGPL-2.1-or-later，FindWDK 使用 BSD-3-Clause。参见 [THIRD_PARTY.md](THIRD_PARTY.md)。本项目与 Sony、Microsoft、Alternative A2DP 厂商无隶属关系。
 
 另见 [源码来源](docs/PROVENANCE.md)、[隐私政策](docs/PRIVACY.md)。默认文档为英文，便于开源贡献者和签名机构审阅。

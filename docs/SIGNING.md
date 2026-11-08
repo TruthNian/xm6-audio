@@ -8,15 +8,15 @@ The kernel SYS files require Microsoft kernel-policy trust. INF, service/tool ex
 
 ## Current status
 
-Research date: 2026-11-08. An explicitly authorized public feasibility inquiry has been published as [SignPath/fdn-website#28](https://github.com/SignPath/fdn-website/issues/28). No signing application or binary submission has been made, and no new paid service is authorized. A reply/approval is still pending.
+Research date: 2026-11-08. A public feasibility inquiry has been published as [SignPath/fdn-website#28](https://github.com/SignPath/fdn-website/issues/28). The project is exploring free OSS signing channels. No signing application or binary submission has been made, and a reply/approval is still pending.
 
-The listening machine currently uses the Microsoft inbox A2DP driver, with normal Bluetooth and audible XM6 sound restored. That recovery does not establish LDAC support. The native candidate must not replace it until the two drivers have a valid Microsoft kernel-policy signature and a controlled hardware acceptance path.
+Unsigned native candidates must not replace a working inbox A2DP path on a normally protected system. The native package needs valid Microsoft kernel-policy signatures and a controlled hardware acceptance path before deployment can be accepted.
 
 ## Verified primary sources
 
 | Channel | Verified facts | Consequence for this project |
 |---|---|---|
-| [Microsoft requirements](https://learn.microsoft.com/en-us/windows-hardware/drivers/dashboard/code-signing-reqs) | Hardware dashboard submissions require an account associated with a valid EV certificate. | The user has neither a signing account nor certificate. A free build does not supply this prerequisite. |
+| [Microsoft requirements](https://learn.microsoft.com/en-us/windows-hardware/drivers/dashboard/code-signing-reqs) | Hardware dashboard submissions require an account associated with a valid EV certificate. | No project signing account/certificate is configured. Building an open-source package does not supply this prerequisite. |
 | [Microsoft attestation](https://learn.microsoft.com/en-us/windows-hardware/drivers/dashboard/code-signing-attestation) | An eligible submitter can submit driver packages without HLK test logs for attestation. Attestation does not establish hardware quality or retail Windows Update distribution. | Requires an authorized signing organization; not an anonymous upload/signing endpoint. |
 | [OSSign](https://ossign.org/) | Publicly offers free OSS signing and EV/attestation for selected projects. Applications currently suspended; minimum six months activity applies to account/organization/project, including forks without prior upstream involvement. | A real candidate in principle, unavailable immediately and this new project does not meet published history requirements. Do not claim an application or exception exists. |
 | [SignPath Foundation](https://signpath.org/terms) | Free OSS signing subject to review, provenance, project reputation and rules for modified upstream sources. Its public terms require upstream signed releases for certain fork-signing cases. | Public material does not confirm a free Microsoft kernel-attestation path for these two drivers. Eligibility and technical coverage need confirmation; no acceptance is implied. |
