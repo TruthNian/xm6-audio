@@ -1,4 +1,4 @@
-name: Native core
+name: Experimental bridge core
 
 on:
   push:

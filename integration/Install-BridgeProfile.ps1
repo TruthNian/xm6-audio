@@ -42,5 +42,5 @@ $null=New-Item -Path $run -Force
 $native=Join-Path $RuntimeDirectory 'bluecaster-core.exe'
 $null=New-ItemProperty -LiteralPath $run -Name BlueCaster -PropertyType String -Value ('"'+$native+'" --background') -Force
 Start-Process -FilePath $native -ArgumentList '--background' -WindowStyle Hidden
-Write-Output 'Installed native system-audio profile and the core startup entry.'
+Write-Output 'Installed the experimental WinUSB bridge profile and its startup entry. This is not a native Windows Bluetooth audio driver.'
 Write-Output ('Configuration backup: '+$backup)
