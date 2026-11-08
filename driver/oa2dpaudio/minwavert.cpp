@@ -323,6 +323,10 @@ CMiniportWaveRT::NonDelegatingQueryInterface
     {
         *Object = PVOID(PMINIPORTWAVERT(this));
     }
+    else if (IsEqualGUIDAligned(Interface, IID_IMiniportAudioSignalProcessing))
+    {
+        *Object = static_cast<IMiniportAudioSignalProcessing *>(this);
+    }
     else
     {
         *Object = NULL;
@@ -337,6 +341,34 @@ CMiniportWaveRT::NonDelegatingQueryInterface
 
     return STATUS_INVALID_PARAMETER;
 } // NonDelegatingQueryInterface
+
+#pragma code_seg("PAGE")
+STDMETHODIMP_(NTSTATUS)
+CMiniportWaveRT::GetModes(
+    _In_ ULONG Pin,
+    _Out_writes_opt_(*NumSignalProcessingModes) GUID *SignalProcessingModes,
+    _Inout_ ULONG *NumSignalProcessingModes)
+{
+    PAGED_CODE();
+    if (Pin > OA2DP_WAVE_PIN_BRIDGE)
+        return STATUS_INVALID_PARAMETER;
+    if (Pin != OA2DP_WAVE_PIN_SINK) {
+        *NumSignalProcessingModes = 0;
+        return STATUS_NOT_SUPPORTED;
+    }
+    const ULONG required = 2;
+    if (SignalProcessingModes && *NumSignalProcessingModes < required) {
+        *NumSignalProcessingModes = required;
+        return STATUS_BUFFER_TOO_SMALL;
+    }
+    if (SignalProcessingModes) {
+        // No device DSP: both modes retain the same unprocessed PCM path.
+        SignalProcessingModes[0] = AUDIO_SIGNALPROCESSINGMODE_DEFAULT;
+        SignalProcessingModes[1] = AUDIO_SIGNALPROCESSINGMODE_RAW;
+    }
+    *NumSignalProcessingModes = required;
+    return STATUS_SUCCESS;
+}
 
 //=============================================================================
 #pragma code_seg("PAGE")

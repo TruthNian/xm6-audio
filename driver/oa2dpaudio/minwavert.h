@@ -24,6 +24,7 @@ Abstract:
 
 class CMiniportWaveRT :
     public IMiniportWaveRT,     // must stay first: property handlers cast MajorTarget
+    public IMiniportAudioSignalProcessing,
     public CUnknown
 {
 public:
@@ -35,6 +36,10 @@ public:
     ~CMiniportWaveRT();
 
     IMP_IMiniportWaveRT;
+    STDMETHOD_(NTSTATUS, GetModes)(
+        _In_ ULONG Pin,
+        _Out_writes_opt_(*NumSignalProcessingModes) GUID *SignalProcessingModes,
+        _Inout_ ULONG *NumSignalProcessingModes);
 
     OA2DP_AUDIO_DEVICE *Device() const { return m_Device; }
 
