@@ -29,6 +29,7 @@ Abstract:
 #include "minwavertstream.h"
 #include "wavtable.h"
 #include "trace.h"
+#include "ks_attributes.h"
 
 #ifndef VT_ILLEGAL
 #define VT_ILLEGAL 0xffff
@@ -676,12 +677,12 @@ CMiniportWaveRT::PropertyHandlerProposedFormat2
     PKSP_PIN                kspPin = NULL;
     NTSTATUS                ntStatus;
     PKSMULTIPLE_ITEM        pKsItemsHeader;
-    PBYTE                   pEnd;
     ULONG                   cbItemsList = 0;
     ULONG                   cbFormat = sizeof(KSDATAFORMAT_WAVEFORMATEXTENSIBLE);
     ULONG                   cbFormatAligned = (cbFormat + 7) & ~7UL;
     ULONG                   cbMinSize;
     OA2DP_FORMAT            format;
+    GUID                    mode;
 
     PAGED_CODE();
 
@@ -702,18 +703,14 @@ CMiniportWaveRT::PropertyHandlerProposedFormat2
         return STATUS_INVALID_DEVICE_REQUEST;
     }
 
-    // Optional attribute list (signal processing mode) after the KSP_PIN.
+    // Validate the entire optional list before using its length or echoing it.
+    // In particular, do not advertise a preferred format for unsupported modes.
     pKsItemsHeader = (PKSMULTIPLE_ITEM)(kspPin + 1);
-    pEnd = ((PBYTE)PropertyRequest->Instance) + PropertyRequest->InstanceSize;
-    if ((PBYTE)pKsItemsHeader + sizeof(KSMULTIPLE_ITEM) <= pEnd)
-    {
-        ULONG available = (ULONG)(pEnd - (PBYTE)pKsItemsHeader);
-        if (pKsItemsHeader->Size < sizeof(KSMULTIPLE_ITEM) || pKsItemsHeader->Size > available)
-        {
-            return STATUS_INVALID_PARAMETER;
-        }
-        cbItemsList = pKsItemsHeader->Size;
-    }
+    const ULONG pinBytes = sizeof(KSP_PIN) - RTL_SIZEOF_THROUGH_FIELD(KSP_PIN, Property);
+    ntStatus = Oa2dpParseModeAttributes(pKsItemsHeader,
+        PropertyRequest->InstanceSize - pinBytes, &mode, &cbItemsList);
+    if (!NT_SUCCESS(ntStatus))
+        return ntStatus;
 
     cbMinSize = cbItemsList ? cbFormatAligned + cbItemsList : cbFormat;
 

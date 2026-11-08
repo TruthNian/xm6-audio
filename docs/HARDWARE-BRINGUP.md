@@ -11,6 +11,14 @@ The controlled developer trial targets WH-1000XM6 on Windows 10 x64, build 19045
 - Actual WASAPI exclusive-mode initialization also failed; successful format queries were insufficient. A direct KS probe initially omitted the required nonzero priority subclass and returned `ERROR_INVALID_PARAMETER`; this was a probe defect. Corrected `KsCreatePin` requests actually opened float32 and integer16/24/32 streams, and a float32 stream accepted notification support and actual buffer-allocation requests. This does not prove WASAPI initialization or audible playback. Version 0.3.7 adds an opt-in kernel ETW provider (`XM6Audio.WaveRT`, `{ad2dba1f-78a1-4d25-a66e-d3195b9b1f72}`), extended in 0.3.8 with format-property stages. It logs scalar status/phase information only, without file names, device addresses or audio content.
 - A paging timeout was observed in Bluetooth ETW. The headset responded after a power cycle. The service no longer requires an existing ACL link before initiating its own connection; complete reconnection acceptance remains outstanding.
 
+## Offline format-contract correction in 0.3.9
+
+The proposed-format handler previously copied a signal-processing attribute list after checking only its outer length. It could return a preferred format for modes absent from `GetModes`, or echo malformed attribute records. The handler now validates the complete list, record bounds, count, padding and supported mode before returning a format. DEFAULT and RAW remain supported; unsupported modes are rejected rather than reported as supported.
+
+The exact allocation-free parser used by the miniport is exercised in a user-mode contract test. These tests open no audio devices and cover supported modes, required attributes, truncated buffers, invalid sizes/counts/flags, unknown modes/attributes and duplicate modes. Full driver builds still require the offline PE/PDB descriptor check. This correction has not been deployed or tested on the headset, and is not established as the cause of the WASAPI failure.
+
+Reference: [Microsoft's proposed-format and attribute handling sample](https://github.com/microsoft/Windows-driver-samples/blob/main/audio/simpleaudiosample/Source/Main/minwavert.cpp).
+
 ## Do not load candidate 0.3.5
 
 A local crash dump identified a descriptor ABI error introduced in 0.3.5: its stream data-range pointer table used a serialized `KSMULTIPLE_ITEM` where PortCls expects a pointer-based `KSATTRIBUTE_LIST`. The kernel interpreted a length as a pointer while enumerating the attributes. The developer trial was rolled back to the Windows inbox driver.
