@@ -165,9 +165,9 @@ void WINAPI service_main(DWORD, LPWSTR *)
         return;
     set_state(SERVICE_START_PENDING);
     log_init(false);
-    LOGI("OpenA2DP service starting");
+    LOGI("XM6 Audio native service starting");
     run_until_stopped();
-    LOGI("OpenA2DP service stopped");
+    LOGI("XM6 Audio native service stopped");
     set_state(SERVICE_STOPPED);
 }
 

@@ -1,5 +1,7 @@
 # OpenA2DP — functional specification
 
+> Historical upstream requirement catalogue. Its original status marks describe upstream implementation/testing, not this fork's current build or headset acceptance. Some optional backends (notably aptX) are not included in the XM6 build. See [the current README](../README.md) and [acceptance roadmap](ROADMAP.md) for current evidence.
+
 Built under the rules in [CLEAN_ROOM.md](CLEAN_ROOM.md). Each requirement has an
 ID so code, tests and issues can reference it. The **Status** column tracks the
 current state of this repository (see [ROADMAP.md](ROADMAP.md)).

@@ -15,7 +15,7 @@ Class       = MEDIA
 ClassGuid   = {4d36e96c-e325-11ce-bfc1-08002be10318}
 Provider    = %ProviderName%
 CatalogFile = oa2dpaudio.cat
-DriverVer   = 11/08/2026,0.2.0.0
+DriverVer   = 11/08/2026,0.3.0.0
 PnpLockdown = 1
 
 [DestinationDirs]
@@ -100,12 +100,12 @@ HKR,,DeviceType,0x10001,0x0000001D
 HKR,,Security,,"D:P(A;;GA;;;SY)(A;;GRGWGX;;;BA)(A;;GRGWGX;;;WD)(A;;GRGWGX;;;RC)"
 
 [Strings]
-ProviderName = "OpenA2DP Project"
-DiskName     = "OpenA2DP Installation Disk"
-DeviceDesc   = "OpenA2DP Bluetooth Headphones"
-ServiceDesc  = "OpenA2DP Audio Endpoint"
-WaveName     = "OpenA2DP Wave"
-TopologyName = "OpenA2DP Topology"
+ProviderName = "XM6 Audio Project"
+DiskName     = "XM6 Audio Driver Package"
+DeviceDesc   = "XM6 Audio Bluetooth Headphones"
+ServiceDesc  = "XM6 Audio Endpoint"
+WaveName     = "XM6 Audio Wave"
+TopologyName = "XM6 Audio Topology"
 
 KSNAME_Wave     = "WaveOa2dp"
 KSNAME_Topology = "TopologyOa2dp"

@@ -1,0 +1,26 @@
+name: Native audio bug report
+description: Report a reproducible issue with build, negotiation, endpoint behavior or playback.
+title: "[Bug] "
+body:
+  - type: markdown
+    attributes:
+      value: "The native implementation is a prototype. Describe the observed result and remove device addresses, pairing data and licenses from logs."
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: "Windows build, headset model, Bluetooth radio model and source commit/artifact."
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps and observed behavior
+      description: "Include expected behavior, actual audio/control behavior and whether this is a build-only or hardware result."
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Relevant evidence
+      description: "Sanitized build output, negotiated codec/format or minimal logs."

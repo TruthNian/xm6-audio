@@ -47,7 +47,7 @@ void print_status(unsigned long long addr)
 {
     LiveStatus st;
     if (!read_status(addr, &st)) {
-        wprintf(L"  %ls: not connected through OpenA2DP\n", addr_str(addr).c_str());
+        wprintf(L"  %ls: not connected through XM6 Audio\n", addr_str(addr).c_str());
         return;
     }
     wprintf(L"  %ls: %ls, %ls %lu Hz %lu ch, encoder input %lu bit, transport %lu kbit/s, quality level %lu, headset delay "
@@ -148,7 +148,7 @@ int wmain(int argc, wchar_t **argv)
         bool ours = cmd == L"use";
         if (!switch_driver(devs.set(), h->dev, ours))
             return 1;
-        wprintf(L"%ls now uses the %ls driver.\n", h->name.c_str(), ours ? L"OpenA2DP" : L"Windows");
+        wprintf(L"%ls now uses the %ls driver.\n", h->name.c_str(), ours ? L"XM6 Audio" : L"Windows");
         return 0;
     }
     if (cmd == L"get") {

@@ -16,11 +16,14 @@ be asked for one.
 1. Open an issue for anything bigger than a bug fix, referencing the SPEC ID
    (e.g. "F4.3").
 2. Keep `core/` portable: no Windows headers, no allocation, C99.
-3. Every change to `core/` comes with unit tests; run `sh scripts/zig-build.sh`
-   (or `ctest`) before pushing.
-4. Kernel code: run Code Analysis and Static Driver Verifier; describe how you
-   tested (headset model, Windows build, radio).
-5. Update the status column in `docs/SPEC.md` when a requirement changes state.
+3. Add focused regression checks for changed protocol/PCM behavior and run the
+   relevant CMake checks from [BUILDING.md](BUILDING.md). Documentation changes
+   need link/content checks, not repeated encoder or hardware tests.
+4. Kernel code: describe build/analysis results and separate them from actual
+   headset testing. State explicitly when hardware was not tested. Run driver
+   diagnostics only on an appropriately configured development system.
+5. Update [docs/ROADMAP.md](docs/ROADMAP.md) when acceptance evidence changes.
+   The inherited SPEC is a reference, not a current hardware support claim.
 
 ## Style
 
@@ -30,6 +33,9 @@ naming (`Oa2dp...`) in drivers, `snake_case` in the service. Format with
 
 ## Testing with headsets
 
-Report results in the "Headset compatibility" discussion: model, codecs
+Report results in a GitHub issue: model, codecs
 offered (`oa2dpsvc --console` logs them), codec chosen, any dropouts, and the
 `oa2dpctl status` output.
+
+Review logs before posting: remove device addresses, pairing data, licenses
+and unrelated personal information. See [privacy policy](docs/PRIVACY.md).

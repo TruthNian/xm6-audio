@@ -1,5 +1,13 @@
 # Kernel signing and free channels
 
+## Code signing policy
+
+Project owner and release approver: [@TruthNian](https://github.com/TruthNian). Signing has not been approved or sponsored by any provider. A future request must identify the reviewed source commit, pinned dependencies and corresponding public CI artifact. Release/signing approval is manual; a green CI run alone does not authorize a submission or establish hardware compatibility.
+
+The kernel SYS files require Microsoft kernel-policy trust. INF, service/tool executables and codec DLLs are checked as catalog members of the returned package. Runtime privacy is documented in [PRIVACY.md](PRIVACY.md), and source ownership/attribution in [PROVENANCE.md](PROVENANCE.md). Provider-specific account, MFA, role and eligibility requirements must be satisfied before the first signing request. This project does not advertise a provider's sponsorship before approval.
+
+## Current status
+
 Research date: 2026-11-08. An explicitly authorized public feasibility inquiry has been published as [SignPath/fdn-website#28](https://github.com/SignPath/fdn-website/issues/28). No signing application or binary submission has been made, and no new paid service is authorized. A reply/approval is still pending.
 
 The listening machine currently uses the Microsoft inbox A2DP driver, with normal Bluetooth and audible XM6 sound restored. That recovery does not establish LDAC support. The native candidate must not replace it until the two drivers have a valid Microsoft kernel-policy signature and a controlled hardware acceptance path.
@@ -25,7 +33,7 @@ Microsoft's [catalog documentation](https://learn.microsoft.com/en-us/windows-ha
 ./scripts/verify-package.ps1 -PackageDirectory path/to/signed-native
 ```
 
-This read-only gate requires a valid Microsoft catalog and SignTool `/kp` verification of each SYS/INF against its catalog. Do not reuse old unsigned catalogs or modify any signed INF/SYS. A signature proves trust/integrity; actual audio and driver reliability still require testing.
+This read-only gate requires a valid Microsoft catalog, SignTool `/kp` verification of each SYS, and `/pa /c` membership verification for the INF and user-mode payload. Do not reuse old unsigned catalogs or modify signed package members. A signature proves trust/integrity; actual audio and driver reliability still require testing.
 
 After review, in an administrator shell, select the paired device's address locally (never put it in an issue or commit):
 
@@ -40,7 +48,7 @@ Recovery is scoped to the same selected headset:
 ./scripts/install.ps1 -DeviceAddress <local-address> -RestoreWindows
 ```
 
-Recovery switches the selected headset back to Microsoft A2DP and makes the native codec service demand-start. It retains pairing, radio ownership, package files and local backup for diagnosis. No automatic reboot or broad `restore all` is performed.
+The INF installs the codec service as demand-start with a device-interface trigger and runs it from Driver Store. Recovery verifies the installed catalog and switches only the selected headset back to Microsoft A2DP; the service is stopped when no other headset uses it. Pairing, radio ownership, cached package files and the local backup are retained. No automatic reboot or broad `restore all` is performed.
 
 ## Still required before calling native complete
 

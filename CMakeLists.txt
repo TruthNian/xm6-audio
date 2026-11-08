@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(XM6Audio VERSION 0.2.0 LANGUAGES C CXX)
+project(XM6Audio VERSION 0.3.0 LANGUAGES C CXX)
 
 set(CMAKE_C_STANDARD 99)
 set(CMAKE_CXX_STANDARD 17)
@@ -134,6 +134,17 @@ endif()
 endif()
 
 # --- drivers ------------------------------------------------------------------
+if(MSVC)
+    # User-mode payload is self-contained; do not require a separate VC runtime
+    # installer. Kernel targets keep the WDK's independent runtime settings.
+    foreach(binary IN ITEMS oa2dp_core oa2dp_codecs oa2dp_manage oa2dpsvc oa2dpctl
+                            oa2dpgui ldac sbc oa2dp_tests test_encoders)
+        if(TARGET ${binary})
+            set_property(TARGET ${binary} PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+        endif()
+    endforeach()
+endif()
+
 if(OA2DP_BUILD_DRIVERS)
     list(APPEND CMAKE_MODULE_PATH ${OA2DP_THIRD_PARTY}/FindWDK/cmake)
     find_package(WDK REQUIRED)

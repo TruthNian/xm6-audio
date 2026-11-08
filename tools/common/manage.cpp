@@ -20,7 +20,7 @@ namespace {
 
 const wchar_t kA2dpSinkUuid[] = L"{0000110B-0000-1000-8000-00805F9B34FB}";
 const wchar_t kOurService[] = L"oa2dp";
-const wchar_t kOurProvider[] = L"OpenA2DP Project";
+const wchar_t kOurProvider[] = L"XM6 Audio Project";
 const wchar_t kDevicesKey[] = L"SOFTWARE\\OpenA2DP\\Devices\\";
 const wchar_t kStatusKey[] = L"SOFTWARE\\OpenA2DP\\Status\\";
 
@@ -159,7 +159,8 @@ bool pick_driver(HDEVINFO set, SP_DEVINFO_DATA &dev, bool ours, SP_DRVINFO_DATA_
         bool is_ours = _wcsicmp(drv.ProviderName, kOurProvider) == 0;
         bool is_ms = wcsstr(drv.ProviderName, L"Microsoft") != nullptr;
         if ((ours && is_ours) || (!ours && is_ms)) {
-            if (!found || CompareFileTime(&drv.DriverDate, &chosen->DriverDate) > 0)
+            int date_order = found ? CompareFileTime(&drv.DriverDate, &chosen->DriverDate) : 1;
+            if (!found || date_order > 0 || (date_order == 0 && drv.DriverVersion > chosen->DriverVersion))
                 *chosen = drv;
             found = true;
         }
@@ -190,7 +191,7 @@ bool install_driver(HDEVINFO set, SP_DEVINFO_DATA &dev, bool ours, std::wstring 
     SP_DRVINFO_DATA_W chosen{};
     if (!pick_driver(set, dev, ours, &chosen)) {
         SetupDiDestroyDriverInfoList(set, &dev, SPDIT_COMPATDRIVER);
-        return fail(ours ? L"OpenA2DP driver package is not installed (run the installer)"
+        return fail(ours ? L"XM6 Audio driver package is not installed (run the installer)"
                          : L"Windows' own A2DP driver was not found for this device");
     }
     // Resolved at run time: some SDKs ship newdev import libraries without it.

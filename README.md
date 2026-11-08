@@ -1,50 +1,94 @@
-# XM6 Audio — native Windows Bluetooth implementation
+# XM6 Audio
 
-原生 Windows 蓝牙 LDAC 的开发原型，面向 WH-1000XM6。**尚未完成驱动签名和本机实机验收，当前不是可安装成品。** 已恢复可用的 Windows 自带 A2DP 通道应继续保留。
+**Native Windows Bluetooth audio, with capability-aware codec negotiation and a standard headphone endpoint.**
 
-默认分支保留 Windows 的 BTHUSB/BTHPORT、配对、蓝牙开关和 AVRCP 媒体控制。新的 A2DP 配置驱动只绑定所选耳机的 Audio Sink 服务，创建标准 WaveRT 耳机音频端点，复用系统输出选择和端点音量。编码通过原生驱动的 PCM 环形缓冲区交给 SCM 管理的 LDAC 服务，再经 Windows 蓝牙 L2CAP 发送。
+[![Native build](https://github.com/TruthNian/xm6-audio/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/TruthNian/xm6-audio/actions/workflows/ci.yml)
+[![Core license: MIT](https://img.shields.io/badge/core_license-MIT-blue.svg)](LICENSE)
+[![Status: prototype](https://img.shields.io/badge/status-prototype-yellow.svg)](docs/ROADMAP.md)
 
-这里没有 WinUSB 整卡接管、系统声音回录、QQ 音乐进程捕获、模拟媒体键、托盘启动器或登录后看门狗。编码服务是原生驱动的一部分；它不接管蓝牙无线电。
+English · [简体中文](README.zh-CN.md)
 
-```text
-任意播放器 / 系统音频
-        ↓ Windows Audio / WASAPI
-XM6 WaveRT 标准端点 → PCM ring → LDAC 编码服务
-        ↓ A2DP 配置驱动 / L2CAP BRB
-Windows BTHPORT / BTHUSB → XM6
+XM6 Audio adds an A2DP profile driver and a WaveRT render endpoint while Windows continues to own the Bluetooth radio, pairing, volume UI and AVRCP media-control stack. The WH-1000XM6 is the initial hardware acceptance target.
 
-Windows AVRCP → 系统媒体控制
+> **Development status:** the native drivers, service and codec checks build in CI. Microsoft kernel signing and native headset acceptance are still pending. CI artifacts are unsigned development candidates, not installable releases for a normally protected Windows system.
+
+**[Architecture](docs/ARCHITECTURE.md) · [Build from source](BUILDING.md) · [Signing status](docs/SIGNING.md) · [Roadmap](docs/ROADMAP.md)**
+
+## What the project implements
+
+- A **standard Windows headphone endpoint** for applications using Windows Audio/WASAPI.
+- **LDAC, AAC and SBC** negotiation from the intersection of local encoders, headset capabilities and per-device preferences.
+- **Integer 16/24/32-bit and float32 PCM**, with container width and valid precision tracked separately, including 24-in-32.
+- Sample-rate following for formats the peer supports, with explicit fixed-format profiles available for diagnostics.
+- Device-interface notifications, buffered Bluetooth connection events, disconnected endpoint state and cleanup of stale PCM during reconnection.
+- A codec service **installed by the driver INF and started by a Windows device-interface trigger**, with binaries loaded from Driver Store.
+
+Native volume and media controls are part of the intended system integration. Their behavior with the new drivers remains a hardware acceptance item.
+
+## Audio path
+
+```mermaid
+flowchart LR
+    Apps["Music, video and system audio"] --> WinAudio["Windows Audio / WASAPI"]
+    WinAudio --> Endpoint["WaveRT headphone endpoint"]
+    Endpoint --> Codec["Codec service<br/>LDAC · AAC · SBC"]
+    Codec --> Profile["KMDF A2DP profile"]
+    Profile --> WindowsBT["Windows BTHPORT / BTHUSB"]
+    WindowsBT --> Headset["Paired headphones"]
+    Headset <--> AVRCP["Windows AVRCP"]
+    AVRCP <--> Media["System media controls"]
 ```
 
-## 音频策略
+The profile binds to the selected headset's A2DP Audio Sink service. Radio ownership and other Bluetooth profiles remain with Windows. The audio path uses the native endpoint's PCM buffer; it does not capture a player's output or loop back a different system endpoint.
 
-- 默认跟随 Windows 实际送达端点的 PCM 采样率；不把 44.1 kHz 无理由升至 48/96 kHz。
-- 接收整数 16/24/32-bit 和 float32 PCM；分别记录容器位宽、有效位数、整数/浮点，包含 24-in-32。完整整数 32-bit 在环形缓冲区保留，送入编码器时按其能力一次量化；LDAC 最多保留 24 个有用位。16-bit 实际精度使用 S16 输入，浮点混音不会因原文件是 16-bit 而被猜测为 16-bit。
-- 默认按耳机能力优先协商 LDAC，其次 AAC、SBC；状态显示实际编码和端点格式。固定 LDAC 配置仍可显式选择，协商降级不算达到固定 LDAC 的目标。
-- 默认使用固定 LDAC **HQ**：44.1/88.2 kHz 为标称 909 kbps，48/96 kHz 为 990 kbps。SQ 为 606/660，MQ 为 303/330。名称取自 Sony 的 libldac，不按名称猜质量。
-- 默认关闭 ABR；如需按链路稳定性降档，必须明确配置，不将降档报告成最高品质。
-- 独占流可以让驱动接收播放器选择的原格式。共享模式收到的是 Windows 混音格式，驱动无法从中还原每个文件的原始采样率或位深，也不会逐首改系统默认格式干扰其他应用。
-- 可显式设置固定 48 kHz/24-bit/HQ 作为诊断配置，但它不再是覆盖所有音源的成功标准。
+See [component boundaries and lifecycle](docs/ARCHITECTURE.md).
 
-来源：[Sony libldac API](https://android.googlesource.com/platform/external/libldac/+/eeee1a3f5f8df1282e3a6d297085885fd886737b/inc/ldacBT.h)、[Windows 共享/独占设备格式](https://learn.microsoft.com/en-us/windows/win32/coreaudio/device-formats)。
+## Format and quality policy
 
-MP3、FLAC、ALAC、AAC、Opus、WAV 等文件由播放器/Windows 解码为 PCM 后进入相同端点，不要求在蓝牙驱动里重新实现文件解码器。XM6 的经典蓝牙实际支持 SBC/AAC/LDAC；LC3 属于 LE Audio，不能列成这个 Windows 10 A2DP 实现的可用模式。参见 [Sony 编码支持列表](https://helpguide.sony.net/mdr/2984/v1/en/contents/TP1001856790.html)。
-
-## 开发状态
-
-| 项目 | 状态 |
+| Layer | Policy |
 |---|---|
-| 协议、PCM 格式及编码器检查 | 整数/浮点及有效位数检查；SBC、AAC、LDAC 编码；LDAC 包含 44.1/16、48/24、88.2/24、96/24 |
-| MSVC 原生服务、命令行工具 | 本机已构建；内核驱动由 WDK CI 构建 |
-| 可追溯依赖、哈希清单、INF/CAT 包装 | 固定 git submodule 提交；CI 只生成未签名候选包 |
-| 微软内核签名 | 未取得；[免费渠道核实记录](docs/SIGNING.md) |
-| 本机原生 LDAC 实际声音、系统音量、耳机控制 | 未验收，不以离线编码或发送计数代替 |
-| 关机、重连、睡眠唤醒、断连端点状态、视频同步 | 已补标准 jack 状态通知和重连旧 PCM 清理；仍须实机验证 |
+| Source files | The player/Windows decodes MP3, FLAC, ALAC, AAC, Opus, WAV and other formats it supports into PCM. File decoders do not belong in the Bluetooth driver. |
+| Endpoint PCM | Integer 16/24/32 and float32; valid precision is distinct from container width. |
+| Sample rate | Follow the actual Windows stream where supported. Shared-mode audio exposes the Windows mix format, not each file's original metadata. |
+| LDAC quality | HQ by default: nominal 909 kbps at 44.1/88.2 kHz and 990 kbps at 48/96 kHz. ABR is off by default. |
+| Precision boundary | Keep full integer32 PCM until conversion to the encoder's supported input precision. LDAC accepts at most 24 useful bits; a 32-bit container is not a claim of 32-bit Bluetooth transmission. |
+| Negotiation | Prefer LDAC, then AAC/SBC. Report the actual codec and format. An explicitly fixed LDAC profile must not report a fallback as success. |
 
-签名验证脚本拒绝未签名包，不安装测试证书，不关闭 Secure Boot，不改变签名强制。不要把已有厂商驱动的签名移植到新文件；签名绑定文件内容和目录成员。
+The XM6 supports SBC/AAC/LDAC over Classic Audio and LC3 over LE Audio. LC3 is not part of this Windows 10 A2DP implementation. Sources: [Sony codec support](https://helpguide.sony.net/mdr/2984/v1/en/contents/TP1001856790.html), [Sony libldac API](https://android.googlesource.com/platform/external/libldac/+/eeee1a3f5f8df1282e3a6d297085885fd886737b/inc/ldacBT.h), [Windows device formats](https://learn.microsoft.com/en-us/windows/win32/coreaudio/device-formats).
 
-参见 [BUILDING.md](BUILDING.md)、[签名与部署](docs/SIGNING.md)。原有可听的整卡接管桥接实现保存在 [`v0.1.0-bridge`](https://github.com/TruthNian/xm6-audio/tree/v0.1.0-bridge)；它不是本分支的原生实现。
+## Evidence and current limits
 
-## 来源与许可
+| Area | Evidence / status |
+|---|---|
+| Portable protocol and PCM policy | CMake checks, including integer/float distinction, valid bits, 24-in-32 and precision conversion; sanitizer CI on Linux. |
+| Encoders | Actual SBC, Media Foundation AAC and pinned libldac encoding checks on Windows. LDAC checks cover 44.1/16, 48/24, 88.2/24 and 96/24. |
+| Native binaries | MSVC/WDK build of both kernel drivers, codec service and command-line tool. |
+| Packaging | INF validation, catalog generation, pinned dependency commits, symbols, licenses and SHA-256 manifest. |
+| Microsoft kernel signing | **Pending.** [Public feasibility inquiry](https://github.com/SignPath/fdn-website/issues/28); no provider approval or production signature obtained. |
+| Native headset acceptance | **Pending.** Audible playback, volume/media controls, startup, reconnect, sleep/resume and video timing must be verified on hardware. |
 
-原生实现基于 [RafiMota/open-a2dp](https://github.com/RafiMota/open-a2dp)，固定源码提交 `167ebc0e2c89fec570eec535fefdade72bd9e416`。本项目保留其 MIT 许可和 clean-room 规则；WaveRT 衍生代码另保留 Microsoft SYSVAD 的 MS-PL 许可和原始版权。Sony libldac 使用 Apache-2.0，FindWDK 使用 BSD-3-Clause。参见 [THIRD_PARTY.md](THIRD_PARTY.md)。本项目与 Sony、Microsoft、Alternative A2DP 厂商无隶属关系。
+Build success, encoder bitrate and packet counters are not evidence of audible headset playback. The target baseline is Windows 10 2004+ x64; broader runtime compatibility also requires hardware validation.
+
+## Build and review
+
+```powershell
+git clone --recurse-submodules https://github.com/TruthNian/xm6-audio.git
+cd xm6-audio
+cmake -S . -B build/native -G "Visual Studio 17 2022" -A x64 -DOA2DP_BUILD_DRIVERS=ON
+cmake --build build/native --config Release --parallel 2
+ctest --test-dir build/native -C Release --output-on-failure
+```
+
+The full build needs Visual Studio C++ tools, Windows SDK and WDK. [BUILDING.md](BUILDING.md) also covers user-mode-only and portable builds. The public [CI workflow](.github/workflows/ci.yml) produces an **unsigned** review candidate; deployment requires the signed-package checks in [SIGNING.md](docs/SIGNING.md).
+
+## Provenance, licensing and signing
+
+The native implementation is a documented derivative of [RafiMota/open-a2dp](https://github.com/RafiMota/open-a2dp), pinned at `167ebc0e2c89fec570eec535fefdade72bd9e416`. The initial imported tree is byte-for-byte traceable to that revision; subsequent changes are in this repository's history. See [PROVENANCE.md](docs/PROVENANCE.md).
+
+Core code retains the **MIT** license. WaveRT-derived files retain Microsoft's **MS-PL** notices; libldac is **Apache-2.0**, libsbc is **LGPL-2.1-or-later**, and FindWDK is **BSD-3-Clause**. Component licenses and build pins are documented in [THIRD_PARTY.md](THIRD_PARTY.md) and included in packages.
+
+**Code signing policy:** no signing provider is approved yet. Any future signing request must correspond to a reviewed source revision and public CI artifact, with explicit release approval. See [signing policy and status](docs/SIGNING.md) and [privacy policy](docs/PRIVACY.md).
+
+Maintainer: [@TruthNian](https://github.com/TruthNian). Contributions are welcome through [CONTRIBUTING.md](CONTRIBUTING.md) and the [clean-room rules](docs/CLEAN_ROOM.md). This project is independent of Sony, Microsoft and Luculent Systems.
+
+The earlier experimental radio-takeover bridge is preserved under [`v0.1.0-bridge`](https://github.com/TruthNian/xm6-audio/tree/v0.1.0-bridge) for provenance. It is not the native implementation on the default branch.

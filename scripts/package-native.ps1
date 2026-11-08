@@ -26,15 +26,15 @@ foreach ($driver in @('oa2dp','oa2dpaudio')) {
     foreach ($ext in @('sys','pdb')) {
         Copy-Item -LiteralPath "$build\Release\$driver.$ext" -Destination $dst
     }
+    if ($driver -eq 'oa2dp') {
+        foreach ($file in @('oa2dpsvc.exe','oa2dpctl.exe','ldac.dll','sbc.dll')) {
+            Copy-Item -LiteralPath "$build\Release\$file" -Destination $dst
+        }
+    }
     & $infverif.FullName /w "$dst\$driver.inf"
     if ($LASTEXITCODE -ne 0) { throw "InfVerif failed for $driver ($LASTEXITCODE)." }
     & $inf2cat.FullName "/driver:$dst" /os:10_VB_X64,10_CO_X64,10_NI_X64,10_GE_X64 /uselocaltime
     if ($LASTEXITCODE -ne 0) { throw "Inf2Cat failed for $driver ($LASTEXITCODE)." }
-}
-$user = Join-Path $output 'user-mode'
-New-Item -ItemType Directory -Path $user | Out-Null
-foreach ($file in @('oa2dpsvc.exe','oa2dpctl.exe','ldac.dll','sbc.dll')) {
-    Copy-Item -LiteralPath "$build\Release\$file" -Destination $user
 }
 $licenses = Join-Path $output 'licenses'
 New-Item -ItemType Directory -Path $licenses | Out-Null
@@ -45,13 +45,14 @@ Copy-Item -LiteralPath "$repo\third_party\libldac\NOTICE" -Destination "$license
 Copy-Item -LiteralPath "$repo\third_party\sbc\COPYING.LIB" -Destination "$licenses\libsbc-LGPL-2.1.txt"
 Copy-Item -LiteralPath "$repo\THIRD_PARTY.md" -Destination $licenses
 Copy-Item -LiteralPath "$PSScriptRoot\verify-package.ps1" -Destination $output
+Copy-Item -LiteralPath "$PSScriptRoot\install.ps1" -Destination $output
 $files = @{}
 Get-ChildItem -LiteralPath $output -Recurse -File | ForEach-Object {
     $relative = $_.FullName.Substring($output.Length + 1).Replace('\','/')
     $files[$relative] = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
 }
 $manifest = [ordered]@{
-    project = 'XM6 Audio'; version = '0.2.0'; architecture = 'x64'
+    project = 'XM6 Audio'; version = '0.3.0'; architecture = 'x64'
     commit = (& git -C $repo rev-parse HEAD)
     upstream = 'RafiMota/open-a2dp@167ebc0e2c89fec570eec535fefdade72bd9e416'
     libldac = (& git -C "$repo\third_party\libldac" rev-parse HEAD)
