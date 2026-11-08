@@ -12,6 +12,8 @@ XM6 Audio adds an A2DP profile driver and a WaveRT render endpoint while Windows
 
 > **Development status:** the native drivers, service and codec checks build in CI. Microsoft kernel signing and native headset acceptance are still pending. CI artifacts are unsigned development candidates, not installable releases for a normally protected Windows system.
 
+The [hardware bring-up record](docs/HARDWARE-BRINGUP.md) documents observed negotiation and unresolved shared-mode playback. **Do not load candidate 0.3.5**; its descriptor ABI error caused a developer-machine bugcheck and is corrected in the 0.3.6 source.
+
 **[Architecture](docs/ARCHITECTURE.md) · [Build from source](BUILDING.md) · [Signing status](docs/SIGNING.md) · [Roadmap](docs/ROADMAP.md)**
 
 ## What the project implements

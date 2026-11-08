@@ -4,6 +4,8 @@
 
 原生 Windows 蓝牙 LDAC 的开发原型，面向 WH-1000XM6。**尚未完成驱动签名和本机实机验收，当前不是可安装成品。** 已恢复可用的 Windows 自带 A2DP 通道应继续保留。
 
+实机加载、协商和未解决问题见[开发记录](docs/HARDWARE-BRINGUP.md)。**不要加载 0.3.5 候选驱动**：该版属性表布局错误已导致开发机蓝屏，0.3.6 源码修正了结构并增加离线 PE/PDB 检查；仍未完成实际声音验收。
+
 默认分支保留 Windows 的 BTHUSB/BTHPORT、配对、蓝牙开关和 AVRCP 媒体控制。新的 A2DP 配置驱动只绑定所选耳机的 Audio Sink 服务，创建标准 WaveRT 耳机音频端点，复用系统输出选择和端点音量。编码通过原生驱动的 PCM 环形缓冲区交给 SCM 管理的 LDAC 服务，再经 Windows 蓝牙 L2CAP 发送。
 
 编码服务、管理工具和 LDAC/SBC 库纳入驱动 INF 的 Driver Store 包，由 Windows 根据原生设备接口触发服务启动。部署脚本负责签名验证、指定耳机绑定和回退，不再单独复制 Program Files 文件或手工注册服务。

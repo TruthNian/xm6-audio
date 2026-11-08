@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(XM6Audio VERSION 0.3.5 LANGUAGES C CXX)
+project(XM6Audio VERSION 0.3.6 LANGUAGES C CXX)
 
 set(CMAKE_C_STANDARD 99)
 set(CMAKE_CXX_STANDARD 17)
@@ -102,6 +102,8 @@ if(OA2DP_BUILD_TESTS)
     add_executable(test_encoders codecs/tests/test_encoders.c)
     target_link_libraries(test_encoders PRIVATE oa2dp_codecs)
     add_test(NAME encoders COMMAND test_encoders)
+    add_executable(verify_native_metadata tools/verify-native-metadata.cpp)
+    target_link_libraries(verify_native_metadata PRIVATE dbghelp)
 endif()
 
 # --- service ----------------------------------------------------------------
@@ -138,7 +140,7 @@ if(MSVC)
     # User-mode payload is self-contained; do not require a separate VC runtime
     # installer. Kernel targets keep the WDK's independent runtime settings.
     foreach(binary IN ITEMS oa2dp_core oa2dp_codecs oa2dp_manage oa2dpsvc oa2dpctl
-                            oa2dpgui ldac sbc oa2dp_tests test_encoders)
+                            oa2dpgui ldac sbc oa2dp_tests test_encoders verify_native_metadata)
         if(TARGET ${binary})
             set_property(TARGET ${binary} PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
         endif()
@@ -174,4 +176,7 @@ if(OA2DP_BUILD_DRIVERS)
         target_compile_options(${driver} PRIVATE /Zi)
         target_link_options(${driver} PRIVATE /DEBUG)
     endforeach()
+    if(OA2DP_BUILD_TESTS)
+        add_test(NAME native_metadata COMMAND verify_native_metadata "$<TARGET_FILE:oa2dpaudio>")
+    endif()
 endif()

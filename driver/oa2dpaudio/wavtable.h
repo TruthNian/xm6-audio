@@ -65,12 +65,14 @@ static KSDATARANGE_AUDIO Oa2dpPinDataRangesStream[] =
     }
 };
 
-static struct {
-    KSMULTIPLE_ITEM Header;
-    KSATTRIBUTE Mode;
-} Oa2dpRangeAttributes = {
-    { sizeof(KSMULTIPLE_ITEM) + sizeof(KSATTRIBUTE), 1 },
-    { sizeof(KSATTRIBUTE), 0, STATICGUIDOF(KSATTRIBUTEID_AUDIOSIGNALPROCESSING_MODE) }
+static KSATTRIBUTE Oa2dpModeAttribute = {
+    sizeof(KSATTRIBUTE), 0, STATICGUIDOF(KSATTRIBUTEID_AUDIOSIGNALPROCESSING_MODE)
+};
+static PKSATTRIBUTE Oa2dpModeAttributes[] = { &Oa2dpModeAttribute };
+/* PortCls consumes a pointer-based KSATTRIBUTE_LIST here. KSMULTIPLE_ITEM
+ * is the serialized wire representation, not the descriptor-table ABI. */
+static KSATTRIBUTE_LIST Oa2dpRangeAttributes = {
+    RTL_NUMBER_OF(Oa2dpModeAttributes), Oa2dpModeAttributes
 };
 
 static PKSDATARANGE Oa2dpPinDataRangePointersStream[] =
