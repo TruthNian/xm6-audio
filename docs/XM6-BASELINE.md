@@ -13,7 +13,7 @@ THX endpoint loopback previously produced silence despite active application met
 ## Native changes
 
 1. Restore the saved active profile from the resident core's existing sampler. Retry initial failures with bounded backoff while the device is unavailable; hand a successful stream to existing reconnect behavior. Respect Disconnect, a changed/removed profile and disabled auto-reconnect.
-2. Honor `output_mute` in ordinary mode, without requiring developer mode or the developer volume mixer. Existing output-mute, mute-key and volume-sync code remains responsible for interaction with Windows.
+2. Honor `output_mute` in ordinary mode, without requiring developer mode or the developer volume mixer. Keep the existing mute-key watcher attached when the output was already muted at startup, while preserving that original mute state on exit. This prevents a Windows volume key from exposing speakers in a session that started with the PC muted. Existing output-mute, mute-key and volume-sync code remains responsible for interaction with Windows.
 3. Configure system loopback with a real 48 kHz render endpoint, a fixed LDAC profile and the core's own Windows startup registration. Setup is one-time; the installed core is the only runtime.
 
 ## Acceptance status
@@ -29,6 +29,8 @@ THX endpoint loopback previously produced silence despite active application met
 | Video synchronization | Measure/observe separately; do not equate high bitrate with low delay |
 
 ## Constraints that remain real
+
+Intel cold-start firmware is part of the path, not a startup-script problem. This controller answered with legacy variant `0x13`, hardware revision `0`, firmware revision `0`. The loader deliberately re-reads legacy fields for variants `0x11..=0x14`; its cold-start stem is derived from those fields. The tested warm session already had operational firmware in RAM. Local preparation uses the official linux-firmware common `ibt-19-0-4.sfi` / `.ddc`, also under the observed `ibt-19-0-0` names. Intel's [upstream alias change](https://kernel.googlesource.com/pub/scm/linux/kernel/git/firmware/linux-firmware/+/949dba8936abfc1d17ff6f9a69b96488b0cd4c4a) documents that these variants share that image. SHA-256 of that pinned image: `74c7df0302a4cb0917411b959771b9148e87e4518e37215daddab57b397c99e1`; DDC: `fe272982577efdc289cfe3e8bedafca607c0b7d6c9df1aab1880e22ef930d077`. Keep the Intel firmware license beside downloaded files. Preparing files does not establish a passed cold-boot test.
 
 Fixed 990 kbps requires sufficient usable radio airtime. No software can guarantee it at arbitrary distance or interference. DRM-protected or exclusive hardware paths may not be available to WASAPI loopback. Application-specific output selection can bypass the default system endpoint. Video has sink buffering and transport delay; universal automatic lip-sync is not established by the audible music result.
 

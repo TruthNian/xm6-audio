@@ -20,6 +20,12 @@ app/src/ui/src-tauri/gen/
 # Downloaded at runtime (firmware)
 *.fw
 *.bin
+*.sfi
+*.ddc
+link_keys.txt
+settings.json
+profiles.json
+audio-before-start.json
 
 # Packages
 *.zip

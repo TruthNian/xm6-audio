@@ -255,8 +255,9 @@ impl<P: EndpointProvider> OutputMute<P> {
         };
         if let Some(a) = self.attached.as_ref().filter(|a| a.endpoint.device_id() == id) {
             // Unmuted in Windows (its mute key): the watcher may have been first
-            if a.ours {
-                key_pressed(&a.endpoint, &mut lock(&self.ours), self.silence);
+            let mut watched = lock(&self.ours);
+            if watched.device.as_deref() == Some(id.as_str()) {
+                key_pressed(&a.endpoint, &mut watched, self.silence);
             }
             return;
         }
@@ -278,7 +279,9 @@ impl<P: EndpointProvider> OutputMute<P> {
         } else {
             mute(&endpoint)
         };
-        if ours {
+        // Keep the output silent even when it was muted before startup.
+        // `ours` only controls restoration; it must not disable the keys.
+        if endpoint.muted() == Some(true) {
             *lock(&self.ours) = Watched { device: Some(id), volume: endpoint.volume() };
         }
         self.attached = Some(Attached { endpoint, ours });
@@ -477,14 +480,21 @@ mod tests {
     }
 
     #[test]
-    fn a_device_the_user_had_muted_is_not_watched() {
+    fn a_device_muted_before_startup_stays_silent_when_windows_unmutes_it() {
         let d = Devices::with(&["a"]);
         d.set("a", true);
         let mut m = session(&d, handover());
         m.tick(true);
         d.set("a", false);
         m.tick(true);
-        assert!(!d.muted("a") && !m.silence.load(Ordering::Acquire));
+        assert!(d.muted("a") && m.silence.load(Ordering::Acquire));
+        // A volume key resumes headphones without exposing the speakers.
+        d.volume.borrow_mut().insert("a".into(), 0.6);
+        d.set("a", false);
+        m.tick(true);
+        assert!(d.muted("a") && !m.silence.load(Ordering::Acquire));
+        drop(m);
+        assert!(d.muted("a"));
     }
 
     #[test]

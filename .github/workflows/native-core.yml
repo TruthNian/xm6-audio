@@ -3,6 +3,7 @@ name: Native core
 on:
   push:
     branches: [main]
+    paths: ["app/**", "Cargo.toml", "Cargo.lock", "extern/**", "compat/**", ".github/workflows/native-core.yml"]
   workflow_dispatch:
 
 permissions:
@@ -28,6 +29,8 @@ jobs:
         run: cargo test --release --locked -p bluecaster-core-exe startup_
       - name: Verify normal-mode output mute
         run: cargo test --release --locked -p bluecaster-core output_mute_is_independent_of_developer_controls
+      - name: Verify output ownership and Windows volume keys
+        run: cargo test --release --locked -p bluecaster-core mute_output::tests
       - name: Build the existing native core and driver helper
         run: cargo build --release --locked -p bluecaster-core-exe -p bluecaster-driver
       - uses: actions/upload-artifact@v4
