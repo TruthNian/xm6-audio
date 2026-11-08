@@ -1,29 +1,85 @@
-# XM6 Audio
+# OpenA2DP
 
-**当前可运行版本是 WinUSB 用户态桥接实验基线，不是 Windows 原生蓝牙耳机驱动。** 它会让 Windows 失去对该蓝牙适配器的管理，系统蓝牙可能显示 off，也没有独立的 XM6 标准音频端点。这些是尚未解决的架构缺口，不是已经完成的系统集成。
+Open-source replacement for the Windows 10/11 Bluetooth A2DP audio driver,
+with high-quality codecs and full control over codec parameters.
 
-基于 [BlueCaster v3.0.0-beta.3](https://github.com/SeiyaFunaokaJP/BlueCaster/tree/v3.0.0-beta.3) 保存可复现的编码和传输基线，目标是在 Windows 上让 WH-1000XM6 以 **48 kHz、立体声、24 bit、固定 LDAC 990 kbps** 播放系统音频，并具有真正的 Windows 设备集成。
+**Status: pre-alpha.** The protocol core and every encoder work and are
+tested; the kernel drivers are written but have not been built with the WDK
+or run against a headset yet. See [docs/ROADMAP.md](docs/ROADMAP.md).
 
-首个已听到音乐且稳定的基线来自 Windows 10 19045、Intel 8087:0AAA 内置蓝牙和 QQ 音乐。它证明了编码与无线发送链路可行，不等于已经验证所有播放器、重启、休眠和视频同步。
+| | |
+|---|---|
+| Codecs | SBC (incl. Dual Channel "XQ"), AAC, aptX, aptX HD, aptX Low Latency, LDAC (HQ/SQ/MQ/adaptive), FastStream |
+| Settings | per device: codec priority, sample rate, bit depth, channel mode, SBC bitpool/blocks/subbands/allocation, AAC bitrate, LDAC quality, adaptive bitrate, follow the player's sample rate |
+| Scope | replaces only the A2DP part of one headset at a time; hands-free mic (HFP) and media keys (AVRCP) stay on Windows' drivers |
+| Provenance | clean-room: built from Bluetooth SIG specs, public docs and open-source stacks — see [docs/CLEAN_ROOM.md](docs/CLEAN_ROOM.md) |
 
-桥接分支的改进直接进入现有核心：恢复已保存配置、在耳机稍后开机时重试初次连接、保留用户断开操作、采集所有应用音频，并把耳机媒体按键优先交给 Windows 当前媒体会话。它只用于保留可播放基线和排查协议，不被视为最终原生实现。
+## How it fits together
 
-桥接实验的一次性配置：从本仓库 Actions 获取核心构建，将它与上游同版本 `bluecaster.exe` 放在同一目录，再运行 `integration/Install-BridgeProfile.ps1`。这一步不会提供 Windows 原生蓝牙管理或 XM6 音频端点。本机地址仅写入本机配置，不能提交到仓库。
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File integration/Install-BridgeProfile.ps1 -DeviceAddress 'AA:BB:CC:DD:EE:FF' -BuildDirectory 'C:\path\to\runtime'
+```
+Windows audio ─▶ oa2dpaudio.sys ─(shared PCM ring)─▶ oa2dpsvc.exe ─▶ oa2dp.sys ─▶ bthport.sys ─▶ headset
+                 virtual endpoint                   AVDTP + codecs    L2CAP only
 ```
 
-完整的实现与验收状态见 [基线记录](docs/XM6-BASELINE.md)，后续工作的触发条件和验收见 [改进决策](docs/XM6-ROADMAP.md)。上游功能及构建说明见 [原始 README](README.upstream.md) 和 [Building](docs/building.md)。
+Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · Requirements and their
+status: [docs/SPEC.md](docs/SPEC.md).
 
-工程原则：先质疑要求，删除多余环节，简化必要路径，再优化有证据的瓶颈。实际可听到音乐是验收的一部分，码率计数和电平表不能代替它。源码改变后运行针对启动恢复和输出静音的必要检查。
+## Repository layout
 
-完整耳机行为也是验收条件：播放、暂停、上一曲、下一曲、Windows 音量、系统声音、重连和视频。当前实现与 Alternative A2DP 的架构区别、以及真正 Windows 音频端点仍缺的部分，见 [Windows 集成边界](docs/XM6-WINDOWS-INTEGRATION.md)。
+| Path | What |
+|------|------|
+| `core/` | Portable C99: AVDTP 1.3 signalling, A2DP codec capabilities and negotiation, RTP/LATM packetisation, adaptive bitrate, PCM ring, settings. 377 unit checks. |
+| `codecs/` | Encoder adapters: libsbc, libopenaptx, libldac, Media Foundation AAC. |
+| `service/` | `oa2dpsvc.exe`, the Windows service that runs one session per headset. |
+| `tools/oa2dpctl/` | Command-line manager: list headsets, switch driver, edit settings, live status. |
+| `tools/oa2dpgui/` | The same as a small Win32 window: headset list, driver switch, codec settings with live SBC bitrate, status bar. |
+| `tools/common/` | Device and registry logic shared by both tools. |
+| `driver/oa2dp/` | KMDF Bluetooth profile driver (L2CAP transport) + INF. |
+| `driver/oa2dpaudio/` | Virtual render endpoint: PortCls/WaveRT miniport derived from SYSVAD (MS-PL), ring producer, control IOCTLs. Builds in CI; not yet run. |
 
-后续主线首先删除整块适配器接管：保留 Windows 蓝牙栈，在 A2DP 音频设备边界接入编码与传输。候选实现的实际状态见 [原生后端调查](docs/XM6-NATIVE-CANDIDATES.md)。
+## Quick start (developers)
 
-已固定一个具有 Windows 10 目标结构且通过 WDK 编译的上游原型，源码和产物来源见 [native/](native/README.md)。下载产物经检查仍未签名、未安装、未进行真实耳机验证；它不是可直接交付的原生版本。
+```bash
+sh scripts/fetch-deps.sh
+ZIG=/path/to/zig sh scripts/zig-build.sh
+```
 
-边界：固定 990 kbps 需要足够的无线带宽；强干扰、DRM、独占输出、应用指定其他输出设备，以及视频唇音同步需要分别处理。这是 WinUSB 用户态蓝牙实现，当前没有为 Windows 新建原生耳机音频端点，也没有实现内核 A2DP 编码驱动。
+That builds and runs the unit tests and the encoder smoke test, and produces
+`oa2dpsvc.exe`, `oa2dpctl.exe` and `oa2dpgui.exe` — no Visual Studio needed. Drivers need
+Visual Studio + WDK: see [BUILDING.md](BUILDING.md).
 
-本仓库保留上游 MIT/Apache-2.0 授权与全部第三方说明。BTstack 依赖受其个人、非商业使用条款约束；本仓库源码许可证不替代该条款。详见 [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md)。
+```
+oa2dpctl list
+oa2dpctl set 0 codecs=ldac,aptx_hd,aac,sbc ldac_quality=hq sample_rate=96000
+oa2dpctl set 0 codecs=sbc channel_mode=dual sbc_bitpool=47
+oa2dpctl sbc-bitrate dual 47 44100
+oa2dpctl use 0          # switch headset 0 to OpenA2DP (admin, needs drivers)
+oa2dpctl restore all    # back to Windows' driver
+```
+
+## Contributing
+
+Read [CONTRIBUTING.md](CONTRIBUTING.md) and the clean-room rules in
+[docs/CLEAN_ROOM.md](docs/CLEAN_ROOM.md) first. The most valuable help right
+now: building the drivers with the WDK, and testing with real headsets.
+
+## Licence
+
+MIT for this repository's code ([LICENSE](LICENSE)). Codec libraries keep
+their own licences — **builds that include libopenaptx (aptX) must be
+distributed under GPL-3.0-or-later terms**. See [THIRD_PARTY.md](THIRD_PARTY.md).
+
+---
+
+## Português (resumo)
+
+OpenA2DP é um substituto de código aberto para o driver de áudio Bluetooth
+A2DP do Windows 10/11, com codecs de alta qualidade (SBC/SBC XQ, AAC, aptX,
+aptX HD, aptX LL, LDAC, FastStream) e ajuste fino por dispositivo. Foi feito
+em modelo *clean room*: só especificações do Bluetooth SIG, documentação
+pública e projetos open source — nenhum binário proprietário foi aberto.
+
+Estado atual: pré-alfa. O núcleo do protocolo e todos os codificadores
+funcionam e têm testes; os drivers de kernel estão escritos mas ainda não
+foram compilados com o WDK nem testados com um fone. Veja o
+[roadmap](docs/ROADMAP.md) e como contribuir em [CONTRIBUTING.md](CONTRIBUTING.md).

@@ -1,3 +1,0 @@
-// bluecaster-core.exe resources: v1's icon (tray and file) and manifest
-1 RT_MANIFEST "../../../../app/resources/app.manifest"
-101 ICON "../../../../app/resources/app.ico"

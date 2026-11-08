@@ -1,57 +1,35 @@
-# Contributing to BlueCaster
+# Contributing
 
-Thank you for your interest in contributing to BlueCaster!
+Thanks for helping! A few rules keep the project legally clean and easy to
+review.
 
-## Bug Reports & Feature Requests
+## Clean room
 
-Feel free to [open an issue](https://github.com/SeiyaFunaokaJP/BlueCaster/issues/new/choose) — you'll find a few simple forms there:
+Read [docs/CLEAN_ROOM.md](docs/CLEAN_ROOM.md). In short: never disassemble or
+unpack proprietary A2DP drivers or their installers, and cite the public
+source (spec section, Microsoft doc, open-source file) for protocol or codec
+behaviour you implement. PRs without a source for new protocol behaviour will
+be asked for one.
 
-- **Bug report**: Something isn't working right.
-- **Device compatibility report**: How BlueCaster works with your adapter and headphones. "It just works" reports are welcome too!
-- **Feature request**: Ideas big or small.
+## Workflow
 
-You don't need to fill in every field. Rough reports are fine, and I'll ask if I need more details.
+1. Open an issue for anything bigger than a bug fix, referencing the SPEC ID
+   (e.g. "F4.3").
+2. Keep `core/` portable: no Windows headers, no allocation, C99.
+3. Every change to `core/` comes with unit tests; run `sh scripts/zig-build.sh`
+   (or `ctest`) before pushing.
+4. Kernel code: run Code Analysis and Static Driver Verifier; describe how you
+   tested (headset model, Windows build, radio).
+5. Update the status column in `docs/SPEC.md` when a requirement changes state.
 
-For connection problems, **Copy Diagnostics** on the **Diagnostics** screen puts the version, adapter, connection flow and recent log on the clipboard, ready to paste into the report.
+## Style
 
-## Building from Source
+Match the surrounding code: 4-space indent, `oa2dp_` prefix in C, Windows
+naming (`Oa2dp...`) in drivers, `snake_case` in the service. Format with
+`clang-format` defaults close to the existing files.
 
-For detailed setup instructions, see the [GitHub Pages](https://seiyafunaokajp.github.io/BlueCaster/) documentation.
+## Testing with headsets
 
-### Quick Start
-
-**Requirements:**
-
-- Windows 10/11 (x64 or ARM64)
-- Rust (stable, 1.90 or later)
-- Visual Studio 2022 or later with C++ desktop workload (for the C libraries)
-- Node.js 22 and pnpm (for the UI)
-- Git
-- PowerShell 7 (for `build.ps1`) and Python 3.11 or later (for `tools/check_lang.py`)
-
-**Build:**
-
-```bash
-git clone --recursive https://github.com/SeiyaFunaokaJP/BlueCaster.git
-cd BlueCaster
-cargo build --release -p bluecaster-core-exe -p bluecaster-driver
-cd app/src/ui && pnpm install && pnpm build && cd ../../..
-cargo build --release -p bluecaster-ui
-```
-
-**Before a pull request:** `cargo fmt --all`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, and in `app/src/ui` `pnpm exec tsc --noEmit` and `pnpm exec vitest run`; `pwsh ./build.ps1 -Test` builds and runs them all (with `cargo fmt --check`), plus `python tools/check_lang.py`. The design is described in [docs/v2-design.md](docs/v2-design.md) (Japanese).
-
-## Pull Requests
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/my-feature`)
-3. Commit your changes (`git commit -m "Add my feature"`)
-4. Push to the branch (`git push origin feature/my-feature`)
-5. Open a [Pull Request](https://github.com/SeiyaFunaokaJP/BlueCaster/pulls)
-
-## License
-
-BlueCaster is dual-licensed under the [Apache License 2.0](LICENSE-APACHE) or the
-[MIT License](LICENSE-MIT), at the user's option. Unless you explicitly state
-otherwise, any contribution you submit is provided under the same dual license
-(`Apache-2.0 OR MIT`), without any additional terms or conditions.
+Report results in the "Headset compatibility" discussion: model, codecs
+offered (`oa2dpsvc --console` logs them), codec chosen, any dropouts, and the
+`oa2dpctl status` output.
