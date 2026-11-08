@@ -77,6 +77,7 @@ typedef enum _OA2DP_EVENT_TYPE {
     Oa2dpEventChannelOpened = 1,  /* remote opened a channel to us */
     Oa2dpEventChannelClosed = 2,
     Oa2dpEventDeviceGone = 3,
+    Oa2dpEventStateLost = 4,     /* event backlog overflow: reconnect, never guess state */
 } OA2DP_EVENT_TYPE;
 
 typedef struct _OA2DP_EVENT {

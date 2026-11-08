@@ -4,7 +4,6 @@
 #pragma once
 
 #include <atomic>
-#include <condition_variable>
 #include <cstdint>
 #include <deque>
 #include <map>
@@ -50,7 +49,6 @@ private:
 
     // threads
     void main_loop();
-    void rx_loop();
     void event_loop();
     void audio_loop();
     void stream_loop();
@@ -91,6 +89,7 @@ private:
     std::map<int, oa2dp_avdtp_event> responses_;   // label -> response
     uint16_t sig_mtu_ = 0, media_mtu_ = 0;
     bool sig_open_ = false, media_open_ = false;
+    bool rx_failed_ = false;   // owned by the signalling thread
 
     // negotiated stream
     uint8_t local_seid_ = 0;
@@ -107,14 +106,12 @@ private:
 
     // thread plumbing
     HANDLE stop_event_ = nullptr;
-    std::thread main_, rx_, ev_, audio_thr_, stream_;
+    HANDLE wake_event_ = nullptr;
+    std::thread main_, ev_, audio_thr_, stream_;
     std::mutex mu_;
-    std::condition_variable cv_;
-    std::deque<std::vector<uint8_t>> rx_q_;
     std::deque<Command> cmd_q_;
     std::atomic<bool> stopping_{false};
     std::atomic<bool> streaming_{false};
-    std::atomic<bool> rx_active_{false};
 
     // shared with the stream thread
     std::atomic<uint32_t> delay_report_us_{0};

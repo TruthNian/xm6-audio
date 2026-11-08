@@ -204,8 +204,11 @@ static void IndicationCallback(_In_ PVOID Context, _In_ INDICATION_CODE Indicati
         WDF_OBJECT_ATTRIBUTES attrs;
         WDFWORKITEM wi;
         WdfSpinLockAcquire(dev->Lock);
-        if (ch->State == ChannelOpen)
-            ch->State = ChannelClosing;
+        if (ch->State != ChannelOpen) {
+            WdfSpinLockRelease(dev->Lock);
+            break;
+        }
+        ch->State = ChannelClosing;
         WdfSpinLockRelease(dev->Lock);
         /* Closing the handle needs PASSIVE_LEVEL; do it from a work item. */
         WDF_WORKITEM_CONFIG_INIT(&cfg, CloseWorkItem);
@@ -215,7 +218,8 @@ static void IndicationCallback(_In_ PVOID Context, _In_ INDICATION_CODE Indicati
         if (NT_SUCCESS(WdfWorkItemCreate(&cfg, &attrs, &wi))) {
             Oa2dpGetWorkItem(wi)->Channel = ch;
             WdfWorkItemEnqueue(wi);
-        }
+        } else
+            Oa2dpPostEvent(dev, Oa2dpEventChannelClosed, ch);
         break;
     }
     default:
@@ -227,6 +231,7 @@ static VOID CloseWorkItem(_In_ WDFWORKITEM WorkItem)
 {
     OA2DP_CHANNEL *ch = Oa2dpGetWorkItem(WorkItem)->Channel;
     (void)Oa2dpCloseChannel(ch->Dev, ch->Kind);
+    Oa2dpPostEvent(ch->Dev, Oa2dpEventChannelClosed, ch);
     WdfObjectDelete(WorkItem);
 }
 
@@ -424,7 +429,9 @@ NTSTATUS Oa2dpCloseChannel(_In_ OA2DP_DEVICE_CONTEXT *dev, _In_ OA2DP_CHANNEL_KI
     ch->State = ChannelClosed;
     ch->Handle = NULL;
     WdfSpinLockRelease(dev->Lock);
-    Oa2dpPostEvent(dev, Oa2dpEventChannelClosed, ch);
+    /* The caller already knows a local close completed. Only the remote
+     * disconnect work item emits a notification; a local echo could tear
+     * down a new connection after the service reconnects. */
     return status;
 }
 

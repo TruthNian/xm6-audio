@@ -124,27 +124,85 @@ NTSTATUS Oa2dpEvtReleaseHardware(_In_ WDFDEVICE Device, _In_ WDFCMRESLIST Transl
 
 /* ------------------------------------------------------------------------ */
 
-VOID Oa2dpPostEvent(_In_ OA2DP_DEVICE_CONTEXT *dev, _In_ ULONG type, _In_ OA2DP_CHANNEL *ch)
+static VOID CompleteEvent(_In_ WDFREQUEST req, _In_ const OA2DP_EVENT *event)
 {
-    WDFREQUEST req;
     OA2DP_EVENT *ev;
-    /* Events with nobody waiting are dropped; the service re-reads state
-     * with GET_INFO / OPEN_CHANNEL after it re-arms WAIT_EVENT. */
-    if (!NT_SUCCESS(WdfIoQueueRetrieveNextRequest(dev->EventQueue, &req)))
-        return;
     if (!NT_SUCCESS(WdfRequestRetrieveOutputBuffer(req, sizeof(*ev), (PVOID *)&ev, NULL))) {
         WdfRequestComplete(req, STATUS_BUFFER_TOO_SMALL);
         return;
     }
-    RtlZeroMemory(ev, sizeof(*ev));
-    ev->Type = type;
-    if (ch) {
-        ev->Kind = ch->Kind;
-        ev->Channel.Kind = ch->Kind;
-        ev->Channel.OutMtu = ch->OutMtu;
-        ev->Channel.InMtu = ch->InMtu;
-    }
+    *ev = *event;
     WdfRequestCompleteWithInformation(req, STATUS_SUCCESS, sizeof(*ev));
+}
+
+VOID Oa2dpPostEvent(_In_ OA2DP_DEVICE_CONTEXT *dev, _In_ ULONG type, _In_ OA2DP_CHANNEL *ch)
+{
+    WDFREQUEST req = NULL;
+    OA2DP_EVENT event;
+    RtlZeroMemory(&event, sizeof(event));
+    event.Type = type;
+    WdfSpinLockAcquire(dev->Lock);
+    if (ch) {
+        event.Kind = ch->Kind;
+        event.Channel.Kind = ch->Kind;
+        event.Channel.OutMtu = ch->OutMtu;
+        event.Channel.InMtu = ch->InMtu;
+    }
+    if (!NT_SUCCESS(WdfIoQueueRetrieveNextRequest(dev->EventQueue, &req))) {
+        /* Buffer gaps between waits, including connections arriving before
+         * the service starts. GET_INFO does not replay channel transitions. */
+        if (type == Oa2dpEventDeviceGone) {
+            dev->EventHead = dev->EventCount = 0;
+            dev->EventOverflow = FALSE;
+        }
+        if (!dev->EventOverflow) {
+            if (dev->EventCount == OA2DP_EVENT_CAPACITY) {
+                dev->EventHead = dev->EventCount = 0;
+                dev->EventOverflow = TRUE;
+            } else {
+                ULONG tail = (dev->EventHead + dev->EventCount) % OA2DP_EVENT_CAPACITY;
+                dev->Events[tail] = event;
+                ++dev->EventCount;
+            }
+        }
+        req = NULL;
+    }
+    WdfSpinLockRelease(dev->Lock);
+    if (req)
+        CompleteEvent(req, &event);
+}
+
+static VOID WaitEvent(_In_ OA2DP_DEVICE_CONTEXT *dev, _In_ WDFREQUEST request)
+{
+    OA2DP_EVENT event;
+    OA2DP_EVENT *out;
+    BOOLEAN deliver = FALSE;
+    NTSTATUS status = WdfRequestRetrieveOutputBuffer(request, sizeof(*out), (PVOID *)&out, NULL);
+    if (!NT_SUCCESS(status)) {
+        WdfRequestComplete(request, status);
+        return;
+    }
+    WdfSpinLockAcquire(dev->Lock);
+    if (dev->EventOverflow) {
+        RtlZeroMemory(&event, sizeof(event));
+        event.Type = Oa2dpEventStateLost;
+        dev->EventOverflow = FALSE;
+        deliver = TRUE;
+    } else if (dev->EventCount) {
+        event = dev->Events[dev->EventHead];
+        dev->EventHead = (dev->EventHead + 1) % OA2DP_EVENT_CAPACITY;
+        --dev->EventCount;
+        deliver = TRUE;
+    } else {
+        /* Forwarding and checking the backlog share the producer's lock:
+         * no notification can fall between the check and waiter insertion. */
+        status = WdfRequestForwardToIoQueue(request, dev->EventQueue);
+    }
+    WdfSpinLockRelease(dev->Lock);
+    if (deliver)
+        CompleteEvent(request, &event);
+    else if (!NT_SUCCESS(status))
+        WdfRequestComplete(request, status);
 }
 
 NTSTATUS Oa2dpCreateAudioChild(_In_ OA2DP_DEVICE_CONTEXT *dev)
@@ -264,10 +322,8 @@ VOID Oa2dpEvtIoDeviceControl(_In_ WDFQUEUE Queue, _In_ WDFREQUEST Request,
     }
 
     case IOCTL_OA2DP_WAIT_EVENT:
-        status = WdfRequestForwardToIoQueue(Request, dev->EventQueue);
-        if (NT_SUCCESS(status))
-            return;
-        break;
+        WaitEvent(dev, Request);
+        return;
 
     case IOCTL_OA2DP_GET_TX_STATE: {
         OA2DP_TX_STATE *out;

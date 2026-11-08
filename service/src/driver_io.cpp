@@ -100,18 +100,28 @@ DWORD DriverHandle::ioctl(DWORD code, const void *in, DWORD in_len, void *out, D
 
 bool Transport::open(const std::wstring &path)
 {
+    close();
     if (!dev_.open(path))
         return false;
     for (auto &s : slots_) {
         s.event = CreateEventW(nullptr, TRUE, FALSE, nullptr);
-        if (!s.event)
+        if (!s.event) {
+            close();
             return false;
+        }
     }
+    receive_.event = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    if (!receive_.event) {
+        close();
+        return false;
+    }
+    next_slot_ = 0;
     return true;
 }
 
 void Transport::close()
 {
+    cancel_receive();
     drain_media();
     dev_.close();
     for (auto &s : slots_) {
@@ -120,6 +130,9 @@ void Transport::close()
         s.event = nullptr;
         s.busy = false;
     }
+    if (receive_.event)
+        CloseHandle(receive_.event);
+    receive_.event = nullptr;
 }
 
 bool Transport::get_info(OA2DP_DEVICE_INFO &out)
@@ -145,6 +158,8 @@ bool Transport::open_channel(OA2DP_CHANNEL_KIND kind, OA2DP_CHANNEL_INFO &out)
 
 bool Transport::close_channel(OA2DP_CHANNEL_KIND kind)
 {
+    if (kind == Oa2dpChannelSignaling)
+        cancel_receive();
     OA2DP_CLOSE_CHANNEL_IN in{};
     in.Kind = kind;
     return dev_.ioctl(IOCTL_OA2DP_CLOSE_CHANNEL, &in, sizeof(in), nullptr, 0, nullptr, 5000) ==
@@ -162,6 +177,36 @@ bool Transport::send(OA2DP_CHANNEL_KIND kind, const uint8_t *data, size_t len)
 int Transport::recv(OA2DP_CHANNEL_KIND kind, uint8_t *buf, size_t cap, DWORD timeout_ms,
                     HANDLE cancel)
 {
+    if (kind == Oa2dpChannelSignaling) {
+        Slot &s = receive_;
+        if (!s.busy) {
+            s.data.resize(cap);
+            s.ov = OVERLAPPED{};
+            s.ov.hEvent = s.event;
+            ResetEvent(s.event);
+            static OA2DP_RECV_IN in = {Oa2dpChannelSignaling};
+            if (!DeviceIoControl(dev_.get(), IOCTL_OA2DP_RECV, &in, sizeof(in), s.data.data(),
+                                 static_cast<DWORD>(cap), nullptr, &s.ov) &&
+                GetLastError() != ERROR_IO_PENDING)
+                return -1;
+            s.busy = true;
+        }
+        HANDLE waits[2] = {s.event, cancel};
+        DWORD wait = WaitForMultipleObjects(cancel ? 2 : 1, waits, FALSE, timeout_ms);
+        if (wait == WAIT_TIMEOUT)
+            return 0;  // keep the request and its buffer alive between pumps
+        if (wait != WAIT_OBJECT_0) {
+            cancel_receive();
+            return -1;
+        }
+        DWORD bytes = 0;
+        BOOL ok = GetOverlappedResult(dev_.get(), &s.ov, &bytes, FALSE);
+        s.busy = false;
+        if (!ok || bytes > cap)
+            return -1;
+        std::copy_n(s.data.data(), bytes, buf);
+        return static_cast<int>(bytes);
+    }
     OA2DP_RECV_IN in{};
     in.Kind = kind;
     DWORD n = 0;
@@ -172,6 +217,18 @@ int Transport::recv(OA2DP_CHANNEL_KIND kind, uint8_t *buf, size_t cap, DWORD tim
     if (err != ERROR_SUCCESS)
         return -1;
     return static_cast<int>(n);
+}
+
+void Transport::cancel_receive()
+{
+    if (receive_.busy && dev_.is_open()) {
+        CancelIoEx(dev_.get(), &receive_.ov);
+        DWORD bytes = 0;
+        GetOverlappedResult(dev_.get(), &receive_.ov, &bytes, TRUE);
+    }
+    receive_.busy = false;
+    if (receive_.event)
+        ResetEvent(receive_.event);
 }
 
 bool Transport::wait_event(OA2DP_EVENT &ev, HANDLE cancel)

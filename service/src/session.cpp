@@ -46,6 +46,7 @@ std::string codec_label(const oa2dp_codec_caps &c) { return oa2dp_codec_name(c.c
 Session::Session(std::wstring transport_path) : path_(std::move(transport_path))
 {
     stop_event_ = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    wake_event_ = CreateEventW(nullptr, FALSE, FALSE, nullptr);
 }
 
 Session::~Session()
@@ -53,6 +54,8 @@ Session::~Session()
     stop();
     if (stop_event_)
         CloseHandle(stop_event_);
+    if (wake_event_)
+        CloseHandle(wake_event_);
 }
 
 void Session::start()
@@ -64,7 +67,6 @@ void Session::stop()
 {
     stopping_ = true;
     SetEvent(stop_event_);
-    cv_.notify_all();
     tr_.cancel_all();
     audio_.cancel_all();
     if (main_.joinable())
@@ -77,31 +79,12 @@ void Session::post(const Command &c)
         std::lock_guard<std::mutex> lock(mu_);
         cmd_q_.push_back(c);
     }
-    cv_.notify_all();
+    SetEvent(wake_event_);
 }
 
 // ---------------------------------------------------------------------------
 // Helper threads
 // ---------------------------------------------------------------------------
-
-void Session::rx_loop()
-{
-    std::vector<uint8_t> buf(OA2DP_AVDTP_MSG_MAX + 3);
-    while (!stopping_) {
-        if (!rx_active_) {
-            WaitForSingleObject(stop_event_, 50);
-            continue;
-        }
-        int n = tr_.recv(Oa2dpChannelSignaling, buf.data(), buf.size(), 500, stop_event_);
-        if (n > 0) {
-            std::lock_guard<std::mutex> lock(mu_);
-            rx_q_.emplace_back(buf.begin(), buf.begin() + n);
-            cv_.notify_all();
-        } else if (n < 0 && rx_active_.exchange(false) && !stopping_) {
-            post({Cmd::SignalingClosed});
-        }
-    }
-}
 
 void Session::event_loop()
 {
@@ -123,6 +106,10 @@ void Session::event_loop()
             break;
         case Oa2dpEventDeviceGone:
             c.cmd = Cmd::DeviceGone;
+            break;
+        case Oa2dpEventStateLost:
+            LOGE("Bluetooth event backlog overflow; reconnecting to recover state");
+            c.cmd = Cmd::StreamFailed;
             break;
         default:
             continue;
@@ -179,18 +166,20 @@ uint8_t Session::cb_check(void *user, uint8_t seid, const oa2dp_avdtp_caps *cfg,
 
 bool Session::pump(DWORD timeout_ms)
 {
-    std::vector<uint8_t> pdu;
-    {
-        std::unique_lock<std::mutex> lock(mu_);
-        if (!cv_.wait_for(lock, std::chrono::milliseconds(timeout_ms),
-                          [this] { return !rx_q_.empty() || stopping_; }))
-            return false;
-        if (stopping_ || rx_q_.empty())
-            return false;
-        pdu = std::move(rx_q_.front());
-        rx_q_.pop_front();
+    if (!sig_open_ || rx_failed_ || stopping_)
+        return false;
+    uint8_t pdu[OA2DP_AVDTP_MSG_MAX + 3];
+    int n = tr_.recv(Oa2dpChannelSignaling, pdu, sizeof(pdu), timeout_ms, stop_event_);
+    if (n <= 0) {
+        if (n < 0 && !stopping_) {
+            rx_failed_ = true;
+            post({Cmd::SignalingClosed});
+        }
+        return false;
     }
-    oa2dp_avdtp_input(&av_, pdu.data(), pdu.size());
+    // Receive, protocol state and reconnect are serialized. No old receive
+    // worker or queued PDU can outlive a channel and affect its replacement.
+    oa2dp_avdtp_input(&av_, pdu, static_cast<size_t>(n));
     return true;
 }
 
@@ -199,7 +188,7 @@ bool Session::request(int label, oa2dp_avdtp_event &out, DWORD timeout_ms)
     if (label < 0)
         return false;
     DWORD deadline = GetTickCount() + timeout_ms;
-    while (!stopping_ && sig_open_) {
+    while (!stopping_ && sig_open_ && !rx_failed_) {
         auto it = responses_.find(label);
         if (it != responses_.end()) {
             out = it->second;
@@ -271,7 +260,7 @@ bool Session::connect_signaling()
     sig_mtu_ = ci.OutMtu;
     av_.out_mtu = sig_mtu_ < 48 ? 48 : sig_mtu_;
     sig_open_ = true;
-    rx_active_ = true;
+    rx_failed_ = false;
     LOGI("signalling channel open (MTU %u)", sig_mtu_);
     return true;
 }
@@ -493,10 +482,10 @@ void Session::teardown(const char *why)
     if (media_open_)
         tr_.close_channel(Oa2dpChannelMedia);
     media_open_ = false;
-    rx_active_ = false;
     if (sig_open_)
         tr_.close_channel(Oa2dpChannelSignaling);
     sig_open_ = false;
+    rx_failed_ = false;
     oa2dp_avdtp_reset(&av_);
     responses_.clear();
     local_seid_ = 0;
@@ -511,8 +500,7 @@ void Session::handle(const Command &c)
         sig_mtu_ = c.channel.OutMtu;
         av_.out_mtu = sig_mtu_ < 48 ? 48 : sig_mtu_;
         sig_open_ = true;
-        rx_active_ = true;
-        cv_.notify_all();
+        rx_failed_ = false;
         init_deadline_ = GetTickCount() + kPeerConfigGraceMs;
         LOGI("headset opened signalling");
         break;
@@ -622,7 +610,6 @@ void Session::main_loop()
         return;
     }
 
-    rx_ = std::thread([this] { rx_loop(); });
     ev_ = std::thread([this] { event_loop(); });
     audio_thr_ = std::thread([this] { audio_loop(); });
     publish("connecting");
@@ -663,11 +650,10 @@ void Session::main_loop()
         while (pump(0)) {
         }
         std::deque<Command> cmds;
+        HANDLE waits[] = {stop_event_, wake_event_, tr_.signaling_event()};
+        WaitForMultipleObjects(sig_open_ && !rx_failed_ ? 3 : 2, waits, FALSE, 100);
         {
-            std::unique_lock<std::mutex> lock(mu_);
-            cv_.wait_for(lock, std::chrono::milliseconds(100), [this] {
-                return !rx_q_.empty() || !cmd_q_.empty() || stopping_;
-            });
+            std::lock_guard<std::mutex> lock(mu_);
             cmds.swap(cmd_q_);
         }
         for (const auto &c : cmds)
@@ -681,7 +667,7 @@ void Session::main_loop()
     SetEvent(stop_event_);
     tr_.cancel_all();
     audio_.cancel_all();
-    for (std::thread *t : {&rx_, &ev_, &audio_thr_})
+    for (std::thread *t : {&ev_, &audio_thr_})
         if (t->joinable())
             t->join();
     audio_.close();

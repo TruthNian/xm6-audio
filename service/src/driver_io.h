@@ -41,6 +41,7 @@ private:
 
 class Transport {
 public:
+    ~Transport() { close(); }
     bool open(const std::wstring &path);
     void close();
     void cancel_all() { dev_.cancel_all(); }
@@ -53,6 +54,7 @@ public:
     int recv(OA2DP_CHANNEL_KIND kind, uint8_t *buf, size_t cap, DWORD timeout_ms,
              HANDLE cancel = nullptr);
     bool wait_event(OA2DP_EVENT &ev, HANDLE cancel);
+    HANDLE signaling_event() const { return receive_.event; }
     bool tx_state(OA2DP_TX_STATE &out);
 
     // Media: up to kSlots sends in flight; blocks when all are busy.
@@ -68,9 +70,11 @@ private:
         bool busy = false;
     };
     bool finish_slot(Slot &s, DWORD timeout_ms);
+    void cancel_receive();
 
     DriverHandle dev_;
     std::array<Slot, kSlots> slots_{};
+    Slot receive_{};  // one persistent overlapped signalling receive
     size_t next_slot_ = 0;
 };
 

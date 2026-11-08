@@ -27,6 +27,7 @@
 #define OA2DP_DEFAULT_SIGNALING_MTU 672
 #define OA2DP_DEFAULT_MEDIA_MTU 1005
 #define OA2DP_INCOMING_QUEUE_DEPTH 50
+#define OA2DP_EVENT_CAPACITY 32
 
 typedef struct _OA2DP_DEVICE_CONTEXT OA2DP_DEVICE_CONTEXT;
 
@@ -60,6 +61,10 @@ struct _OA2DP_DEVICE_CONTEXT {
 
     WDFQUEUE DefaultQueue;
     WDFQUEUE EventQueue;           /* pended WAIT_EVENT requests */
+    OA2DP_EVENT Events[OA2DP_EVENT_CAPACITY]; /* protected by Lock */
+    ULONG EventHead;
+    ULONG EventCount;
+    BOOLEAN EventOverflow;
 
     BOOLEAN PsmRegistered;
     L2CAP_SERVER_HANDLE ServerHandle;
