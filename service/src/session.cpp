@@ -746,8 +746,15 @@ void Session::stream_loop()
     const uint8_t encoder_bits = oa2dp_codec_pcm_bits(&cfg, &set);
     const uint32_t spc = info.samples_per_call;
     const uint32_t spf = info.samples_per_frame ? info.samples_per_frame : spc;
+    oa2dp_ring_format ring_format{};
+    if (oa2dp_ring_snapshot(ring, &ring_format) != OA2DP_OK || ring_format.channels > 2) {
+        LOGE("PCM format unavailable when starting the encoder");
+        oa2dp_encoder_destroy(enc);
+        post({Cmd::StreamFailed});
+        return;
+    }
     oa2dp_ring_discard(ring);
-    const uint16_t ring_ch = ring->channels;
+    const uint16_t ring_ch = ring_format.channels;
     const uint8_t ch = info.channels;
 
     std::vector<uint8_t> pkt(media_mtu_), out(info.max_output);
@@ -783,23 +790,32 @@ void Session::stream_loop()
     };
 
     while (streaming_) {
-        if (ring->sample_rate != info.sample_rate || ring->channels != ring_ch) {
+        if (ring_format.sample_rate != info.sample_rate) {
             // The format event will suspend/reconfigure this stream. Never
             // encode a new rate with the previous rate's timing meanwhile.
             Sleep(2);
             continue;
         }
-        if (oa2dp_ring_readable(ring) < spc) {
+        uint32_t read_frames = 0;
+        const bool floating = ring_format.format == OA2DP_RING_FMT_FLOAT32;
+        void *input = floating ? static_cast<void *>(fbuf.data()) : static_cast<void *>(pcm.data());
+        const size_t input_bytes = floating ? fbuf.size() * sizeof(float) : pcm.size() * sizeof(int32_t);
+        const int read_status = oa2dp_ring_read(ring, &ring_format, input, input_bytes, spc, &read_frames);
+        if (read_status == OA2DP_ERR_BUSY || read_status == OA2DP_ERR_STATE ||
+            (read_status == OA2DP_OK && !read_frames)) {
             Sleep(2);
             continue;
         }
+        if (read_status != OA2DP_OK || read_frames != spc) {
+            LOGE("invalid PCM block; stopping the encoder");
+            post({Cmd::StreamFailed});
+            break;
+        }
         // Ring -> int32 24-bit -> codec channel layout.
-        if (ring->format == OA2DP_RING_FMT_FLOAT32) {
-            oa2dp_ring_read(ring, fbuf.data(), spc);
+        if (floating) {
             oa2dp_pcm_float_to_quantized24(fbuf.data(), pcm.data(), fbuf.size(), encoder_bits);
         } else {
-            oa2dp_ring_read(ring, pcm.data(), spc);
-            if (ring->format == OA2DP_RING_FMT_S32_FULL)
+            if (ring_format.format == OA2DP_RING_FMT_S32_FULL)
                 oa2dp_pcm_s32_to_quantized24(pcm.data(), pcm.data(), static_cast<size_t>(spc) * ring_ch,
                                             encoder_bits);
         }

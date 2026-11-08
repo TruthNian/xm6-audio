@@ -134,15 +134,8 @@ BOOLEAN Oa2dpRingSetFormat(_Inout_ OA2DP_AUDIO_RING *r, _In_ ULONG rate, _In_ US
     if (channels == 0 || channels > OA2DP_RING_MAX_CHANNELS)
         return FALSE;
     KeAcquireSpinLock(&r->Lock, &irql);
-    if (r->Ring && (r->Ring->sample_rate != rate || r->Ring->channels != channels ||
-                    r->Ring->format != format)) {
-        r->Ring->sample_rate = rate;
-        r->Ring->channels = channels;
-        r->Ring->format = format;
-        KeMemoryBarrier();
-        InterlockedOr((volatile LONG *)&r->Ring->flags, OA2DP_RING_FLAG_FORMAT_CHANGED);
-        changed = TRUE;
-    }
+    if (r->Ring)
+        changed = oa2dp_ring_set_format(r->Ring, rate, channels, format) > 0;
     KeReleaseSpinLock(&r->Lock, irql);
     return changed;
 }

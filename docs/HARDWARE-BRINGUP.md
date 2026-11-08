@@ -23,6 +23,12 @@ Reference: [Microsoft's proposed-format and attribute handling sample](https://g
 
 The standalone recovery source also coordinates codec-service shutdown before rebinding the selected headset. Offline tests exercise the actual script with fake service/PnP/install APIs, including stop failures/timeouts, binding failure, service absence, restart failure and pending reboot. This reduces the recovery-time mapping teardown race; it does not establish safety for unexpected PnP removal during playback, which remains a lifecycle acceptance item.
 
+## Offline format-transition correction in 0.3.10
+
+The service previously allocated input buffers from one channel count, then copied PCM using a mutable ring header. A mono-to-stereo change could therefore size a later copy differently from its destination. Previously queued samples could also be interpreted with the new sample rate or representation.
+
+Ring protocol v2 uses fixed storage slots, atomic format generations, a first-frame boundary and bounded complete-block reads. The service encodes only a block matching one stable snapshot. Deterministic regressions cover obsolete mono buffers, representation/rate changes, wrapped storage, old-format backlog and incomplete encoder blocks. A separate two-thread memory-only test alternates 10,000 formats and checks generation-tagged samples and destination boundaries. Linux CI applies AddressSanitizer/UndefinedBehaviorSanitizer to both C and C++ tests. The kernel target explicitly selects the kernel-only ring code path, excluding user-mode floating-point conversion helpers. This source has not been deployed or exercised on the headset.
+
 ## Do not load candidate 0.3.5
 
 A local crash dump identified a descriptor ABI error introduced in 0.3.5: its stream data-range pointer table used a serialized `KSMULTIPLE_ITEM` where PortCls expects a pointer-based `KSATTRIBUTE_LIST`. The kernel interpreted a length as a pointer while enumerating the attributes. The developer trial was rolled back to the Windows inbox driver.

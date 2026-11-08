@@ -4,14 +4,13 @@
 #include <string.h>
 
 #if defined(_MSC_VER)
+#include <intrin.h>
 #if defined(_KERNEL_MODE)
 #include <wdm.h>
 #define OA2DP_FENCE() KeMemoryBarrier()
 #elif defined(_M_ARM64)
-#include <intrin.h>
 #define OA2DP_FENCE() __dmb(_ARM64_BARRIER_ISH)
 #else
-#include <intrin.h>
 #define OA2DP_FENCE() __faststorefence()
 #endif
 #else
@@ -28,6 +27,57 @@ static size_t frame_bytes(const oa2dp_pcm_ring *r)
     return (size_t)r->channels * 4;
 }
 
+/* Interlocked operations also work across the kernel/user mapping. On other
+ * platforms use compiler atomics, including for metadata read by a seqlock. */
+static uint32_t load32(const volatile uint32_t *p)
+{
+#if defined(_MSC_VER)
+    return (uint32_t)_InterlockedCompareExchange((volatile long *)p, 0, 0);
+#else
+    return __atomic_load_n(p, __ATOMIC_SEQ_CST);
+#endif
+}
+static uint16_t load16(const uint16_t *p)
+{
+#if defined(_MSC_VER)
+    return (uint16_t)_InterlockedCompareExchange16((volatile short *)p, 0, 0);
+#else
+    return __atomic_load_n(p, __ATOMIC_SEQ_CST);
+#endif
+}
+static uint64_t load64(const volatile uint64_t *p)
+{
+#if defined(_MSC_VER)
+    return (uint64_t)_InterlockedCompareExchange64((volatile long long *)p, 0, 0);
+#else
+    return __atomic_load_n(p, __ATOMIC_SEQ_CST);
+#endif
+}
+static void store32(volatile uint32_t *p, uint32_t value)
+{
+#if defined(_MSC_VER)
+    (void)_InterlockedExchange((volatile long *)p, (long)value);
+#else
+    __atomic_store_n(p, value, __ATOMIC_SEQ_CST);
+#endif
+}
+static void store16(uint16_t *p, uint16_t value)
+{
+#if defined(_MSC_VER)
+    (void)_InterlockedExchange16((volatile short *)p, (short)value);
+#else
+    __atomic_store_n(p, value, __ATOMIC_SEQ_CST);
+#endif
+}
+static void store64(volatile uint64_t *p, uint64_t value)
+{
+#if defined(_MSC_VER)
+    (void)_InterlockedExchange64((volatile long long *)p, (long long)value);
+#else
+    __atomic_store_n(p, value, __ATOMIC_SEQ_CST);
+#endif
+}
+
 size_t oa2dp_ring_bytes(uint32_t capacity, uint16_t channels)
 {
     return sizeof(oa2dp_pcm_ring) + (size_t)capacity * channels * 4;
@@ -36,7 +86,7 @@ size_t oa2dp_ring_bytes(uint32_t capacity, uint16_t channels)
 int oa2dp_ring_init(oa2dp_pcm_ring *r, uint32_t capacity, uint32_t sample_rate,
                     uint16_t channels, uint16_t format)
 {
-    if (!r || capacity == 0 || (capacity & (capacity - 1)) || channels == 0 ||
+    if (!r || !sample_rate || capacity == 0 || (capacity & (capacity - 1)) || channels == 0 ||
         channels > 8 || format > OA2DP_RING_FMT_S32_FULL)
         return OA2DP_ERR_INVAL;
     memset(r, 0, sizeof(*r));
@@ -45,6 +95,7 @@ int oa2dp_ring_init(oa2dp_pcm_ring *r, uint32_t capacity, uint32_t sample_rate,
     r->capacity = capacity;
     r->sample_rate = sample_rate;
     r->channels = channels;
+    r->storage_channels = channels;
     r->format = format;
     return OA2DP_OK;
 }
@@ -53,45 +104,102 @@ int oa2dp_ring_validate(const oa2dp_pcm_ring *r, size_t mapped)
 {
     if (!r || mapped < sizeof(*r))
         return OA2DP_ERR_INVAL;
-    if (r->magic != OA2DP_RING_MAGIC || r->version != OA2DP_RING_VERSION)
-        return OA2DP_ERR_PROTO;
-    if (r->capacity == 0 || (r->capacity & (r->capacity - 1)) || r->channels == 0 ||
-        r->channels > 8 || r->format > OA2DP_RING_FMT_S32_FULL)
-        return OA2DP_ERR_PROTO;
-    if (oa2dp_ring_bytes(r->capacity, r->channels) > mapped)
+    oa2dp_ring_format format;
+    int status = oa2dp_ring_snapshot(r, &format);
+    if (status != OA2DP_OK)
+        return status;
+    if (oa2dp_ring_bytes(format.capacity, format.storage_channels) > mapped)
         return OA2DP_ERR_PROTO;
     return OA2DP_OK;
 }
 
+int oa2dp_ring_snapshot(const oa2dp_pcm_ring *r, oa2dp_ring_format *format)
+{
+    if (!r || !format)
+        return OA2DP_ERR_INVAL;
+    if (r->magic != OA2DP_RING_MAGIC || r->version != OA2DP_RING_VERSION)
+        return OA2DP_ERR_PROTO;
+    oa2dp_ring_format value;
+    memset(&value, 0, sizeof(value));
+    value.sequence = load32(&r->format_sequence);
+    if (value.sequence & 1)
+        return OA2DP_ERR_BUSY;
+    value.sample_rate = load32(&r->sample_rate);
+    value.channels = load16(&r->channels);
+    value.format = load16(&r->format);
+    value.start_pos = load64(&r->format_start_pos);
+    value.capacity = r->capacity;
+    value.storage_channels = r->storage_channels;
+    if (load32(&r->format_sequence) != value.sequence)
+        return OA2DP_ERR_BUSY;
+    if (!value.sample_rate || !value.capacity || (value.capacity & (value.capacity - 1)) || !value.channels ||
+        value.storage_channels < value.channels || value.storage_channels > 8 ||
+        value.format > OA2DP_RING_FMT_S32_FULL)
+        return OA2DP_ERR_PROTO;
+    *format = value;
+    return OA2DP_OK;
+}
+
+int oa2dp_ring_set_format(oa2dp_pcm_ring *r, uint32_t rate, uint16_t channels, uint16_t format)
+{
+    if (!r || !rate || !channels || channels > r->storage_channels ||
+        format > OA2DP_RING_FMT_S32_FULL)
+        return OA2DP_ERR_INVAL;
+    if (r->sample_rate == rate && r->channels == channels && r->format == format)
+        return 0;
+    uint32_t sequence = load32(&r->format_sequence);
+    if (sequence & 1)
+        return OA2DP_ERR_BUSY;
+    store32(&r->format_sequence, sequence + 1);
+    store32(&r->sample_rate, rate);
+    store16(&r->channels, channels);
+    store16(&r->format, format);
+    store64(&r->format_start_pos, load64(&r->write_pos));
+#if defined(_MSC_VER)
+    (void)_InterlockedOr((volatile long *)&r->flags, OA2DP_RING_FLAG_FORMAT_CHANGED);
+#else
+    (void)__atomic_fetch_or(&r->flags, OA2DP_RING_FLAG_FORMAT_CHANGED, __ATOMIC_SEQ_CST);
+#endif
+    store32(&r->format_sequence, sequence + 2);
+    return 1;
+}
+
 uint32_t oa2dp_ring_readable(const oa2dp_pcm_ring *r)
 {
-    uint64_t w = r->write_pos;
-    OA2DP_FENCE();
-    uint64_t d = w - r->read_pos;
+    oa2dp_ring_format format;
+    if (oa2dp_ring_snapshot(r, &format) != OA2DP_OK)
+        return 0;
+    uint64_t rd = load64(&r->read_pos);
+    if (rd < format.start_pos)
+        rd = format.start_pos;
+    uint64_t d = load64(&r->write_pos) - rd;
     return d > r->capacity ? r->capacity : (uint32_t)d;
 }
 
 uint32_t oa2dp_ring_writable(const oa2dp_pcm_ring *r)
 {
-    uint64_t rd = r->read_pos;
-    OA2DP_FENCE();
-    uint64_t d = r->write_pos - rd;
+    uint64_t rd = load64(&r->read_pos);
+    uint64_t d = load64(&r->write_pos) - rd;
     return d >= r->capacity ? 0 : (uint32_t)(r->capacity - d);
 }
 
 uint32_t oa2dp_ring_discard(oa2dp_pcm_ring *r)
 {
-    uint64_t w = r->write_pos;
-    OA2DP_FENCE();
-    uint64_t discarded = w - r->read_pos;
-    r->read_pos = w;
-    OA2DP_FENCE();
+    uint64_t w = load64(&r->write_pos);
+    uint64_t discarded = w - load64(&r->read_pos);
+    store64(&r->read_pos, w);
     return discarded > r->capacity ? r->capacity : (uint32_t)discarded;
 }
 
 static void copy_in(oa2dp_pcm_ring *r, uint64_t pos, const uint8_t *src, uint32_t frames)
 {
     size_t fb = frame_bytes(r);
+    size_t stride = (size_t)r->storage_channels * 4;
+    if (stride != fb) {
+        for (uint32_t i = 0; i < frames; ++i)
+            memcpy(ring_data(r) + ((pos + i) & (r->capacity - 1)) * stride, src + i * fb, fb);
+        return;
+    }
     uint32_t slot = (uint32_t)(pos & (r->capacity - 1));
     uint32_t first = r->capacity - slot;
     if (first > frames)
@@ -101,11 +209,18 @@ static void copy_in(oa2dp_pcm_ring *r, uint64_t pos, const uint8_t *src, uint32_
         memcpy(ring_data(r), src + first * fb, (frames - first) * fb);
 }
 
-static void copy_out(const oa2dp_pcm_ring *r, uint64_t pos, uint8_t *dst, uint32_t frames)
+static void copy_out(const oa2dp_pcm_ring *r, const oa2dp_ring_format *format,
+                      uint64_t pos, uint8_t *dst, uint32_t frames)
 {
-    size_t fb = frame_bytes(r);
-    uint32_t slot = (uint32_t)(pos & (r->capacity - 1));
-    uint32_t first = r->capacity - slot;
+    size_t fb = (size_t)format->channels * 4;
+    size_t stride = (size_t)format->storage_channels * 4;
+    if (stride != fb) {
+        for (uint32_t i = 0; i < frames; ++i)
+            memcpy(dst + i * fb, ring_data(r) + ((pos + i) & (format->capacity - 1)) * stride, fb);
+        return;
+    }
+    uint32_t slot = (uint32_t)(pos & (format->capacity - 1));
+    uint32_t first = format->capacity - slot;
     if (first > frames)
         first = frames;
     memcpy(dst, ring_data(r) + slot * fb, first * fb);
@@ -120,23 +235,51 @@ uint32_t oa2dp_ring_write(oa2dp_pcm_ring *r, const void *data, uint32_t frames)
     if (n < frames)
         r->overruns += frames - n;
     if (n) {
-        copy_in(r, r->write_pos, (const uint8_t *)data, n);
+        uint64_t pos = load64(&r->write_pos);
+        copy_in(r, pos, (const uint8_t *)data, n);
         OA2DP_FENCE(); /* data visible before the new position */
-        r->write_pos += n;
+        store64(&r->write_pos, pos + n);
     }
     return n;
 }
 
-uint32_t oa2dp_ring_read(oa2dp_pcm_ring *r, void *data, uint32_t frames)
+int oa2dp_ring_read(oa2dp_pcm_ring *r, const oa2dp_ring_format *format,
+                    void *data, size_t data_bytes, uint32_t frames, uint32_t *read_frames)
 {
-    uint32_t avail = oa2dp_ring_readable(r);
-    uint32_t n = frames < avail ? frames : avail;
-    if (n) {
-        copy_out(r, r->read_pos, (uint8_t *)data, n);
-        OA2DP_FENCE(); /* finish reading before releasing the slots */
-        r->read_pos += n;
-    }
-    return n;
+    if (!read_frames)
+        return OA2DP_ERR_INVAL;
+    *read_frames = 0;
+    if (!format || (!data && frames))
+        return OA2DP_ERR_INVAL;
+    oa2dp_ring_format current;
+    int status = oa2dp_ring_snapshot(r, &current);
+    if (status != OA2DP_OK)
+        return status;
+    if (current.sequence != format->sequence || current.sample_rate != format->sample_rate ||
+        current.channels != format->channels || current.format != format->format ||
+        current.capacity != format->capacity || current.storage_channels != format->storage_channels ||
+        current.start_pos != format->start_pos)
+        return OA2DP_ERR_STATE;
+    size_t fb = (size_t)format->channels * 4;
+    if (frames > format->capacity || frames > data_bytes / fb)
+        return OA2DP_ERR_INVAL;
+    uint64_t rd = load64(&r->read_pos);
+    if (rd < format->start_pos)
+        rd = format->start_pos;
+    uint64_t w = load64(&r->write_pos);
+    if (w < rd || w - rd > format->capacity)
+        return OA2DP_ERR_PROTO;
+    uint32_t n = w - rd >= frames ? frames : 0;
+    if (n)
+        copy_out(r, format, rd, (uint8_t *)data, n);
+    OA2DP_FENCE();
+    if (load32(&r->format_sequence) != format->sequence)
+        return OA2DP_ERR_STATE;
+    // Even an empty new-format block releases the obsolete backlog, so a full
+    // ring from the previous format cannot starve its new producer.
+    store64(&r->read_pos, rd + n);
+    *read_frames = n;
+    return OA2DP_OK;
 }
 
 /* Consumer-only; kept out of oa2dpaudio.sys, which never touches floats. */

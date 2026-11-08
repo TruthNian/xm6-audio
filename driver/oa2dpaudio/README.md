@@ -54,8 +54,13 @@ generator, file saving, KMDF.
    16/24-bit PCM becomes 24-bit values in int32 (`OA2DP_RING_FMT_S32`).
    `OA2DP_RING_FLAG_RUNNING` follows `SetState(RUN)` / leaving RUN.
 4. **Format change.** The ring is allocated once for 2 channels and never
-   moves. A stream with another format rewrites only the header
-   (rate, channels, sample format; positions keep counting), sets
+   moves. Ring protocol v2 keeps the two-channel storage stride fixed, even
+   for mono PCM. A format transaction updates rate/channels/representation,
+   an atomic sequence and the first position of the new format. Counters
+   keep growing; the consumer discards preceding backlog instead of treating
+   it as the new format. A bounded complete-block read uses one snapshot and
+   rejects a sequence change before publishing the block to the encoder.
+   A format update also sets
    `OA2DP_RING_FLAG_FORMAT_CHANGED` and completes a pending
    `IOCTL_OA2DP_AUDIO_WAIT_FORMAT`. WAIT_FORMAT also completes on RUN
    (`Running = 1`) and when leaving RUN (`Running = 0`), which the service

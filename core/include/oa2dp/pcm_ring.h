@@ -19,7 +19,7 @@ extern "C" {
 #endif
 
 #define OA2DP_RING_MAGIC 0x4D435041u /* "APCM" */
-#define OA2DP_RING_VERSION 1
+#define OA2DP_RING_VERSION 2
 
 #define OA2DP_RING_FMT_FLOAT32 0 /* interleaved IEEE float, [-1, 1] */
 #define OA2DP_RING_FMT_S32 1     /* interleaved int32, 24-bit values */
@@ -45,11 +45,25 @@ typedef struct {
     OA2DP_ALIGN8 volatile uint64_t write_pos; /* written by producer only */
     OA2DP_ALIGN8 volatile uint64_t read_pos;  /* written by consumer only */
     OA2DP_ALIGN8 volatile uint64_t overruns;  /* frames dropped by producer */
-    uint32_t reserved[8];
-    /* followed by capacity * channels * 4 bytes of sample data */
+    volatile uint32_t format_sequence; /* odd during a producer format update */
+    uint16_t storage_channels; /* immutable slot stride; channels may be smaller */
+    uint16_t reserved0;
+    OA2DP_ALIGN8 volatile uint64_t format_start_pos; /* first frame of this format */
+    uint32_t reserved[4];
+    /* followed by capacity * storage_channels * 4 bytes of sample data */
 } oa2dp_pcm_ring;
 
-/* Total bytes to allocate for a ring (header + data). */
+typedef struct {
+    uint32_t sequence;
+    uint32_t sample_rate;
+    uint16_t channels;
+    uint16_t format;
+    uint32_t capacity;
+    uint16_t storage_channels;
+    uint64_t start_pos;
+} oa2dp_ring_format;
+
+/* Total bytes to allocate (header + fixed storage-channel slots). */
 size_t oa2dp_ring_bytes(uint32_t capacity, uint16_t channels);
 
 int oa2dp_ring_init(oa2dp_pcm_ring *r, uint32_t capacity, uint32_t sample_rate,
@@ -59,13 +73,25 @@ int oa2dp_ring_init(oa2dp_pcm_ring *r, uint32_t capacity, uint32_t sample_rate,
  * the mapping, so a hostile/buggy header cannot make us read past it. */
 int oa2dp_ring_validate(const oa2dp_pcm_ring *r, size_t mapped_bytes);
 
+/* Producer only, serialized with writes. Returns 1 changed, 0 unchanged, <0 error.
+ * Storage stride and counters do not change. Old-format backlog is not retyped. */
+int oa2dp_ring_set_format(oa2dp_pcm_ring *r, uint32_t sample_rate,
+                          uint16_t channels, uint16_t format);
+/* A stable format transaction, or ERR_BUSY while the producer changes it. */
+int oa2dp_ring_snapshot(const oa2dp_pcm_ring *r, oa2dp_ring_format *format);
+
 uint32_t oa2dp_ring_readable(const oa2dp_pcm_ring *r);
 uint32_t oa2dp_ring_writable(const oa2dp_pcm_ring *r);
 
 /* Producer: copy up to `frames`; returns frames written. */
 uint32_t oa2dp_ring_write(oa2dp_pcm_ring *r, const void *data, uint32_t frames);
-/* Consumer: copy up to `frames`; returns frames read. */
-uint32_t oa2dp_ring_read(oa2dp_pcm_ring *r, void *data, uint32_t frames);
+/* Consumer: a complete block, or zero frames if insufficient data is available.
+ * Never sizes a copy from a mutable format. ERR_STATE rejects an obsolete
+ * snapshot (including changes during the copy); the copied block must then be
+ * ignored. Partial current-format blocks stay queued; obsolete backlog is
+ * released even if the new format has no full block yet. Output is bounded. */
+int oa2dp_ring_read(oa2dp_pcm_ring *r, const oa2dp_ring_format *format,
+                    void *data, size_t data_bytes, uint32_t frames, uint32_t *read_frames);
 /* Consumer: discard accumulated PCM when a Bluetooth stream restarts. */
 uint32_t oa2dp_ring_discard(oa2dp_pcm_ring *r);
 

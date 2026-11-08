@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(XM6Audio VERSION 0.3.9 LANGUAGES C CXX)
+project(XM6Audio VERSION 0.3.10 LANGUAGES C CXX)
 
 set(CMAKE_C_STANDARD 99)
 set(CMAKE_CXX_STANDARD 17)
@@ -38,6 +38,11 @@ if(OA2DP_BUILD_TESTS)
         core/tests/test_pcm_format.c)
     target_link_libraries(oa2dp_tests PRIVATE oa2dp_core)
     add_test(NAME core COMMAND oa2dp_tests)
+    find_package(Threads REQUIRED)
+    add_executable(test_ring_concurrency core/tests/test_ring_concurrency.cpp)
+    target_link_libraries(test_ring_concurrency PRIVATE oa2dp_core Threads::Threads)
+    add_test(NAME ring_concurrency COMMAND test_ring_concurrency)
+    set_tests_properties(ring_concurrency PROPERTIES TIMEOUT 15)
 endif()
 
 if(NOT WIN32)
@@ -144,7 +149,8 @@ if(MSVC)
     # User-mode payload is self-contained; do not require a separate VC runtime
     # installer. Kernel targets keep the WDK's independent runtime settings.
     foreach(binary IN ITEMS oa2dp_core oa2dp_codecs oa2dp_manage oa2dpsvc oa2dpctl
-                            oa2dpgui ldac sbc oa2dp_tests test_encoders verify_native_metadata test_ks_attributes)
+                            oa2dpgui ldac sbc oa2dp_tests test_encoders verify_native_metadata test_ks_attributes
+                            test_ring_concurrency)
         if(TARGET ${binary})
             set_property(TARGET ${binary} PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
         endif()
@@ -172,7 +178,7 @@ if(OA2DP_BUILD_DRIVERS)
     target_include_directories(oa2dpaudio PRIVATE core/include driver/common)
     # _NEW_DELETE_OPERATORS_: we supply new/delete (newdelete.cpp), so the
     # WDK's stdunk.h must not define its own (as in SYSVAD).
-    target_compile_definitions(oa2dpaudio PRIVATE PC_IMPLEMENTATION UNICODE _UNICODE
+    target_compile_definitions(oa2dpaudio PRIVATE PC_IMPLEMENTATION UNICODE _UNICODE _KERNEL_MODE
         _NEW_DELETE_OPERATORS_)
     target_link_libraries(oa2dpaudio WDK::PORTCLS WDK::STDUNK WDK::LIBCNTPR)
     foreach(driver IN ITEMS oa2dp oa2dpaudio)
