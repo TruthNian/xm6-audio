@@ -26,17 +26,18 @@ foreach($file in @('bluecaster-core.exe','bluecaster-driver.exe','bluecaster.exe
     if([IO.Path]::GetFullPath($source) -ne [IO.Path]::GetFullPath($dest)){Copy-Item -LiteralPath $source -Destination $dest -Force}
 }
 function Set-Field($obj,[string]$name,$value){$obj | Add-Member -MemberType NoteProperty -Name $name -Value $value -Force}
+function Write-Json($obj,[string]$path){[IO.File]::WriteAllText($path,($obj | ConvertTo-Json -Depth 20),(New-Object Text.UTF8Encoding($false)))}
 $settingsPath=Join-Path $dir 'settings.json'
 $s=if(Test-Path -LiteralPath $settingsPath){Get-Content -LiteralPath $settingsPath -Raw | ConvertFrom-Json}else{[pscustomobject]@{schema_version=8}}
 $fields=@{start_with_windows=$true;start_minimized=$true;auto_reconnect=$true;volume_sync=$true;output_mute=$true;auto_codec=$false;check_updates_on_startup=$false;last_profile='XM6 LDAC 990';le_audio_experimental=$false;awaiting_vb_cable=$false}
 foreach($entry in $fields.GetEnumerator()){Set-Field $s $entry.Key $entry.Value}
-$s | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $settingsPath -Encoding utf8
+Write-Json $s $settingsPath
 $profilesPath=Join-Path $dir 'profiles.json'
 $p=if(Test-Path -LiteralPath $profilesPath){Get-Content -LiteralPath $profilesPath -Raw | ConvertFrom-Json}else{[pscustomobject]@{profiles=@()}}
 $keep=@($p.profiles | Where-Object {$_.name -ne 'XM6 LDAC 990'})
 $profile=[ordered]@{name='XM6 LDAC 990';device_address=$DeviceAddress.ToUpperInvariant();device_name='WH-1000XM6';codec='ldac';quality='hq';sample_rate=48000;bit_depth=24;abr=$false;codec_forced=$true;codec_fallback=$false;capture_mode='loopback';auto_switch_device=$false;le_audio=$false;codec_order=@('ldac')}
 Set-Field $p 'profiles' @($keep+[pscustomobject]$profile)
-$p | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $profilesPath -Encoding utf8
+Write-Json $p $profilesPath
 $null=New-Item -Path $run -Force
 $native=Join-Path $RuntimeDirectory 'bluecaster-core.exe'
 $null=New-ItemProperty -LiteralPath $run -Name BlueCaster -PropertyType String -Value ('"'+$native+'" --background') -Force
