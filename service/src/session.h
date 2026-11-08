@@ -97,6 +97,7 @@ private:
     oa2dp_codec_caps remote_caps_{};  // capabilities of the peer SEP we use
     bool have_remote_caps_ = false;
     bool audio_running_ = false;
+    OA2DP_FORMAT audio_format_{};  // actual Windows stream, not file metadata
     DWORD idle_since_ = 0;
     DWORD init_deadline_ = 0;      // become INT if the peer has not configured us by then
     DWORD next_reconnect_ = 0;

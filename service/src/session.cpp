@@ -62,8 +62,7 @@ void Session::start()
 
 void Session::stop()
 {
-    if (stopping_.exchange(true))
-        return;
+    stopping_ = true;
     SetEvent(stop_event_);
     cv_.notify_all();
     tr_.cancel_all();
@@ -174,7 +173,8 @@ uint8_t Session::cb_check(void *user, uint8_t seid, const oa2dp_avdtp_caps *cfg,
     if (it == s->sep_codec_.end() || oa2dp_codec_parse(cfg->codec, cfg->codec_len, &want) != OA2DP_OK)
         return OA2DP_A2DP_NOT_SUPPORTED_CODEC_TYPE;
     oa2dp_codec_local_caps(it->second, &local);
-    return oa2dp_codec_check_config(&local, &want);
+    const uint8_t capability_error = oa2dp_codec_check_config(&local, &want);
+    return capability_error ? capability_error : oa2dp_codec_check_settings(&want, &s->settings_);
 }
 
 bool Session::pump(DWORD timeout_ms)
@@ -334,7 +334,8 @@ bool Session::configure_as_initiator()
             if (c.caps.codec != want || !local)
                 continue;
             oa2dp_codec_caps cfg{};
-            if (oa2dp_codec_select(nullptr, &c.caps, &settings_, &cfg) != OA2DP_OK)
+            if (oa2dp_codec_select(nullptr, &c.caps, &settings_, &cfg) != OA2DP_OK ||
+                oa2dp_codec_check_settings(&cfg, &settings_) != 0)
                 continue;
             oa2dp_avdtp_caps avc = make_config_caps(cfg, c.delay_reporting);
             oa2dp_avdtp_event r{};
@@ -391,19 +392,28 @@ bool Session::setup_audio_endpoint()
             break;
         oa2dp_codec_caps probe = config_;
         bool ok = rate == current ||
-                  (have_remote_caps_ && settings_.follow_source_rate &&
+                  (have_remote_caps_ && settings_.follow_source_rate && !settings_.sample_rate &&
                    oa2dp_codec_set_rate(&probe, &remote_caps_, rate) == OA2DP_OK);
         if (!ok)
             continue;
-        if (rate == current)
-            list.Preferred = list.Count;
-        OA2DP_FORMAT &f = list.Formats[list.Count++];
-        f.SampleRate = rate;
-        f.Channels = oa2dp_codec_channels(&config_);
-        f.BitsPerSample = 32;  // float
+        static const USHORT depths[] = {32, 24, 16};
+        for (USHORT depth : depths) {
+            if (settings_.bits && depth != settings_.bits)
+                continue;
+            if (list.Count >= OA2DP_MAX_FORMATS)
+                break;
+            if (rate == current && depth == (settings_.bits ? settings_.bits : 32))
+                list.Preferred = list.Count;
+            OA2DP_FORMAT &f = list.Formats[list.Count++];
+            f.SampleRate = rate;
+            f.Channels = oa2dp_codec_channels(&config_);
+            f.BitsPerSample = depth;
+        }
     }
-    audio_.set_formats(list);
-    audio_.set_latency(0, delay_report_us_);
+    if (!audio_.set_formats(list) || !audio_.set_latency(0, delay_report_us_)) {
+        LOGE("cannot configure the native audio endpoint");
+        return false;
+    }
     return true;
 }
 
@@ -436,6 +446,8 @@ void Session::suspend_stream()
 
 void Session::reconfigure_rate(uint32_t rate)
 {
+    if (settings_.sample_rate && rate != settings_.sample_rate)
+        return;
     oa2dp_avdtp_sep *sep = oa2dp_avdtp_sep_get(&av_, local_seid_);
     if (!sep || rate == oa2dp_codec_sample_rate(&config_))
         return;
@@ -515,6 +527,11 @@ void Session::handle(const Command &c)
         SetEvent(stop_event_);
         break;
     case Cmd::AudioFormat:
+        if (streaming_ && (audio_format_.SampleRate != c.format.Format.SampleRate ||
+                          audio_format_.BitsPerSample != c.format.Format.BitsPerSample ||
+                          audio_format_.Channels != c.format.Format.Channels))
+            suspend_stream();
+        audio_format_ = c.format.Format;
         audio_running_ = c.format.Running != 0;
         if (audio_running_) {
             idle_since_ = 0;
@@ -541,7 +558,10 @@ void Session::publish(const char *state)
         status_.codec = codec_label(config_);
         status_.sample_rate = oa2dp_codec_sample_rate(&config_);
         status_.channels = oa2dp_codec_channels(&config_);
-        status_.bits = oa2dp_codec_pcm_bits(&config_, &settings_);
+        oa2dp_settings effective = settings_;
+        if (!effective.bits)
+            effective.bits = audio_format_.BitsPerSample == 16 ? 16 : 24;
+        status_.bits = oa2dp_codec_pcm_bits(&config_, &effective);
     }
     status_.delay_report_us = delay_report_us_;
     publish_status(info_.RemoteAddress, status_);
@@ -666,6 +686,13 @@ void Session::begin_streaming()
 {
     if (streaming_ || !media_open_ || !audio_ready_)
         return;
+    if (audio_format_.SampleRate &&
+        audio_format_.SampleRate != oa2dp_codec_sample_rate(&config_)) {
+        LOGE("endpoint rate %lu does not match negotiated codec rate; not sending mistimed audio",
+             audio_format_.SampleRate);
+        publish("format-mismatch");
+        return;
+    }
     if (stream_.joinable())  // previous loop exited on its own (encoder error)
         stream_.join();
     streaming_ = true;
@@ -675,8 +702,7 @@ void Session::begin_streaming()
 
 void Session::end_streaming()
 {
-    if (!streaming_.exchange(false))
-        return;
+    streaming_ = false;
     if (stream_.joinable())
         stream_.join();
     publish("open");
@@ -686,7 +712,9 @@ void Session::stream_loop()
 {
     SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
     const oa2dp_codec_caps cfg = config_;
-    const oa2dp_settings set = settings_;
+    oa2dp_settings set = settings_;
+    if (!set.bits)
+        set.bits = audio_format_.BitsPerSample == 16 ? 16 : 24;
     oa2dp_pcm_ring *ring = audio_.ring();
 
     oa2dp_encoder *enc = nullptr;
@@ -698,6 +726,7 @@ void Session::stream_loop()
     }
     const oa2dp_encoder_info info = enc->info;
     const uint32_t spc = info.samples_per_call;
+    const uint32_t spf = info.samples_per_frame ? info.samples_per_frame : spc;
     const uint16_t ring_ch = ring->channels;
     const uint8_t ch = info.channels;
 
@@ -754,16 +783,16 @@ void Session::stream_loop()
         if (len == 0 || frames == 0)
             continue;
 
-        int r = oa2dp_rtp_add_frames(&rtp, out.data(), len, frames, spc);
+        int r = oa2dp_rtp_add_frames(&rtp, out.data(), len, frames, spf);
         if (r == 0) {
             send_packet(oa2dp_rtp_flush(&rtp));
-            r = oa2dp_rtp_add_frames(&rtp, out.data(), len, frames, spc);
+            r = oa2dp_rtp_add_frames(&rtp, out.data(), len, frames, spf);
         }
         if (r == OA2DP_ERR_NOSPC) {  // larger than one packet: fragment
             send_packet(oa2dp_rtp_flush(&rtp));
             size_t off = 0;
             while (off < len) {
-                int n = oa2dp_rtp_fragment(&rtp, out.data(), len, spc, &off);
+                int n = oa2dp_rtp_fragment(&rtp, out.data(), len, spf * frames, &off);
                 if (n <= 0)
                     break;
                 send_packet(static_cast<size_t>(n));

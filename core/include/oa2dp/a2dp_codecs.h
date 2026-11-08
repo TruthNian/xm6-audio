@@ -211,6 +211,11 @@ int oa2dp_codec_select(const oa2dp_codec_caps *local,
 uint8_t oa2dp_codec_check_config(const oa2dp_codec_caps *local,
                                  const oa2dp_codec_caps *config);
 
+/* A valid peer configuration must also honor the explicit user policy.
+ * Returns an A2DP rejection code instead of accepting a silent downgrade. */
+uint8_t oa2dp_codec_check_settings(const oa2dp_codec_caps *config,
+                                   const oa2dp_settings *settings);
+
 /* Among `count` remote endpoints, choose the first codec in the user's
  * priority list that both sides support. Returns the index into `remote`
  * or OA2DP_ERR_NOTFOUND. */

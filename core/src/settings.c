@@ -39,14 +39,16 @@ oa2dp_codec_id oa2dp_codec_from_key(const char *key, size_t len)
 void oa2dp_settings_default(oa2dp_settings *s)
 {
     static const oa2dp_codec_id order[] = {
-        OA2DP_CODEC_LDAC, OA2DP_CODEC_APTX_HD, OA2DP_CODEC_APTX,
-        OA2DP_CODEC_AAC,  OA2DP_CODEC_SBC};
+        OA2DP_CODEC_LDAC};
     memset(s, 0, sizeof(*s));
     memcpy(s->priority, order, sizeof(order));
     s->priority_count = (uint8_t)(sizeof(order) / sizeof(order[0]));
-    s->adaptive_bitrate = true;
+    s->sample_rate = 0;
+    s->bits = 0;
+    s->chmode = OA2DP_CHMODE_STEREO;
+    s->adaptive_bitrate = false;
     s->follow_source_rate = true;
-    s->ldac_quality = OA2DP_LDAC_ABR;
+    s->ldac_quality = OA2DP_LDAC_HQ;
 }
 
 /* --- parsing ----------------------------------------------------------- */

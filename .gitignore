@@ -4,3 +4,15 @@
 *.user
 .vs/
 /dist/
+*.pfx
+*.key
+*.password.txt
+*.sys
+*.cat
+*.pdb
+*.exe
+*.cab
+*.etl
+*.pklg
+*.log
+*.local.json

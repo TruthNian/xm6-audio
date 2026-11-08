@@ -9,7 +9,7 @@
 #ifndef OA2DP_IOCTL_H
 #define OA2DP_IOCTL_H
 
-#define OA2DP_IOCTL_VERSION 1
+#define OA2DP_IOCTL_VERSION 2
 
 /* {8EF6C0BE-1B48-409A-A689-9F9FD9E82E12} transport (oa2dp.sys) */
 DEFINE_GUID(GUID_DEVINTERFACE_OA2DP_TRANSPORT, 0x8ef6c0be, 0x1b48, 0x409a, 0xa6, 0x89,
@@ -104,7 +104,7 @@ typedef struct _OA2DP_RING_MAPPING {
     ULONGLONG Bytes;
 } OA2DP_RING_MAPPING;
 
-#define OA2DP_MAX_FORMATS 8
+#define OA2DP_MAX_FORMATS 18
 typedef struct _OA2DP_FORMAT {
     ULONG SampleRate;
     USHORT Channels;

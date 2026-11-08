@@ -610,6 +610,22 @@ int oa2dp_codec_select(const oa2dp_codec_caps *local,
     }
 }
 
+uint8_t oa2dp_codec_check_settings(const oa2dp_codec_caps *config, const oa2dp_settings *settings)
+{
+    bool enabled = false;
+    for (uint8_t i = 0; i < settings->priority_count; ++i)
+        enabled = enabled || settings->priority[i] == config->codec;
+    if (!enabled)
+        return OA2DP_A2DP_NOT_SUPPORTED_CODEC_TYPE;
+    if (settings->sample_rate && oa2dp_codec_sample_rate(config) != settings->sample_rate)
+        return OA2DP_A2DP_NOT_SUPPORTED_SAMPLING_FREQUENCY;
+    if (settings->chmode == OA2DP_CHMODE_STEREO && oa2dp_codec_channels(config) != 2)
+        return OA2DP_A2DP_NOT_SUPPORTED_CHANNEL_MODE;
+    if (settings->bits && oa2dp_codec_pcm_bits(config, settings) != settings->bits)
+        return OA2DP_A2DP_NOT_SUPPORTED_CODEC_PARAMETER;
+    return 0;
+}
+
 int oa2dp_codec_choose_best(const oa2dp_codec_caps *remote, size_t count,
                             const oa2dp_settings *s, oa2dp_codec_caps *config)
 {

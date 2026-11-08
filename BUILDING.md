@@ -1,102 +1,54 @@
-# Building
+# Building XM6 Audio
 
-## 1. Dependencies
+Clone with `--recurse-submodules`, or run:
 
-```bash
-sh scripts/fetch-deps.sh   # libsbc, libopenaptx, libldac, FindWDK -> third_party/
+```sh
+git submodule update --init --recursive
 ```
 
-Any adapter whose library is missing is simply left out of the build.
+The gitlinks pin Sony/AOSP libldac and FindWDK. The default Windows build requires LDAC and does not silently produce a codec-less service. SBC/aptX dependencies are not downloaded. The optional developer GUI is off by default.
 
-## 2. User-mode parts with Zig (fastest, verified)
+## Windows user mode
 
-[Zig](https://ziglang.org/download/) ships clang plus MinGW-w64 headers, so it
-builds the Windows user-mode binaries from any OS:
+Visual Studio 2019/2022 with C++ and Windows SDK:
 
-```bash
-ZIG=/path/to/zig sh scripts/zig-build.sh
+```powershell
+cmake -S . -B build/native -G "Visual Studio 17 2022" -A x64 -DXM6_BUILD_GUI=OFF
+cmake --build build/native --config Release --parallel 2
+ctest --test-dir build/native -C Release --output-on-failure
 ```
 
-Output in `build/zig/`: `oa2dp_tests.exe` (host), `test_encoders.exe`,
-`oa2dpsvc.exe`, `oa2dpctl.exe`, `oa2dpgui.exe` (keep it next to `oa2dpctl.exe`,
-which it starts elevated to switch drivers and save settings). This is the configuration used to verify the
-current code (zig 0.15.2).
+For VS2019 use `-G "Visual Studio 16 2019"`. The pinned libldac has two MSVC portability adaptations outside the submodule: an unused-parameter annotation and an otherwise unused POSIX include. No codec algorithm is changed.
 
-Tip on Windows: if the zig path is very long, call it through its 8.3 short
-path or move it to e.g. `C:\zig` — zig re-spawns itself and Windows' 260-char
-path limit applies.
+Outputs include `oa2dpsvc.exe`, `oa2dpctl.exe`, and `ldac.dll`. Keep the DLL alongside the service. User-mode CMake builds with MSVC; the older optional Zig script is retained for upstream development but is not the release pipeline.
 
-## 3. CMake (Visual Studio or clang-cl)
+## Kernel drivers and unsigned candidate
 
-```bash
-cmake -S . -B build/vs -G "Visual Studio 17 2022" -A x64
-cmake --build build/vs --config Release
-ctest --test-dir build/vs -C Release
+Install the matching WDK on a development machine, or use the Windows CI job:
+
+```powershell
+cmake -S . -B build/native -G "Visual Studio 17 2022" -A x64 -DOA2DP_BUILD_DRIVERS=ON
+cmake --build build/native --config Release --parallel 2
+ctest --test-dir build/native -C Release --output-on-failure
+./scripts/package-native.ps1 -BuildDirectory build/native -OutputDirectory out/native
 ```
 
-Not yet verified with MSVC. Known gaps: libsbc's headers use POSIX
-`ssize_t` (patched with a define in CMakeLists.txt); if MSVC rejects other
-GCC-isms in libsbc, use `-T ClangCL`.
+The packager requires InfVerif and Inf2Cat to pass; includes both SYS/INF/CAT/PDB sets, user-mode files and licenses; and records source/dependency commits and SHA-256 hashes. Its CAT files are **unsigned**. The manifest proves integrity relative to that build, not Microsoft trust or hardware compatibility. Symbols are included for the signing provider and crash analysis.
 
-Core tests only (Linux/macOS, CI):
+The two drivers and service must come from the same build: IOCTL version 2 expands the native format list to support integer 16/24 and float32 at supported rates. Kernel compile success does not establish hardware correctness.
 
-```bash
-cmake -S . -B build/host && cmake --build build/host && ctest --test-dir build/host
+## Deployment and recovery
+
+Follow [docs/SIGNING.md](docs/SIGNING.md). A Microsoft-signed returned package is a prerequisite. `scripts/install.ps1` checks the signature before making changes and binds only the selected XM6 A2DP service; it does not change the radio driver or pairing. It is a deployment prototype and has not yet been exercised on hardware.
+
+The previous development installer that created trusted test certificates and requested relaxed boot protection has been removed. Never run a test-signed package on the listening machine.
+
+## Portable protocol checks
+
+```sh
+cmake -S . -B build/core
+cmake --build build/core
+ctest --test-dir build/core --output-on-failure
 ```
 
-## 4. Drivers (Visual Studio + WDK)
-
-Requirements: Visual Studio 2022, Windows SDK and **WDK** of the same
-version, Spectre-mitigated libraries.
-
-```bash
-cmake -S . -B build/drv -G "Visual Studio 17 2022" -A x64 -DOA2DP_BUILD_DRIVERS=ON
-cmake --build build/drv --config Release --target oa2dp oa2dpaudio
-```
-
-Both drivers build with WDK 10.0.26100 (MSVC 2022, FindWDK); the
-`drivers` job in `.github/workflows/ci.yml` does exactly this on
-`windows-2022` and runs Inf2Cat. `oa2dpaudio.inf` needs Windows 10 2004 or
-later.
-
-### Without a local toolchain: CI artifacts
-
-Every push builds two artifacts: `drivers-x64` (`oa2dp\` and `oa2dpaudio\`
-folders with `.sys`, `.inf` and an unsigned `.cat`) and `user-mode-x64`
-(`oa2dpsvc.exe`, `oa2dpctl.exe`, `oa2dpgui.exe`, codecs linked in).
-
-```bash
-gh run download <run-id> -D dist
-```
-
-### Test install (development machines only)
-
-1. Turn **Secure Boot off** in the firmware setup (test-signed drivers do
-   not load with it on). If BitLocker protects the system drive, suspend it
-   first (`manage-bde -protectors -disable C: -RebootCount 2`) or have the
-   recovery key at hand.
-2. From an elevated prompt: `bcdedit /set testsigning on`, then reboot.
-3. From an elevated PowerShell in the repository:
-   `.\scripts\install-dev.ps1` — creates and trusts a local test
-   certificate, signs the drivers and catalogs from `dist\`, adds both
-   packages to the driver store, installs the service and tools to
-   `%ProgramFiles%\OpenA2DP` and starts the service.
-4. `oa2dpctl list`, then `oa2dpctl use <n>` (or the GUI) switches one
-   headset to OpenA2DP. The service log is
-   `%ProgramData%\OpenA2DP\oa2dpsvc.log`.
-
-`.\scripts\install-dev.ps1 -Uninstall` restores Windows' driver on every
-headset and removes the service, the packages and the certificate; then
-`bcdedit /set testsigning off` and Secure Boot back on.
-
-For end users the drivers must be **attestation-signed** through the
-Microsoft Partner Center (needs an EV code-signing certificate). That is a
-project-level step for releases.
-
-## 5. Running the service by hand
-
-```
-oa2dpsvc.exe --console
-```
-
-Logs go to the console and `%ProgramData%\OpenA2DP\oa2dpsvc.log`.
+The Windows encoder check runs the actual pinned library and verifies represented frame durations and HQ frame sizes at 44.1, 48, 88.2 and 96 kHz. At 88.2/96 kHz an LDAC codec frame represents 256 samples although an API encode call still consumes 128; RTP uses codec-frame duration. Initial encoder buffering is excluded from the bitrate calculation. This check neither transmits Bluetooth audio nor proves the headset is audible.

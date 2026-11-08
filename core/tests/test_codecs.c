@@ -21,6 +21,7 @@ static void sbc(void)
     CHECK_EQ(remote.u.sbc.max_bitpool, 53);
 
     oa2dp_settings_default(&s);
+    s.chmode = OA2DP_CHMODE_AUTO; /* Test generic SBC auto-selection, not the XM6 profile. */
     CHECK_EQ(oa2dp_codec_select(NULL, &remote, &s, &cfg), OA2DP_OK);
     CHECK_EQ(cfg.u.sbc.freq, OA2DP_SBC_FREQ_48000);
     CHECK_EQ(cfg.u.sbc.chmode, OA2DP_SBC_CH_JOINT);
@@ -236,6 +237,24 @@ static void best(void)
 
 void test_codecs(void)
 {
+    /* Auto accepts the source rate; explicit fixed settings still reject a
+     * fallback. Use the actual XM6 capability octets. */
+    const uint8_t xm6[] = {0x00, 0xFF, 0x2D, 0x01, 0, 0, 0xAA, 0x00, 0x3C, 0x07};
+    oa2dp_codec_caps remote, config;
+    oa2dp_settings policy;
+    oa2dp_settings_default(&policy);
+    CHECK_EQ(oa2dp_codec_parse(xm6, sizeof(xm6), &remote), OA2DP_OK);
+    CHECK_EQ(oa2dp_codec_select(NULL, &remote, &policy, &config), OA2DP_OK);
+    CHECK_EQ(oa2dp_codec_check_settings(&config, &policy), 0);
+    config.u.ldac.freq = OA2DP_LDAC_FREQ_44100;
+    CHECK_EQ(oa2dp_codec_check_settings(&config, &policy), 0);
+    policy.sample_rate = 48000;
+    CHECK_EQ(oa2dp_codec_check_settings(&config, &policy), OA2DP_A2DP_NOT_SUPPORTED_SAMPLING_FREQUENCY);
+    config.u.ldac.freq = OA2DP_LDAC_FREQ_48000;
+    config.u.ldac.chmode = OA2DP_LDAC_CH_MONO;
+    CHECK_EQ(oa2dp_codec_check_settings(&config, &policy), OA2DP_A2DP_NOT_SUPPORTED_CHANNEL_MODE);
+    config.codec = OA2DP_CODEC_SBC;
+    CHECK_EQ(oa2dp_codec_check_settings(&config, &policy), OA2DP_A2DP_NOT_SUPPORTED_CODEC_TYPE);
     sbc();
     aac();
     vendor();

@@ -29,7 +29,9 @@ typedef struct {
 #ifdef OA2DP_WITH_LDAC_ABR
     HANDLE_LDAC_ABR abr;
 #endif
-    int32_t *pcm32;
+    void *pcm;
+    bool input16;
+    uint32_t expected_frame_bytes;
 } ldac_enc;
 
 static int eqmid_for(oa2dp_ldac_quality q)
@@ -48,9 +50,16 @@ static int ldac_enc_encode(oa2dp_encoder *e, const int32_t *pcm, uint8_t *out, s
     int used = 0, size = 0, nframes = 0;
     if (cap < LDAC_MAX_OUTPUT)
         return OA2DP_ERR_NOSPC;
-    oa2dp_pcm_to_s32(pcm, x->pcm32, (size_t)e->info.samples_per_call * e->info.channels);
-    if (ldacBT_encode(x->h, x->pcm32, &used, out, &size, &nframes) < 0)
+    size_t samples = (size_t)e->info.samples_per_call * e->info.channels;
+    if (x->input16)
+        oa2dp_pcm_to_s16(pcm, x->pcm, samples);
+    else
+        oa2dp_pcm_to_s32(pcm, x->pcm, samples);
+    if (ldacBT_encode(x->h, x->pcm, &used, out, &size, &nframes) < 0)
         return OA2DP_ERR_IO;
+    if (size && x->expected_frame_bytes &&
+        (size != nframes * (int)x->expected_frame_bytes))
+        return OA2DP_ERR_UNSUPPORTED;
     *out_len = (size_t)size;
     *frames = (uint8_t)nframes;
     return OA2DP_OK;
@@ -85,7 +94,7 @@ static void ldac_enc_destroy(oa2dp_encoder *e)
         ldacBT_close_handle(x->h);
         ldacBT_free_handle(x->h);
     }
-    free(x->pcm32);
+    free(x->pcm);
     free(x);
 }
 
@@ -107,20 +116,24 @@ int oa2dp_ldac_encoder_create(const oa2dp_codec_caps *c, const oa2dp_settings *s
     if (!x)
         return OA2DP_ERR_NOSPC;
     uint8_t ch = oa2dp_codec_channels(c);
-    x->pcm32 = malloc(sizeof(int32_t) * LDAC_SAMPLES_PER_CALL * ch);
+    x->input16 = s->bits == 16;
+    x->pcm = malloc((x->input16 ? sizeof(int16_t) : sizeof(int32_t)) * LDAC_SAMPLES_PER_CALL * ch);
     x->h = ldacBT_get_handle();
-    if (!x->pcm32 || !x->h) {
+    if (!x->pcm || !x->h) {
         ldac_enc_destroy(&x->base);
         return OA2DP_ERR_NOSPC;
     }
     /* The channel-mode bits of the A2DP element equal LDACBT_CHANNEL_MODE_*. */
     if (ldacBT_init_handle_encode(x->h, (int)mtu, eqmid_for(s->ldac_quality),
-                                  c->u.ldac.chmode, LDACBT_SMPL_FMT_S32,
+                                  c->u.ldac.chmode, x->input16 ? LDACBT_SMPL_FMT_S16 : LDACBT_SMPL_FMT_S32,
                                   (int)oa2dp_codec_sample_rate(c)) < 0) {
         ldac_enc_destroy(&x->base);
         return OA2DP_ERR_INVAL;
     }
 
+    if (s->ldac_quality == OA2DP_LDAC_HQ && ch == 2) {
+        x->expected_frame_bytes = 330;
+    }
     bool abr = s->ldac_quality == OA2DP_LDAC_ABR;
 #ifdef OA2DP_WITH_LDAC_ABR
     if (abr && s->adaptive_bitrate) {
@@ -139,6 +152,7 @@ int oa2dp_ldac_encoder_create(const oa2dp_codec_caps *c, const oa2dp_settings *s
     x->base.info.sample_rate = oa2dp_codec_sample_rate(c);
     x->base.info.channels = ch;
     x->base.info.samples_per_call = LDAC_SAMPLES_PER_CALL;
+    x->base.info.samples_per_frame = x->base.info.sample_rate > 48000 ? 256 : 128;
     x->base.info.max_output = LDAC_MAX_OUTPUT;
     /* Without the ABR library, fall back to the generic controller over
      * HQ/SQ/MQ when the user picked "adaptive". */

@@ -1,0 +1,6 @@
+[submodule "xm6-native-libldac"]
+	path = third_party/libldac
+	url = https://android.googlesource.com/platform/external/libldac
+[submodule "xm6-native-findwdk"]
+	path = third_party/FindWDK
+	url = https://github.com/SergiusTheBest/FindWDK.git

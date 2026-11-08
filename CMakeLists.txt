@@ -1,12 +1,17 @@
 cmake_minimum_required(VERSION 3.21)
-project(OpenA2DP VERSION 0.1.0 LANGUAGES C CXX)
+project(XM6Audio VERSION 0.2.0 LANGUAGES C CXX)
 
 set(CMAKE_C_STANDARD 99)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+if(MSVC)
+    add_compile_options(/utf-8)
+endif()
 
 option(OA2DP_BUILD_TESTS "Build unit tests" ON)
 option(OA2DP_BUILD_DRIVERS "Build kernel drivers (needs the WDK and FindWDK)" OFF)
+option(XM6_BUILD_GUI "Build the optional developer settings window" OFF)
+option(XM6_REQUIRE_LDAC "Fail a Windows build without the pinned LDAC encoder" ON)
 
 set(OA2DP_THIRD_PARTY ${CMAKE_CURRENT_SOURCE_DIR}/third_party)
 
@@ -79,8 +84,14 @@ if(EXISTS ${OA2DP_THIRD_PARTY}/libldac/src/ldacBT.c)
     target_include_directories(ldac PUBLIC ${OA2DP_THIRD_PARTY}/libldac/inc
         ${OA2DP_THIRD_PARTY}/libldac/abr/inc)
     set_target_properties(ldac PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
+    if(MSVC)
+        target_compile_options(ldac PRIVATE /FI${CMAKE_CURRENT_SOURCE_DIR}/codecs/msvc-compat.h)
+        target_include_directories(ldac PRIVATE codecs/msvc)
+    endif()
     target_compile_definitions(oa2dp_codecs PUBLIC OA2DP_WITH_LIBLDAC OA2DP_WITH_LDAC_ABR)
     target_link_libraries(oa2dp_codecs PUBLIC ldac)
+elseif(XM6_REQUIRE_LDAC)
+    message(FATAL_ERROR "LDAC is required. Run git submodule update --init --recursive first.")
 endif()
 
 if(OA2DP_BUILD_TESTS)
@@ -91,6 +102,7 @@ endif()
 
 # --- service ----------------------------------------------------------------
 add_executable(oa2dpsvc
+    native-version.rc
     service/src/main.cpp service/src/session.cpp service/src/driver_io.cpp
     service/src/settings_store.cpp service/src/log.cpp)
 target_include_directories(oa2dpsvc PRIVATE driver/common)
@@ -103,9 +115,10 @@ target_include_directories(oa2dp_manage PUBLIC tools/common)
 target_compile_definitions(oa2dp_manage PUBLIC UNICODE _UNICODE)
 target_link_libraries(oa2dp_manage PUBLIC oa2dp_core setupapi bthprops advapi32)
 
-add_executable(oa2dpctl tools/oa2dpctl/oa2dpctl.cpp)
+add_executable(oa2dpctl tools/oa2dpctl/oa2dpctl.cpp native-version.rc)
 target_link_libraries(oa2dpctl PRIVATE oa2dp_manage)
 
+if(XM6_BUILD_GUI)
 add_executable(oa2dpgui WIN32 tools/oa2dpgui/oa2dpgui.cpp tools/oa2dpgui/oa2dpgui.rc)
 target_link_libraries(oa2dpgui PRIVATE oa2dp_manage comctl32 shell32 user32 gdi32)
 if(MSVC)
@@ -114,16 +127,18 @@ if(MSVC)
 elseif(MINGW)
     target_link_options(oa2dpgui PRIVATE -municode)
 endif()
+endif()
 
 # --- drivers ------------------------------------------------------------------
 if(OA2DP_BUILD_DRIVERS)
     list(APPEND CMAKE_MODULE_PATH ${OA2DP_THIRD_PARTY}/FindWDK/cmake)
     find_package(WDK REQUIRED)
-    wdk_add_driver(oa2dp KMDF 1.15 driver/oa2dp/driver.c driver/oa2dp/l2cap.c)
+    wdk_add_driver(oa2dp KMDF 1.15 driver/oa2dp/driver.c driver/oa2dp/l2cap.c native-version.rc)
 
     # Virtual render endpoint: PortCls/WaveRT, derived from SYSVAD (MS-PL).
     # NTDDI 10.0.19041 for ExAllocatePool2; matches the INF decoration.
     wdk_add_driver(oa2dpaudio WINVER 0x0A00 NTDDI_VERSION 0x0A000008
+        native-version.rc
         driver/oa2dpaudio/adapter.cpp
         driver/oa2dpaudio/control.cpp
         driver/oa2dpaudio/minwavert.cpp
@@ -138,4 +153,9 @@ if(OA2DP_BUILD_DRIVERS)
     target_compile_definitions(oa2dpaudio PRIVATE PC_IMPLEMENTATION UNICODE _UNICODE
         _NEW_DELETE_OPERATORS_)
     target_link_libraries(oa2dpaudio WDK::PORTCLS WDK::STDUNK WDK::LIBCNTPR)
+    foreach(driver IN ITEMS oa2dp oa2dpaudio)
+        target_compile_definitions(${driver} PRIVATE XM6_KERNEL_BINARY)
+        target_compile_options(${driver} PRIVATE /Zi)
+        target_link_options(${driver} PRIVATE /DEBUG)
+    endforeach()
 endif()

@@ -20,6 +20,7 @@ typedef struct {
     uint32_t sample_rate;
     uint8_t channels;
     uint32_t samples_per_call; /* per channel; encode() always consumes this many */
+    uint32_t samples_per_frame; /* codec frame duration; 0 = samples_per_call */
     size_t max_output;         /* worst-case bytes produced by one encode() */
     uint8_t levels;            /* quality levels for oa2dp_abr (1 = fixed) */
     bool native_abr;           /* encoder adapts itself from queue_feedback() */

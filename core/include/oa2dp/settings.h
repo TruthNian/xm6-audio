@@ -37,7 +37,7 @@ typedef enum {
 } oa2dp_sbc_alloc;
 
 typedef enum {
-    OA2DP_LDAC_ABR = 0, /* adaptive, default */
+    OA2DP_LDAC_ABR = 0, /* adaptive */
     OA2DP_LDAC_HQ,      /* 990 / 909 kbps */
     OA2DP_LDAC_SQ,      /* 660 / 606 kbps */
     OA2DP_LDAC_MQ       /* 330 / 303 kbps */
@@ -49,7 +49,7 @@ typedef struct {
     uint8_t priority_count;
 
     uint32_t sample_rate;  /* Hz, 0 = auto (48000, then 44100, then best) */
-    uint8_t bits;          /* 16 or 24, 0 = auto (24 when codec allows) */
+    uint8_t bits;          /* 16 or 24, 0 = follow endpoint PCM (float retains 24) */
     oa2dp_chmode chmode;   /* applies to every codec; SBC also has DUAL/JOINT */
 
     /* SBC */
@@ -68,7 +68,7 @@ typedef struct {
     /* Lower quality automatically on a congested link (F3.9). */
     bool adaptive_bitrate;
 
-    /* Follow the Windows endpoint format with AVDTP RECONFIGURE (F4.3). */
+    /* Follow Windows endpoint rate; shared-mode file metadata is unavailable. */
     bool follow_source_rate;
 } oa2dp_settings;
 
