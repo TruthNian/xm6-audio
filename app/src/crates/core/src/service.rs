@@ -522,14 +522,14 @@ impl Inner {
             while let Ok(e) = rx.recv() {
                 match e {
                     HostEvent::MediaKey(k) => {
-                        tracing::debug!("host event: media key {k:?}");
+                        tracing::info!("host event: media key {k:?}");
                         let key = match k {
                             bt_host::MediaKey::PlayPause => win_sys::media_keys::MediaKey::PlayPause,
                             bt_host::MediaKey::Stop => win_sys::media_keys::MediaKey::Stop,
                             bt_host::MediaKey::Next => win_sys::media_keys::MediaKey::Next,
                             bt_host::MediaKey::Previous => win_sys::media_keys::MediaKey::Previous,
                         };
-                        if let Err(e) = win_sys::media_keys::send(key) {
+                        if let Err(e) = crate::le_media::classic_media_key(key) {
                             tracing::warn!("media key {k:?}: {e}");
                         }
                     }

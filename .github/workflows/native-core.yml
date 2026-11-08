@@ -31,6 +31,8 @@ jobs:
         run: cargo test --release --locked -p bluecaster-core output_mute_is_independent_of_developer_controls
       - name: Verify output ownership and Windows volume keys
         run: cargo test --release --locked -p bluecaster-core mute_output::tests
+      - name: Verify media-session dispatch does not duplicate keys
+        run: cargo test --release --locked -p bluecaster-core classic_media_control
       - name: Build the existing native core and driver helper
         run: cargo build --release --locked -p bluecaster-core-exe -p bluecaster-driver
       - uses: actions/upload-artifact@v4

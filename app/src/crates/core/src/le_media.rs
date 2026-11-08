@@ -103,6 +103,40 @@ macro_rules! wait_result {
     }};
 }
 
+/// Classic AVRCP uses the same Windows media session as LE media control.
+/// It runs on the existing host-events thread, not the Bluetooth thread.
+pub(crate) fn classic_media_key(key: MediaKey) -> windows::core::Result<()> {
+    dispatch_classic(key, classic_session_command, win_sys::media_keys::send)
+}
+
+fn dispatch_classic(
+    key: MediaKey,
+    session: impl FnOnce(MediaKey) -> bool,
+    keyboard: impl FnOnce(MediaKey) -> windows::core::Result<()>,
+) -> windows::core::Result<()> {
+    if session(key) {
+        tracing::info!("AVRCP: {key:?} accepted by the current Windows media session");
+        return Ok(());
+    }
+    tracing::info!("AVRCP: {key:?}: no accepting media session, using the Windows media key");
+    keyboard(key)
+}
+
+fn classic_session_command(key: MediaKey) -> bool {
+    let Ok(_com) = win_sys::audio_policy::ComApartment::init_mta() else { return false };
+    pin_factory_dll::<Manager>("session manager factory");
+    let Some(manager) = wait_result!(Manager::RequestAsync()) else { return false };
+    pin_dll_of("session manager", &manager);
+    let Ok(session) = manager.GetCurrentSession() else { return false };
+    let accepted = match key {
+        MediaKey::PlayPause => wait_result!(session.TryTogglePlayPauseAsync()),
+        MediaKey::Stop => wait_result!(session.TryStopAsync()),
+        MediaKey::Next => wait_result!(session.TrySkipNextAsync()),
+        MediaKey::Previous => wait_result!(session.TrySkipPreviousAsync()),
+    };
+    accepted.unwrap_or(false)
+}
+
 enum Task {
     Command(u8, i32, DoneFn),
     Seek(i32),
@@ -541,6 +575,19 @@ fn filetime_now() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn classic_media_control_does_not_toggle_twice_after_session_accepts() {
+        dispatch_classic(MediaKey::PlayPause, |_| true, |_| panic!("duplicate media key")).unwrap();
+    }
+
+    #[test]
+    fn classic_media_control_keeps_legacy_players_as_a_fallback() {
+        use std::cell::Cell;
+        let sent = Cell::new(None);
+        dispatch_classic(MediaKey::Next, |_| false, |key| { sent.set(Some(key)); Ok(()) }).unwrap();
+        assert_eq!(sent.get(), Some(MediaKey::Next));
+    }
 
     #[test]
     fn player_names_from_aumids() {

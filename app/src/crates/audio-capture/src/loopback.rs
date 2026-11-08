@@ -47,6 +47,8 @@ pub(crate) enum Target {
     Device(Option<String>),
     /// Process loopback of this process and its children
     Process(u32),
+    /// Every Windows audio session except this core and its children.
+    AllProcesses,
 }
 
 /// HRESULTs that mean the source went away rather than a fault of ours
@@ -68,7 +70,7 @@ pub(crate) struct Opened {
 impl Opened {
     pub fn open(target: Target, options: &CaptureOptions) -> Result<Opened, CaptureError> {
         // Checked here, before a thread exists, since this one is cheap
-        if let Target::Process(_) = target {
+        if matches!(target, Target::Process(_) | Target::AllProcesses) {
             let build = crate::windows_build();
             if build < APP_CAPTURE_MIN_BUILD {
                 return Err(CaptureError::UnsupportedBuild(build));
@@ -221,7 +223,8 @@ fn thread_main(
 fn open_stream(target: &Target, options: &CaptureOptions) -> Result<Stream, CaptureError> {
     match target {
         Target::Device(id) => open_device(id.as_deref(), options),
-        Target::Process(pid) => open_process(*pid, options),
+        Target::Process(pid) => open_process(*pid, true, options),
+        Target::AllProcesses => open_process(std::process::id(), false, options),
     }
 }
 
@@ -318,7 +321,7 @@ fn open_device(id: Option<&str>, options: &CaptureOptions) -> Result<Stream, Cap
 }
 
 /// v1 WasapiCapture::init_process
-fn open_process(pid: u32, options: &CaptureOptions) -> Result<Stream, CaptureError> {
+fn open_process(pid: u32, include_tree: bool, options: &CaptureOptions) -> Result<Stream, CaptureError> {
     // Opened first: it is how we tell the app has exited, and it fails for
     // a PID that does not exist (activation would succeed and capture
     // nothing)
@@ -326,7 +329,7 @@ fn open_process(pid: u32, options: &CaptureOptions) -> Result<Stream, CaptureErr
     let fmt = format::plan_application(options.preferred_rate);
     let wave = WaveFormat::new(32, 32, &SampleType::Float, fmt.sample_rate as usize, 2, None);
     tracing::debug!(
-        "audio capture: process loopback of pid {pid} (include tree), requesting {} Hz 2 ch f32, buffer {} ms",
+        "audio capture: process loopback of pid {pid} (include tree: {include_tree}), requesting {} Hz 2 ch f32, buffer {} ms",
         fmt.sample_rate,
         BUFFER_HNS / 10_000
     );
@@ -338,7 +341,7 @@ fn open_process(pid: u32, options: &CaptureOptions) -> Result<Stream, CaptureErr
     let mut ready = None;
     for autoconvert in [true, false] {
         let mut client =
-            AudioClient::new_application_loopback_client(pid, true).map_err(|e| CaptureError::activation(&e))?;
+            AudioClient::new_application_loopback_client(pid, include_tree).map_err(|e| CaptureError::activation(&e))?;
         let mode = StreamMode::EventsShared { autoconvert, buffer_duration_hns: BUFFER_HNS };
         match client.initialize_client(&wave, &Direction::Capture, &mode) {
             Ok(()) => {
@@ -362,7 +365,7 @@ fn open_process(pid: u32, options: &CaptureOptions) -> Result<Stream, CaptureErr
     let event = client.set_get_eventhandle().map_err(|e| CaptureError::from_wasapi("SetEventHandle", e))?;
     let capture =
         client.get_audiocaptureclient().map_err(|e| CaptureError::from_wasapi("GetService(IAudioCaptureClient)", e))?;
-    tracing::info!("audio capture: process {pid} and its child processes, {} Hz, 2 ch, 32-bit float", fmt.sample_rate);
+    tracing::info!("audio capture: {} (process {pid}), {} Hz, 2 ch, 32-bit float", if include_tree { "one application tree" } else { "all Windows applications excluding this core" }, fmt.sample_rate);
     tracing::debug!(
         "audio capture: process loopback, event mode, buffer {:?} frames, period assumed {} ms",
         client.get_buffer_size().ok(),
@@ -375,7 +378,7 @@ fn open_process(pid: u32, options: &CaptureOptions) -> Result<Stream, CaptureErr
         format: fmt,
         // GetDevicePeriod does not work on a process loopback client
         period: DEFAULT_PERIOD,
-        process: Some(process),
+        process: include_tree.then_some(process),
     })
 }
 

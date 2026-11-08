@@ -39,9 +39,9 @@ pub use tone::{AMPLITUDE as TEST_TONE_AMPLITUDE, LEFT_HZ as TEST_TONE_LEFT_HZ};
 /// Where the audio comes from (v1 CaptureMode, plus the test tone)
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Source {
-    /// Loopback of the default render device (Console role), as it is when
-    /// the capture is opened. A later change of the default device is not
-    /// followed; reopen to follow it.
+    /// All application audio, excluding the core's own process tree, when
+    /// Windows supports process loopback. On older/rejecting systems,
+    /// fallback to the default render endpoint (Console role).
     SystemLoopback,
     /// Loopback of this render endpoint (virtual or output device mode)
     RenderDevice { id: String },
@@ -226,7 +226,14 @@ impl Capture {
     pub fn open(source: &Source, options: &CaptureOptions) -> Result<Capture, CaptureError> {
         let (format, backend) = match source {
             Source::SystemLoopback => {
-                let o = loopback::Opened::open(loopback::Target::Device(None), options)?;
+                let o = if app_capture_supported() {
+                    loopback::Opened::open(loopback::Target::AllProcesses, options).or_else(|e| {
+                        tracing::warn!("all-application capture unavailable ({e}); using the default render endpoint");
+                        loopback::Opened::open(loopback::Target::Device(None), options)
+                    })?
+                } else {
+                    loopback::Opened::open(loopback::Target::Device(None), options)?
+                };
                 (o.format, Backend::Loopback(o))
             }
             Source::RenderDevice { id } => {
