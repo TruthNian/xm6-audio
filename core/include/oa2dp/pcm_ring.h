@@ -65,6 +65,8 @@ uint32_t oa2dp_ring_writable(const oa2dp_pcm_ring *r);
 uint32_t oa2dp_ring_write(oa2dp_pcm_ring *r, const void *data, uint32_t frames);
 /* Consumer: copy up to `frames`; returns frames read. */
 uint32_t oa2dp_ring_read(oa2dp_pcm_ring *r, void *data, uint32_t frames);
+/* Consumer: discard accumulated PCM when a Bluetooth stream restarts. */
+uint32_t oa2dp_ring_discard(oa2dp_pcm_ring *r);
 
 /* Sample conversion for the consumer. */
 void oa2dp_pcm_float_to_s24(const float *in, int32_t *out, size_t n);

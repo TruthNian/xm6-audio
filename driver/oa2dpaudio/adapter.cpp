@@ -346,7 +346,7 @@ InstallFilters
     }
 
     // Topology first (the wave filter's bridge pin connects to it).
-    ntStatus = CreateMiniportTopology(&miniTopo);
+    ntStatus = CreateMiniportTopology(&miniTopo, dev);
     if (NT_SUCCESS(ntStatus))
     {
         ntStatus = InstallSubdevice(dev, OA2DP_TOPO_NAME, CLSID_PortTopology, miniTopo, &topoPort);

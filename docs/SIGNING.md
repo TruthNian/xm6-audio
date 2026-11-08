@@ -49,4 +49,4 @@ Recovery switches the selected headset back to Microsoft A2DP and makes the nati
 - Headset off/on, disconnect state notification, sleep/resume and service restart without stale PCM or silent-success status.
 - Shared/exclusive audio and video timing; no claim to infer file format from Windows shared-mode PCM.
 
-Known prototype gap: the inherited WaveRT topology does not yet report jack connected/disconnected state. Retaining Windows AVRCP services is an architectural prerequisite, not evidence that headset buttons already control this new endpoint on hardware.
+The WaveRT topology now implements KS jack presence properties and standard jack-change events. The service marks the endpoint disconnected on link failure; control-handle cleanup also handles a crashed service. These paths have not yet been exercised on hardware. Retaining Windows AVRCP services is an architectural prerequisite, not evidence that headset buttons already control this new endpoint on hardware.

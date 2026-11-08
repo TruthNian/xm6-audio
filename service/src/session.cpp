@@ -414,7 +414,7 @@ bool Session::setup_audio_endpoint()
         LOGE("cannot configure the native audio endpoint");
         return false;
     }
-    return true;
+    return audio_.set_connected(true);
 }
 
 bool Session::start_stream()
@@ -483,6 +483,8 @@ void Session::teardown(const char *why)
 {
     LOGI("teardown: %s", why);
     end_streaming();
+    if (audio_ready_)
+        audio_.set_connected(false);
     if (media_open_)
         tr_.close_channel(Oa2dpChannelMedia);
     media_open_ = false;
@@ -518,9 +520,13 @@ void Session::handle(const Command &c)
         teardown("signalling closed");
         break;
     case Cmd::MediaClosed:
-        end_streaming();
-        media_open_ = false;
-        oa2dp_avdtp_media_closed(&av_, local_seid_);
+        teardown("media closed");
+        next_reconnect_ = GetTickCount() + kReconnectPollMs;
+        break;
+    case Cmd::StreamFailed:
+        teardown("encoder or transport failure");
+        publish("stream-error");
+        next_reconnect_ = GetTickCount() + kReconnectPollMs;
         break;
     case Cmd::DeviceGone:
         stopping_ = true;
@@ -721,12 +727,13 @@ void Session::stream_loop()
     int err = oa2dp_encoder_create(&cfg, &set, media_mtu_, &enc);
     if (err != OA2DP_OK) {
         LOGE("encoder for %s failed: %s", oa2dp_codec_name(cfg.codec), oa2dp_strerror(err));
-        streaming_ = false;
+        post({Cmd::StreamFailed});
         return;
     }
     const oa2dp_encoder_info info = enc->info;
     const uint32_t spc = info.samples_per_call;
     const uint32_t spf = info.samples_per_frame ? info.samples_per_frame : spc;
+    oa2dp_ring_discard(ring);
     const uint16_t ring_ch = ring->channels;
     const uint8_t ch = info.channels;
 
@@ -751,11 +758,24 @@ void Session::stream_loop()
          info.sample_rate, ch, spc);
 
     auto send_packet = [&](size_t len) {
-        if (len && tr_.send_media(pkt.data(), len))
-            bytes_sent += len;
+        if (len) {
+            if (tr_.send_media(pkt.data(), len))
+                bytes_sent += len;
+            else {
+                LOGE("Bluetooth media send failed");
+                post({Cmd::StreamFailed});
+                streaming_ = false;
+            }
+        }
     };
 
     while (streaming_) {
+        if (ring->sample_rate != info.sample_rate || ring->channels != ring_ch) {
+            // The format event will suspend/reconfigure this stream. Never
+            // encode a new rate with the previous rate's timing meanwhile.
+            Sleep(2);
+            continue;
+        }
         if (oa2dp_ring_readable(ring) < spc) {
             Sleep(2);
             continue;
@@ -777,8 +797,9 @@ void Session::stream_loop()
         size_t len = 0;
         uint8_t frames = 0;
         if (oa2dp_encoder_encode(enc, pcm.data(), out.data(), out.size(), &len, &frames) != OA2DP_OK) {
-            LOGW("encode failed");
-            continue;
+            LOGE("encode failed; stopping instead of reporting a silent stream");
+            post({Cmd::StreamFailed});
+            break;
         }
         if (len == 0 || frames == 0)
             continue;

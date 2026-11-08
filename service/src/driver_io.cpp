@@ -251,8 +251,17 @@ bool AudioEndpoint::open(uint64_t bt_addr)
 
 void AudioEndpoint::close()
 {
+    if (dev_.is_open())
+        set_connected(false);
     unmap_ring();
     dev_.close();
+}
+
+bool AudioEndpoint::set_connected(bool connected)
+{
+    ULONG value = connected ? 1 : 0;
+    return dev_.ioctl(IOCTL_OA2DP_AUDIO_SET_CONNECTED, &value, sizeof(value), nullptr, 0,
+                      nullptr, 5000) == ERROR_SUCCESS;
 }
 
 bool AudioEndpoint::set_formats(const OA2DP_FORMAT_LIST &list)

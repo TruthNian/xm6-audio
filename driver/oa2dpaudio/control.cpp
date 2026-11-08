@@ -320,6 +320,7 @@ extern "C" NTSTATUS Oa2dpControlStart(_Inout_ OA2DP_AUDIO_DEVICE *dev)
 extern "C" VOID Oa2dpControlStop(_Inout_ OA2DP_AUDIO_DEVICE *dev)
 {
     PAGED_CODE();
+    Oa2dpSetConnected(dev, FALSE);
     if (dev->ControlLink.Buffer)
         (void)IoSetDeviceInterfaceState(&dev->ControlLink, FALSE);
     FailWaits(dev, NULL, STATUS_DELETE_PENDING);
@@ -430,13 +431,17 @@ static NTSTATUS ControlCreate(_Inout_ OA2DP_AUDIO_DEVICE *dev, _In_ PIRP irp, _I
 
 static VOID ControlCleanup(_Inout_ OA2DP_AUDIO_DEVICE *dev, _In_ PFILE_OBJECT fo)
 {
+    BOOLEAN closed = FALSE;
     FailWaits(dev, fo, STATUS_CANCELLED);
     Oa2dpLock(&dev->ControlLock);
     if (dev->ControlFile == fo) {
         Oa2dpRingUnmapUser(&dev->Ring); /* we are in the service's context */
         dev->ControlFile = NULL;
+        closed = TRUE;
     }
     Oa2dpUnlock(&dev->ControlLock);
+    if (closed)
+        Oa2dpSetConnected(dev, FALSE);
 }
 
 static NTSTATUS SetFormats(_Inout_ OA2DP_AUDIO_DEVICE *dev, _In_ const OA2DP_FORMAT_LIST *in)
@@ -577,6 +582,18 @@ static NTSTATUS ControlIoctl(_Inout_ OA2DP_AUDIO_DEVICE *dev, _Inout_ PIRP irp, 
         break;
     case IOCTL_OA2DP_AUDIO_WAIT_FORMAT:
         return WaitFormat(dev, irp, buf ? outLen : 0);
+    case IOCTL_OA2DP_AUDIO_SET_CONNECTED:
+        if (inLen < sizeof(ULONG) || !buf) {
+            status = STATUS_BUFFER_TOO_SMALL;
+            break;
+        }
+        if (*(PULONG)buf > 1) {
+            status = STATUS_INVALID_PARAMETER;
+            break;
+        }
+        Oa2dpSetConnected(dev, *(PULONG)buf != 0);
+        status = STATUS_SUCCESS;
+        break;
     case IOCTL_OA2DP_AUDIO_SET_NAME:
         if (inLen < sizeof(OA2DP_ENDPOINT_NAME) || !buf) {
             status = STATUS_BUFFER_TOO_SMALL;

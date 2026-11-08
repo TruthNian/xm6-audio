@@ -101,15 +101,15 @@ The service validates the header against the mapping size
 
 ## Open points
 
-- Not run yet: Driver Verifier and a real headset are the next step
-  (`scripts/install-dev.ps1`, see `BUILDING.md`).
+- Not run yet: Driver Verifier and a real headset require a legitimately
+  signed package and a controlled test system (see `BUILDING.md`).
 - Whether `IoSetDevicePropertyData(DEVPKEY_Device_FriendlyName)` is
   accepted for the PDO has to be checked on a real system; a failure is
   logged and ignored (the endpoint then shows the INF description).
-- When Windows plays while the headset is not streaming, the ring fills up
-  (new audio is dropped and counted in `overruns`). The service starts
-  reading that stale audio, adding up to ~340 ms of latency. The service
-  should set `read_pos = write_pos` before its first read; that is a
-  service-side change.
-- Jack description (connected/disconnected state) is not reported; the
-  endpoint is always shown as available while the device node exists.
+- The service now discards accumulated PCM when a Bluetooth stream restarts,
+  rather than replaying the pre-reconnection backlog. Hardware timing
+  still needs validation.
+- KS jack presence descriptions and change events are implemented. Link
+  teardown, media failure and service-handle cleanup mark the endpoint
+  disconnected; the negotiated endpoint marks it connected. AudioEndpointBuilder
+  behavior and default-device policy still need hardware validation.

@@ -34,6 +34,14 @@ void test_ring(void)
     CHECK_EQ(oa2dp_ring_readable(r), 0);
     CHECK_EQ(oa2dp_ring_read(r, out, 1), 0);
 
+    /* Reconnection must play new PCM rather than the pre-disconnect backlog. */
+    CHECK_EQ(oa2dp_ring_write(r, in, 8), 8);
+    CHECK_EQ(oa2dp_ring_discard(r), 8);
+    CHECK_EQ(oa2dp_ring_readable(r), 0);
+    CHECK_EQ(oa2dp_ring_write(r, in + 16, 1), 1);
+    CHECK_EQ(oa2dp_ring_read(r, out, 1), 1);
+    CHECK_MEM(out, in + 16, 2 * sizeof(int32_t));
+
     /* Corrupted header from the other side is rejected. */
     r->capacity = 1000;
     CHECK_EQ(oa2dp_ring_validate(r, bytes), OA2DP_ERR_PROTO);

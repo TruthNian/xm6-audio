@@ -14,8 +14,8 @@ Abstract:
 /*
  * Derived from the SYSVAD sample (Windows-driver-samples/audio/sysvad,
  * commit 2dc3fd3a, MS-PL — see LICENSE.MS-PL in this folder). Modified for
- * OpenA2DP: headphone output (Sound settings shows "Headphones"), no jack,
- * resource-group or posture properties.
+ * OpenA2DP: headphone output with Bluetooth jack presence notification;
+ * resource-group and posture properties removed.
  */
 #pragma once
 
@@ -86,10 +86,26 @@ static PCCONNECTION_DESCRIPTOR Oa2dpTopoMiniportConnections[] =
     { PCFILTER_NODE, OA2DP_TOPO_PIN_IN, PCFILTER_NODE, OA2DP_TOPO_PIN_OUT }
 };
 
+static PCPROPERTY_ITEM Oa2dpJackProperties[] =
+{
+    { &KSPROPSETID_Jack, KSPROPERTY_JACK_DESCRIPTION,
+      KSPROPERTY_TYPE_GET | KSPROPERTY_TYPE_BASICSUPPORT, PropertyHandler_Jack },
+    { &KSPROPSETID_Jack, KSPROPERTY_JACK_DESCRIPTION2,
+      KSPROPERTY_TYPE_GET | KSPROPERTY_TYPE_BASICSUPPORT, PropertyHandler_Jack }
+};
+
+static PCEVENT_ITEM Oa2dpJackEvents[] =
+{
+    { &KSEVENTSETID_PinCapsChange, KSEVENT_PINCAPS_JACKINFOCHANGE,
+      KSEVENT_TYPE_ENABLE | KSEVENT_TYPE_BASICSUPPORT, EventHandler_Jack }
+};
+
+DEFINE_PCAUTOMATION_TABLE_PROP_EVENT(Oa2dpJackAutomation, Oa2dpJackProperties, Oa2dpJackEvents);
+
 static PCFILTER_DESCRIPTOR Oa2dpTopoMiniportFilterDescriptor =
 {
     0,                                              // Version
-    NULL,                                           // AutomationTable
+    &Oa2dpJackAutomation,                            // AutomationTable
     sizeof(PCPIN_DESCRIPTOR),                       // PinSize
     RTL_NUMBER_OF(Oa2dpTopoMiniportPins),           // PinCount
     Oa2dpTopoMiniportPins,                          // Pins

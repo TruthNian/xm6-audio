@@ -82,6 +82,7 @@ public:
     bool set_formats(const OA2DP_FORMAT_LIST &list);
     bool set_latency(uint32_t transport_us, uint32_t device_us);
     bool set_name(const std::wstring &name);
+    bool set_connected(bool connected);
     bool map_ring();
     void unmap_ring();
     oa2dp_pcm_ring *ring() const { return ring_; }

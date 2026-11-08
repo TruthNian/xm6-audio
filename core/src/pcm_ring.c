@@ -79,6 +79,16 @@ uint32_t oa2dp_ring_writable(const oa2dp_pcm_ring *r)
     return d >= r->capacity ? 0 : (uint32_t)(r->capacity - d);
 }
 
+uint32_t oa2dp_ring_discard(oa2dp_pcm_ring *r)
+{
+    uint64_t w = r->write_pos;
+    OA2DP_FENCE();
+    uint64_t discarded = w - r->read_pos;
+    r->read_pos = w;
+    OA2DP_FENCE();
+    return discarded > r->capacity ? r->capacity : (uint32_t)discarded;
+}
+
 static void copy_in(oa2dp_pcm_ring *r, uint64_t pos, const uint8_t *src, uint32_t frames)
 {
     size_t fb = frame_bytes(r);

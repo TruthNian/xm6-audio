@@ -31,4 +31,4 @@
 class CMiniportWaveRT;
 
 NTSTATUS CreateMiniportWaveRT(_Out_ CMiniportWaveRT **Out, _In_ OA2DP_AUDIO_DEVICE *Device);
-NTSTATUS CreateMiniportTopology(_Out_ PUNKNOWN *Out);
+NTSTATUS CreateMiniportTopology(_Out_ PUNKNOWN *Out, _In_ OA2DP_AUDIO_DEVICE *Device);

@@ -39,6 +39,7 @@ private:
         MediaClosed,
         DeviceGone,
         AudioFormat,
+        StreamFailed,
         IdleCheck,
     };
     struct Command {
