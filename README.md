@@ -4,7 +4,7 @@
 
 首个已听到音乐且稳定的基线来自 Windows 10 19045、Intel 8087:0AAA 内置蓝牙和 QQ 音乐。它证明了编码与无线发送链路可行，不等于已经验证所有播放器、重启、休眠和视频同步。
 
-改进直接进入现有原生核心：恢复已保存配置、在耳机稍后开机时重试初次连接、保留用户断开操作，并在普通模式中使用现有系统输出静音机制。安装完成后由同一个 `bluecaster-core.exe` 承担音频与设备生命周期；没有新增运行时脚本或守护进程。
+改进直接进入现有原生核心：恢复已保存配置、在耳机稍后开机时重试初次连接、保留用户断开操作、采集所有应用音频，并把耳机媒体按键优先交给 Windows 当前媒体会话。安装完成后由同一个 `bluecaster-core.exe` 承担音频与设备生命周期；没有新增运行时脚本或守护进程。
 
 一次性安装：从本仓库 Actions 获取原生核心构建，将它与上游同版本 `bluecaster.exe` 放在同一目录，再运行 `integration/Install-NativeProfile.ps1`。本机地址仅作为本机参数写入 `%APPDATA%/BlueCaster`，不要提交到仓库。已有配对密钥保留在本地。
 
@@ -12,9 +12,11 @@
 powershell -NoProfile -ExecutionPolicy Bypass -File integration/Install-NativeProfile.ps1 -DeviceAddress 'AA:BB:CC:DD:EE:FF' -BuildDirectory 'C:\path\to\runtime'
 ```
 
-完整的实现、验收状态和后续顺序见 [基线记录](docs/XM6-BASELINE.md)。上游功能及构建说明见 [原始 README](README.upstream.md) 和 [Building](docs/building.md)。
+完整的实现与验收状态见 [基线记录](docs/XM6-BASELINE.md)，后续工作的触发条件和验收见 [改进决策](docs/XM6-ROADMAP.md)。上游功能及构建说明见 [原始 README](README.upstream.md) 和 [Building](docs/building.md)。
 
 工程原则：先质疑要求，删除多余环节，简化必要路径，再优化有证据的瓶颈。实际可听到音乐是验收的一部分，码率计数和电平表不能代替它。源码改变后运行针对启动恢复和输出静音的必要检查。
+
+完整耳机行为也是验收条件：播放、暂停、上一曲、下一曲、Windows 音量、系统声音、重连和视频。当前实现与 Alternative A2DP 的架构区别、以及真正 Windows 音频端点仍缺的部分，见 [Windows 集成边界](docs/XM6-WINDOWS-INTEGRATION.md)。
 
 边界：固定 990 kbps 需要足够的无线带宽；强干扰、DRM、独占输出、应用指定其他输出设备，以及视频唇音同步需要分别处理。这是 WinUSB 用户态蓝牙实现，当前没有为 Windows 新建原生耳机音频端点，也没有实现内核 A2DP 编码驱动。
 
