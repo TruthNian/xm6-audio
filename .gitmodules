@@ -16,3 +16,6 @@
 [submodule "extern/opus"]
 	path = extern/opus
 	url = https://github.com/xiph/opus.git
+[submodule "native/open-a2dp"]
+	path = native/open-a2dp
+	url = https://github.com/RafiMota/open-a2dp.git

@@ -1,0 +1,15 @@
+{
+  "upstream": "https://github.com/RafiMota/open-a2dp",
+  "commit": "167ebc0e2c89fec570eec535fefdade72bd9e416",
+  "build_run": "https://github.com/RafiMota/open-a2dp/actions/runs/38632901913",
+  "driver_artifact": "drivers-x64",
+  "user_mode_artifact": "user-mode-x64",
+  "installation_status": "not installed",
+  "hardware_validation": "not performed",
+  "signatures": {
+    "oa2dp.sys": {"status": "NotSigned", "sha256": "2e4f1a0e4d049817987bdad09c8cdb7a551d255087e207beb4ae50b770c428c9"},
+    "oa2dp.cat": {"status": "NotSigned", "sha256": "f0b2f14bbf150ff96cd33660e119b6c899203848e4b344ed8a74b8e0e6799880"},
+    "oa2dpaudio.sys": {"status": "NotSigned", "sha256": "621d46e3646e7dd83b1191c57655357fbd45a426316a1226b291bca104392eba"},
+    "oa2dpaudio.cat": {"status": "NotSigned", "sha256": "8dd818a6b748e11527d6c90cb09b85ddeffbef5d69f9a7a1f48185b3b56439cf"}
+  }
+}

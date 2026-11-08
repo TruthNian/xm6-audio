@@ -22,6 +22,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File integration/Install-BridgePr
 
 后续主线首先删除整块适配器接管：保留 Windows 蓝牙栈，在 A2DP 音频设备边界接入编码与传输。候选实现的实际状态见 [原生后端调查](docs/XM6-NATIVE-CANDIDATES.md)。
 
+已固定一个具有 Windows 10 目标结构且通过 WDK 编译的上游原型，源码和产物来源见 [native/](native/README.md)。下载产物经检查仍未签名、未安装、未进行真实耳机验证；它不是可直接交付的原生版本。
+
 边界：固定 990 kbps 需要足够的无线带宽；强干扰、DRM、独占输出、应用指定其他输出设备，以及视频唇音同步需要分别处理。这是 WinUSB 用户态蓝牙实现，当前没有为 Windows 新建原生耳机音频端点，也没有实现内核 A2DP 编码驱动。
 
 本仓库保留上游 MIT/Apache-2.0 授权与全部第三方说明。BTstack 依赖受其个人、非商业使用条款约束；本仓库源码许可证不替代该条款。详见 [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md)。

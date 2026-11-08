@@ -37,7 +37,7 @@ jobs:
         run: cargo build --release --locked -p bluecaster-core-exe -p bluecaster-driver
       - uses: actions/upload-artifact@v4
         with:
-          name: xm6-audio-native-win64
+          name: xm6-audio-bridge-win64
           path: |
             target/release/bluecaster-core.exe
             target/release/bluecaster-driver.exe

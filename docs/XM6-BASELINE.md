@@ -10,11 +10,15 @@ The initial baseline is upstream `v3.0.0-beta.3`, commit `e4d254d4a867b84071b91c
 
 THX endpoint loopback previously produced silence despite active application meters and packet counters. Its cause has not been established. It is not the default integration source.
 
-## Native changes
+## Bridge changes
 
 1. Restore the saved active profile from the resident core's existing sampler. Retry initial failures with bounded backoff while the device is unavailable; hand a successful stream to existing reconnect behavior. Respect Disconnect, a changed/removed profile and disabled auto-reconnect.
 2. Honor `output_mute` in ordinary mode, without requiring developer mode or the developer volume mixer. Keep the existing mute-key watcher attached when the output was already muted at startup, while preserving that original mute state on exit. This prevents a Windows volume key from exposing speakers in a session that started with the PC muted. Existing output-mute, mute-key and volume-sync code remains responsible for interaction with Windows.
 3. Configure system loopback with a real 48 kHz render endpoint, a fixed LDAC profile and the core's own Windows startup registration. Setup is one-time; the installed core is the only runtime.
+4. Capture all other Windows application sessions through process-loopback exclusion of the core, rather than only the default endpoint, where supported. Route classic AVRCP through the current Windows media session, with a legacy key fallback only if no session accepts the command.
+5. Preserve the complete AVRCP pass-through operation octet in replies, including the release bit. The bundled BTstack target masked the bit off when replying, so a controller could fail to complete a key transaction. Keep the operation event's semantic ID separate from the echoed wire octet. Windows Play/Pause uses actual playback state and explicit Play/Pause requests when known.
+
+After changes 4 and 5 were deployed, the user confirmed music was normal and then confirmed Play/Pause/Next/Previous had all recovered; volume was already working. Log evidence includes both pressed/released operation events and Windows media-session acceptance. This is bridge acceptance only: Windows Bluetooth ownership and an independent XM6 render endpoint are still not provided.
 
 ## Acceptance status
 
