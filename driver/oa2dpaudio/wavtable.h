@@ -22,8 +22,8 @@ Abstract:
  */
 #pragma once
 
-#define OA2DP_MIN_SAMPLE_RATE 8000
-#define OA2DP_MAX_SAMPLE_RATE 192000
+#define OA2DP_MIN_SAMPLE_RATE 16000
+#define OA2DP_MAX_SAMPLE_RATE 96000
 #define OA2DP_MAX_STREAMS 1
 
 NTSTATUS PropertyHandler_WaveFilter(_In_ PPCPROPERTY_REQUEST PropertyRequest);
@@ -34,7 +34,7 @@ static KSDATARANGE_AUDIO Oa2dpPinDataRangesStream[] =
     { // 0: IEEE float, 32-bit container (preferred: full precision for 24-bit codecs)
         {
             sizeof(KSDATARANGE_AUDIO),
-            0,
+            KSDATARANGE_ATTRIBUTES,
             0,
             0,
             STATICGUIDOF(KSDATAFORMAT_TYPE_AUDIO),
@@ -50,7 +50,7 @@ static KSDATARANGE_AUDIO Oa2dpPinDataRangesStream[] =
     { // 1: signed integer PCM, 16/24/32-bit containers
         {
             sizeof(KSDATARANGE_AUDIO),
-            0,
+            KSDATARANGE_ATTRIBUTES,
             0,
             0,
             STATICGUIDOF(KSDATAFORMAT_TYPE_AUDIO),
@@ -65,10 +65,20 @@ static KSDATARANGE_AUDIO Oa2dpPinDataRangesStream[] =
     }
 };
 
+static struct {
+    KSMULTIPLE_ITEM Header;
+    KSATTRIBUTE Mode;
+} Oa2dpRangeAttributes = {
+    { sizeof(KSMULTIPLE_ITEM) + sizeof(KSATTRIBUTE), 1 },
+    { sizeof(KSATTRIBUTE), 0, STATICGUIDOF(KSATTRIBUTEID_AUDIOSIGNALPROCESSING_MODE) }
+};
+
 static PKSDATARANGE Oa2dpPinDataRangePointersStream[] =
 {
     PKSDATARANGE(&Oa2dpPinDataRangesStream[0]),
-    PKSDATARANGE(&Oa2dpPinDataRangesStream[1])
+    PKSDATARANGE(&Oa2dpRangeAttributes),
+    PKSDATARANGE(&Oa2dpPinDataRangesStream[1]),
+    PKSDATARANGE(&Oa2dpRangeAttributes)
 };
 
 static KSDATARANGE Oa2dpPinDataRangesBridge[] =
@@ -153,6 +163,12 @@ static PCCONNECTION_DESCRIPTOR Oa2dpWaveMiniportConnections[] =
 
 static PCPROPERTY_ITEM PropertiesOa2dpWaveFilter[] =
 {
+    {
+        &KSPROPSETID_Pin,
+        KSPROPERTY_PIN_CONSTRAINEDDATARANGES,
+        KSPROPERTY_TYPE_GET | KSPROPERTY_TYPE_BASICSUPPORT,
+        PropertyHandler_WaveFilter
+    },
     {
         &KSPROPSETID_Pin,
         KSPROPERTY_PIN_PROPOSEDATAFORMAT,

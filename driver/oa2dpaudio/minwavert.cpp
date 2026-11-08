@@ -601,6 +601,51 @@ CMiniportWaveRT::PropertyHandlerProposedFormat
     return STATUS_INVALID_DEVICE_REQUEST;
 } // PropertyHandlerProposedFormat
 
+#pragma code_seg("PAGE")
+NTSTATUS CMiniportWaveRT::PropertyHandlerConstrainedRanges(_In_ PPCPROPERTY_REQUEST request)
+{
+    PAGED_CODE();
+    PKSP_PIN pin = NULL;
+    NTSTATUS status = GetStreamPin(request, &pin);
+    if (!NT_SUCCESS(status))
+        return status;
+    if (request->Verb & KSPROPERTY_TYPE_BASICSUPPORT)
+        return PropertyHandler_BasicSupport(request);
+    if (!(request->Verb & KSPROPERTY_TYPE_GET))
+        return STATUS_INVALID_DEVICE_REQUEST;
+    OA2DP_FORMAT_LIST list;
+    Oa2dpGetFormats(m_Device, &list);
+    const ULONG required = sizeof(KSMULTIPLE_ITEM) + list.Count * sizeof(KSDATARANGE_AUDIO);
+    if (!request->ValueSize) {
+        request->ValueSize = required;
+        return STATUS_BUFFER_OVERFLOW;
+    }
+    if (request->ValueSize < required) {
+        request->ValueSize = required;
+        return STATUS_BUFFER_TOO_SMALL;
+    }
+    RtlZeroMemory(request->Value, required);
+    PKSMULTIPLE_ITEM items = static_cast<PKSMULTIPLE_ITEM>(request->Value);
+    items->Size = required;
+    items->Count = list.Count;
+    PKSDATARANGE_AUDIO ranges = reinterpret_cast<PKSDATARANGE_AUDIO>(items + 1);
+    for (ULONG n = 0; n < list.Count; ++n) {
+        ULONG index = n == 0 ? list.Preferred : (n <= list.Preferred ? n - 1 : n);
+        const OA2DP_FORMAT &f = list.Formats[index];
+        PKSDATARANGE_AUDIO range = &ranges[n];
+        range->DataRange.FormatSize = sizeof(*range);
+        range->DataRange.MajorFormat = KSDATAFORMAT_TYPE_AUDIO;
+        range->DataRange.SubFormat = f.Encoding == OA2DP_PCM_FLOAT ?
+            KSDATAFORMAT_SUBTYPE_IEEE_FLOAT : KSDATAFORMAT_SUBTYPE_PCM;
+        range->DataRange.Specifier = KSDATAFORMAT_SPECIFIER_WAVEFORMATEX;
+        range->MaximumChannels = f.Channels;
+        range->MinimumBitsPerSample = range->MaximumBitsPerSample = f.BitsPerSample;
+        range->MinimumSampleFrequency = range->MaximumSampleFrequency = f.SampleRate;
+    }
+    request->ValueSize = required;
+    return STATUS_SUCCESS;
+}
+
 //=============================================================================
 #pragma code_seg("PAGE")
 NTSTATUS
@@ -763,6 +808,9 @@ Routine Description:
     {
         switch (PropertyRequest->PropertyItem->Id)
         {
+            case KSPROPERTY_PIN_CONSTRAINEDDATARANGES:
+                ntStatus = pWaveHelper->PropertyHandlerConstrainedRanges(PropertyRequest);
+                break;
             case KSPROPERTY_PIN_PROPOSEDATAFORMAT:
                 ntStatus = pWaveHelper->PropertyHandlerProposedFormat(PropertyRequest);
                 break;

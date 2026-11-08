@@ -50,6 +50,7 @@ public:
 
     NTSTATUS PropertyHandlerProposedFormat(_In_ PPCPROPERTY_REQUEST PropertyRequest);
     NTSTATUS PropertyHandlerProposedFormat2(_In_ PPCPROPERTY_REQUEST PropertyRequest);
+    NTSTATUS PropertyHandlerConstrainedRanges(_In_ PPCPROPERTY_REQUEST PropertyRequest);
     NTSTATUS EventHandlerPinCapsChange(_In_ PPCEVENT_REQUEST EventRequest);
 
 private:
