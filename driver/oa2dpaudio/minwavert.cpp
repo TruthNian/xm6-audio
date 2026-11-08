@@ -365,6 +365,10 @@ CMiniportWaveRT::GetModes(
         return STATUS_NOT_SUPPORTED;
     }
     const ULONG required = 2;
+    TraceLoggingWrite(g_Oa2dpAudioTrace, "GetModes",
+        TraceLoggingUInt32(Pin, "Pin"),
+        TraceLoggingUInt32(*NumSignalProcessingModes, "Capacity"),
+        TraceLoggingBool(SignalProcessingModes != NULL, "HasBuffer"));
     if (SignalProcessingModes && *NumSignalProcessingModes < required) {
         *NumSignalProcessingModes = required;
         return STATUS_BUFFER_TOO_SMALL;
@@ -833,6 +837,13 @@ Routine Description:
     }
 
     pWaveHelper->Release();
+
+    TraceLoggingWrite(g_Oa2dpAudioTrace, "WaveProperty",
+        TraceLoggingUInt32(PropertyRequest->PropertyItem->Id, "Id"),
+        TraceLoggingUInt32(PropertyRequest->Verb, "Verb"),
+        TraceLoggingUInt32(PropertyRequest->InstanceSize, "InstanceBytes"),
+        TraceLoggingUInt32(PropertyRequest->ValueSize, "ValueBytes"),
+        TraceLoggingNTStatus(ntStatus, "Status"));
 
     return ntStatus;
 } // PropertyHandler_WaveFilter

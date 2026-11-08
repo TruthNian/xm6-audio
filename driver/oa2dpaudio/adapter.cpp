@@ -173,12 +173,22 @@ Oa2dpDispatch
     const UCHAR major = sp->MajorFunction;
     const BOOLEAN related = sp->FileObject && sp->FileObject->RelatedFileObject;
     const USHORT nameBytes = sp->FileObject ? sp->FileObject->FileName.Length : 0;
+    const ULONG ioctl = major == IRP_MJ_DEVICE_CONTROL ? sp->Parameters.DeviceIoControl.IoControlCode : 0;
+    const ULONG inputBytes = major == IRP_MJ_DEVICE_CONTROL ? sp->Parameters.DeviceIoControl.InputBufferLength : 0;
+    const ULONG outputBytes = major == IRP_MJ_DEVICE_CONTROL ? sp->Parameters.DeviceIoControl.OutputBufferLength : 0;
     NTSTATUS status = gPcDispatch[major](DeviceObject, Irp);
     if (major == IRP_MJ_CREATE)
     {
         TraceLoggingWrite(g_Oa2dpAudioTrace, "PortCreate",
             TraceLoggingBool(related, "Related"),
             TraceLoggingUInt16(nameBytes, "NameBytes"),
+            TraceLoggingNTStatus(status, "Status"));
+    }
+    else if (major == IRP_MJ_DEVICE_CONTROL && ioctl == IOCTL_KS_PROPERTY)
+    {
+        TraceLoggingWrite(g_Oa2dpAudioTrace, "KsProperty",
+            TraceLoggingUInt32(inputBytes, "InputBytes"),
+            TraceLoggingUInt32(outputBytes, "OutputBytes"),
             TraceLoggingNTStatus(status, "Status"));
     }
     return status;
