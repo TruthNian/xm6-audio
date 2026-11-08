@@ -31,12 +31,12 @@ ldac.dll = 1
 sbc.dll = 1
 
 [Manufacturer]
-%ProviderName% = OpenA2DP, NTamd64.10.0...17763, NTarm64.10.0...17763
+%ProviderName% = OpenA2DP, NTamd64.10.0...19041, NTarm64.10.0...19041
 
-[OpenA2DP.NTamd64.10.0...17763]
+[OpenA2DP.NTamd64.10.0...19041]
 %DeviceDesc% = Oa2dp_Install, BTHENUM\{0000110b-0000-1000-8000-00805f9b34fb}
 
-[OpenA2DP.NTarm64.10.0...17763]
+[OpenA2DP.NTarm64.10.0...19041]
 %DeviceDesc% = Oa2dp_Install, BTHENUM\{0000110b-0000-1000-8000-00805f9b34fb}
 
 [Oa2dp_Install.NT]
