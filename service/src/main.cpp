@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cwctype>
+#include <future>
 #include <memory>
 #include <mutex>
 #include <thread>
@@ -54,12 +55,16 @@ public:
             notify_ = nullptr;
         }
         std::vector<std::unique_ptr<Session>> all;
+        std::vector<std::future<void>> retired;
         {
             std::lock_guard<std::mutex> lock(mu_);
             all.swap(sessions_);
+            retired.swap(retired_);
         }
         for (auto &s : all)
             s->stop();
+        for (auto &task : retired)
+            task.wait();
     }
 
 private:
@@ -101,12 +106,18 @@ private:
         }
         LOGI("headset interface removed: %ls", path.c_str());
         // Stopping joins threads: never do it on the notification thread.
-        std::thread([s = std::move(gone)]() mutable { s->stop(); }).detach();
+        auto task = std::async(std::launch::async, [s = std::move(gone)]() mutable { s->stop(); });
+        std::lock_guard<std::mutex> lock(mu_);
+        retired_.erase(std::remove_if(retired_.begin(), retired_.end(), [](auto &previous) {
+            return previous.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready;
+        }), retired_.end());
+        retired_.push_back(std::move(task));
     }
 
     HCMNOTIFICATION notify_ = nullptr;
     std::mutex mu_;
     std::vector<std::unique_ptr<Session>> sessions_;
+    std::vector<std::future<void>> retired_; // joined before SCM reports stopped
 };
 
 DeviceManager g_manager;
