@@ -18,6 +18,14 @@ namespace Xm6Audio {
 }
 '@
 $global:Xm6RecoveryTestDevices = @()
+$global:Xm6RecoveryInboxAvailable = $true
+function Test-Path {
+    [CmdletBinding()] param([string]$LiteralPath, [string]$PathType)
+    if ($LiteralPath -eq (Join-Path $env:windir 'INF\microsoft_bluetooth_a2dp_src.inf')) {
+        return $global:Xm6RecoveryInboxAvailable
+    }
+    Microsoft.PowerShell.Management\Test-Path @PSBoundParameters
+}
 function Get-PnpDevice {
     [CmdletBinding()] param([switch]$PresentOnly)
     if (-not $PresentOnly) { throw 'Recovery must select present devices.' }
@@ -54,7 +62,11 @@ $global:Xm6RecoveryTestDevices = @([pscustomobject]@{
     InstanceId=$id.Replace('0000110B','0000111E'); Class='Bluetooth'
 })
 Assert-Rejected { & "$scripts\restore-windows.ps1" -DeviceAddress $address -CheckOnly }
+$global:Xm6RecoveryTestDevices = @($media)
+$global:Xm6RecoveryInboxAvailable = $false
+Assert-Rejected { & "$scripts\restore-windows.ps1" -DeviceAddress $address -CheckOnly }
 Assert-Check ([Xm6Audio.InboxRecovery]::Calls -eq 2) 'Unexpected native API calls.'
 Assert-Check ([Xm6Audio.InboxRecovery]::Installs -eq 0) 'Check-only attempted to install a driver.'
 Remove-Variable Xm6RecoveryTestDevices -Scope Global
+Remove-Variable Xm6RecoveryInboxAvailable -Scope Global
 Write-Host 'Recovery checks passed: MEDIA/Bluetooth selection, absent registration/package, ambiguous/wrong target, read-only behavior.'
