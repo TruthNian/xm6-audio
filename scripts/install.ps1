@@ -116,6 +116,9 @@ try {
         $problemStatus = (Get-PnpDeviceProperty -InstanceId $headset[0].InstanceId -KeyName DEVPKEY_Device_ProblemStatus).Data
         throw ('Native transport failed to start: problem {0}, status 0x{1:X8}.' -f $problem,[uint32]$problemStatus)
     }
+    # Staging alone leaves an existing child bound to its previous package.
+    # The preflight rejects another present native headset before this update.
+    Invoke-Checked pnputil.exe @('/add-driver',"$package\drivers\oa2dpaudio\oa2dpaudio.inf",'/install')
     $service = Get-Service oa2dpsvc
     if ($service.Status -eq 'Stopped') { Start-Service oa2dpsvc }
     $service.WaitForStatus('Running',[TimeSpan]::FromSeconds(30))

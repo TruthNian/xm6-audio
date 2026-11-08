@@ -639,15 +639,12 @@ void Session::main_loop()
     next_reconnect_ = GetTickCount();
 
     while (!stopping_) {
-        // Connect when the headset's ACL link is up (it was switched on) or
-        // when Windows starts playing to our endpoint.
+        // Opening L2CAP establishes the ACL link when needed. Waiting for
+        // BluetoothGetDeviceInfo.fConnected first deadlocks reconnect when
+        // this profile is the only component that could create that link.
         if (!sig_open_ && is_after(GetTickCount(), next_reconnect_)) {
             next_reconnect_ = GetTickCount() + kReconnectPollMs;
-            BLUETOOTH_DEVICE_INFO d{};
-            d.dwSize = sizeof(d);
-            d.Address.ullLong = info_.RemoteAddress;
-            bool connected = BluetoothGetDeviceInfo(nullptr, &d) == ERROR_SUCCESS && d.fConnected;
-            if (connected && connect_signaling())
+            if (connect_signaling())
                 init_deadline_ = GetTickCount() + kPeerConfigGraceMs;
         }
         if (sig_open_ && init_deadline_ && !local_seid_ && is_after(GetTickCount(), init_deadline_)) {
