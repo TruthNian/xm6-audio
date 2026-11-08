@@ -149,10 +149,18 @@ void Session::audio_loop()
         }
         Command c{};
         c.cmd = Cmd::AudioFormat;
-        if (audio_.wait_format(c.format, stop_event_))
+        c.error = audio_.wait_format(c.format, stop_event_);
+        if (c.error == ERROR_SUCCESS) {
             post(c);
-        else
-            WaitForSingleObject(stop_event_, 100);
+        } else if (!stopping_) {
+            // Do not touch this handle again until the main thread has joined
+            // the encoder and released the old mapping/handle for PnP removal.
+            audio_wait_failed_ = true;
+            c.cmd = Cmd::AudioUnavailable;
+            post(c);
+            while (audio_wait_failed_ && !stopping_)
+                WaitForSingleObject(stop_event_, 100);
+        }
     }
 }
 
@@ -564,6 +572,17 @@ void Session::handle(const Command &c)
         } else {
             idle_since_ = GetTickCount();
         }
+        break;
+    case Cmd::AudioUnavailable:
+        LOGW("audio endpoint wait failed: %lu; releasing the old endpoint", c.error);
+        end_streaming();
+        audio_running_ = false;
+        audio_ready_ = false;
+        audio_.close();
+        audio_wait_failed_ = false;
+        teardown("audio endpoint unavailable");
+        publish("audio-unavailable");
+        next_reconnect_ = GetTickCount() + kReconnectPollMs;
         break;
     case Cmd::IdleCheck:
         break;

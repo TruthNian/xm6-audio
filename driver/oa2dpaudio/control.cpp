@@ -43,6 +43,26 @@ extern "C" VOID Oa2dpUnlock(_Inout_ PKEVENT lock)
     KeLeaveCriticalRegion();
 }
 
+extern "C" NTSTATUS Oa2dpControlStatusLocked(_In_ const OA2DP_AUDIO_DEVICE *dev,
+                                            _In_ BOOLEAN releaseOnly)
+{
+    if (dev->Removed)
+        return STATUS_DELETE_PENDING;
+    if (!dev->Started && !releaseOnly)
+        return STATUS_DEVICE_NOT_READY;
+    return STATUS_SUCCESS;
+}
+
+extern "C" NTSTATUS Oa2dpControlStatus(_Inout_ OA2DP_AUDIO_DEVICE *dev,
+                                      _In_ BOOLEAN releaseOnly)
+{
+    KIRQL irql;
+    KeAcquireSpinLock(&dev->Lock, &irql);
+    NTSTATUS status = Oa2dpControlStatusLocked(dev, releaseOnly);
+    KeReleaseSpinLock(&dev->Lock, irql);
+    return status;
+}
+
 static BOOLEAN FormatValid(_In_ const OA2DP_FORMAT *f)
 {
     return oa2dp_pcm_format_valid(f);
@@ -278,7 +298,7 @@ extern "C" VOID Oa2dpReportStream(_Inout_ OA2DP_AUDIO_DEVICE *dev, _In_ const OA
     KeAcquireSpinLock(&dev->Lock, &irql);
     dev->Current = *format;
     dev->Running = running;
-    irp = IoCsqRemoveNextIrp(&dev->WaitCsq, NULL);
+    irp = dev->Started ? IoCsqRemoveNextIrp(&dev->WaitCsq, NULL) : NULL;
     if (!irp) {
         dev->Event = ev;
         dev->EventPending = TRUE;
@@ -306,6 +326,7 @@ extern "C" NTSTATUS Oa2dpControlStart(_Inout_ OA2DP_AUDIO_DEVICE *dev)
 {
     NTSTATUS status;
     UNICODE_STRING ref;
+    KIRQL irql;
 
     PAGED_CODE();
     if (!dev->ControlLink.Buffer) {
@@ -315,7 +336,14 @@ extern "C" NTSTATUS Oa2dpControlStart(_Inout_ OA2DP_AUDIO_DEVICE *dev)
         if (!NT_SUCCESS(status))
             return status;
     }
-    return IoSetDeviceInterfaceState(&dev->ControlLink, TRUE);
+    // Filters and ring are ready before the control interface announces itself.
+    KeAcquireSpinLock(&dev->Lock, &irql);
+    dev->Started = TRUE;
+    KeReleaseSpinLock(&dev->Lock, irql);
+    status = IoSetDeviceInterfaceState(&dev->ControlLink, TRUE);
+    if (!NT_SUCCESS(status))
+        Oa2dpControlStop(dev);
+    return status;
 }
 
 /* Stop / surprise removal: no new opens; pending waits fail so the service's
@@ -323,20 +351,29 @@ extern "C" NTSTATUS Oa2dpControlStart(_Inout_ OA2DP_AUDIO_DEVICE *dev)
 extern "C" VOID Oa2dpControlStop(_Inout_ OA2DP_AUDIO_DEVICE *dev)
 {
     PAGED_CODE();
+    KIRQL irql;
+    // Same lock as WAIT_FORMAT's ready check and CSQ insertion: no waiter can
+    // be inserted after the final drain. Existing handles may still unmap.
+    KeAcquireSpinLock(&dev->Lock, &irql);
+    dev->Started = FALSE;
+    dev->Running = FALSE;
+    dev->EventPending = FALSE;
+    KeReleaseSpinLock(&dev->Lock, irql);
+    Oa2dpRingSetRunning(&dev->Ring, FALSE);
     Oa2dpSetConnected(dev, FALSE);
     if (dev->ControlLink.Buffer)
         (void)IoSetDeviceInterfaceState(&dev->ControlLink, FALSE);
     FailWaits(dev, NULL, STATUS_DELETE_PENDING);
 }
 
-/* IRP_MN_REMOVE_DEVICE: the ring goes away even if the service still holds
- * its handle (the device object outlives us until that handle closes). */
+/* Final remove frees the ring. Normal Windows surprise removal reaches this
+ * phase after open handles close; stop/surprise-stop alone preserves mapping. */
 extern "C" VOID Oa2dpControlRemove(_Inout_ OA2DP_AUDIO_DEVICE *dev)
 {
     PAGED_CODE();
     Oa2dpControlStop(dev);
     Oa2dpLock(&dev->ControlLock);
-    dev->Removed = TRUE;
+    /* adapter.cpp marks Removed under dev->Lock before invoking us. */
     Oa2dpRingDestroy(&dev->Ring);
     Oa2dpUnlock(&dev->ControlLock);
     if (dev->ControlLink.Buffer) {
@@ -404,30 +441,31 @@ static NTSTATUS ControlCreate(_Inout_ OA2DP_AUDIO_DEVICE *dev, _In_ PIRP irp, _I
     NTSTATUS status = STATUS_SUCCESS;
     KIRQL irql;
 
-    if (!dev->Initialized || dev->Removed)
-        return STATUS_DELETE_PENDING;
-    if (!dev->Started)
+    if (!dev->Initialized)
         return STATUS_DEVICE_NOT_READY;
     if (!CallerIsPrivileged(irp, sp))
         return STATUS_ACCESS_DENIED;
 
     Oa2dpLock(&dev->ControlLock);
-    if (dev->ControlFile) {
+    KeAcquireSpinLock(&dev->Lock, &irql);
+    status = Oa2dpControlStatusLocked(dev, FALSE);
+    if (!NT_SUCCESS(status)) {
+        // Leave a stopped/removed device closed, including a stop/open race.
+    } else if (dev->ControlFile) {
         status = STATUS_SHARING_VIOLATION; /* one service instance */
     } else {
         dev->ControlFile = sp->FileObject;
         sp->FileObject->FsContext = &dev->ControlTag;
         /* A new consumer starts from the current state, so a service that
          * (re)starts while Windows is already playing still connects. */
-        KeAcquireSpinLock(&dev->Lock, &irql);
         dev->EventPending = dev->Running;
         if (dev->Running) {
             RtlZeroMemory(&dev->Event, sizeof(dev->Event));
             dev->Event.Format = dev->Current;
             dev->Event.Running = 1;
         }
-        KeReleaseSpinLock(&dev->Lock, irql);
     }
+    KeReleaseSpinLock(&dev->Lock, irql);
     Oa2dpUnlock(&dev->ControlLock);
     return status;
 }
@@ -509,6 +547,7 @@ static NTSTATUS WaitFormat(_Inout_ OA2DP_AUDIO_DEVICE *dev, _Inout_ PIRP irp, _I
 {
     OA2DP_FORMAT_CHANGE ev;
     KIRQL irql;
+    NTSTATUS status;
 
     if (outLen < sizeof(ev)) {
         irp->IoStatus.Status = STATUS_BUFFER_TOO_SMALL;
@@ -517,6 +556,14 @@ static NTSTATUS WaitFormat(_Inout_ OA2DP_AUDIO_DEVICE *dev, _Inout_ PIRP irp, _I
         return STATUS_BUFFER_TOO_SMALL;
     }
     KeAcquireSpinLock(&dev->Lock, &irql);
+    status = Oa2dpControlStatusLocked(dev, FALSE);
+    if (!NT_SUCCESS(status)) {
+        KeReleaseSpinLock(&dev->Lock, irql);
+        irp->IoStatus.Status = status;
+        irp->IoStatus.Information = 0;
+        IoCompleteRequest(irp, IO_NO_INCREMENT);
+        return status;
+    }
     if (dev->EventPending) {
         ev = dev->Event;
         dev->EventPending = FALSE;
@@ -540,8 +587,8 @@ static NTSTATUS ControlIoctl(_Inout_ OA2DP_AUDIO_DEVICE *dev, _Inout_ PIRP irp, 
     ULONG_PTR info = 0;
     KIRQL irql;
 
-    if (dev->Removed) {
-        status = STATUS_DELETE_PENDING;
+    status = Oa2dpControlStatus(dev, code == IOCTL_OA2DP_AUDIO_UNMAP_RING);
+    if (!NT_SUCCESS(status)) {
         goto done;
     }
     switch (code) {
@@ -552,7 +599,9 @@ static NTSTATUS ControlIoctl(_Inout_ OA2DP_AUDIO_DEVICE *dev, _Inout_ PIRP irp, 
             break;
         }
         Oa2dpLock(&dev->ControlLock);
-        status = dev->Removed ? STATUS_DELETE_PENDING : Oa2dpRingMapUser(&dev->Ring, &m);
+        status = Oa2dpControlStatus(dev, FALSE);
+        if (NT_SUCCESS(status))
+            status = Oa2dpRingMapUser(&dev->Ring, &m);
         Oa2dpUnlock(&dev->ControlLock);
         if (NT_SUCCESS(status)) {
             RtlCopyMemory(buf, &m, sizeof(m));
@@ -594,8 +643,7 @@ static NTSTATUS ControlIoctl(_Inout_ OA2DP_AUDIO_DEVICE *dev, _Inout_ PIRP irp, 
             status = STATUS_INVALID_PARAMETER;
             break;
         }
-        Oa2dpSetConnected(dev, *(PULONG)buf != 0);
-        status = STATUS_SUCCESS;
+        status = Oa2dpSetConnected(dev, *(PULONG)buf != 0);
         break;
     case IOCTL_OA2DP_AUDIO_SET_NAME:
         if (inLen < sizeof(OA2DP_ENDPOINT_NAME) || !buf) {

@@ -38,6 +38,7 @@ private:
         MediaClosed,
         DeviceGone,
         AudioFormat,
+        AudioUnavailable,
         StreamFailed,
         IdleCheck,
     };
@@ -45,6 +46,7 @@ private:
         Cmd cmd;
         OA2DP_FORMAT_CHANGE format{};
         OA2DP_CHANNEL_INFO channel{};
+        DWORD error = ERROR_SUCCESS;
     };
 
     // threads
@@ -103,6 +105,8 @@ private:
     DWORD next_reconnect_ = 0;
     bool need_remote_caps_ = false;
     std::atomic<bool> audio_ready_{false};
+    // A failed waiter stays quiescent until the main thread closes its handle.
+    std::atomic<bool> audio_wait_failed_{false};
 
     // thread plumbing
     HANDLE stop_event_ = nullptr;

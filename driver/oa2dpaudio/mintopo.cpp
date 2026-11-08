@@ -226,12 +226,21 @@ static NTSTATUS EventHandler_Jack(_In_ PPCEVENT_REQUEST request)
     }
 }
 
-extern "C" VOID Oa2dpSetConnected(_Inout_ OA2DP_AUDIO_DEVICE *dev, _In_ BOOLEAN connected)
+extern "C" NTSTATUS Oa2dpSetConnected(_Inout_ OA2DP_AUDIO_DEVICE *dev, _In_ BOOLEAN connected)
 {
     PAGED_CODE();
+    KIRQL irql;
+    KeAcquireSpinLock(&dev->Lock, &irql);
+    NTSTATUS status = connected ? Oa2dpControlStatusLocked(dev, FALSE) : STATUS_SUCCESS;
+    if (!NT_SUCCESS(status)) {
+        KeReleaseSpinLock(&dev->Lock, irql);
+        return status;
+    }
     LONG value = connected ? 1 : 0;
-    if (InterlockedExchange(&dev->Connected, value) == value)
-        return;
+    const BOOLEAN changed = InterlockedExchange(&dev->Connected, value) != value;
+    KeReleaseSpinLock(&dev->Lock, irql);
+    if (!changed)
+        return STATUS_SUCCESS;
     PPORTEVENTS events = NULL;
     Oa2dpLock(&dev->FilterLock);
     if (dev->TopoPort)
@@ -242,4 +251,5 @@ extern "C" VOID Oa2dpSetConnected(_Inout_ OA2DP_AUDIO_DEVICE *dev, _In_ BOOLEAN 
             KSEVENT_PINCAPS_JACKINFOCHANGE, TRUE, OA2DP_TOPO_PIN_OUT, FALSE, ULONG(-1));
         events->Release();
     }
+    return STATUS_SUCCESS;
 }

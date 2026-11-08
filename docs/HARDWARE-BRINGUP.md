@@ -21,13 +21,21 @@ Reference: [Microsoft's proposed-format and attribute handling sample](https://g
 
 ## Offline recovery lifecycle correction
 
-The standalone recovery source also coordinates codec-service shutdown before rebinding the selected headset. Offline tests exercise the actual script with fake service/PnP/install APIs, including stop failures/timeouts, binding failure, service absence, restart failure and pending reboot. This reduces the recovery-time mapping teardown race; it does not establish safety for unexpected PnP removal during playback, which remains a lifecycle acceptance item.
+The standalone recovery source also coordinates codec-service shutdown before rebinding the selected headset. Offline tests exercise the actual script with fake service/PnP/install APIs, including stop failures/timeouts, binding failure, service absence, restart failure and pending reboot. This coordinates handle/mapping release before rebinding; it does not establish safety for unexpected PnP removal during playback, which remains a lifecycle acceptance item.
 
 ## Offline format-transition correction in 0.3.10
 
 The service previously allocated input buffers from one channel count, then copied PCM using a mutable ring header. A mono-to-stereo change could therefore size a later copy differently from its destination. Previously queued samples could also be interpreted with the new sample rate or representation.
 
 Ring protocol v2 uses fixed storage slots, atomic format generations, a first-frame boundary and bounded complete-block reads. The service encodes only a block matching one stable snapshot. Deterministic regressions cover obsolete mono buffers, representation/rate changes, wrapped storage, old-format backlog and incomplete encoder blocks. A separate two-thread memory-only test alternates 10,000 formats and checks generation-tagged samples and destination boundaries. Linux CI applies AddressSanitizer/UndefinedBehaviorSanitizer to both C and C++ tests. The kernel target explicitly selects the kernel-only ring code path, excluding user-mode floating-point conversion helpers. This source has not been deployed or exercised on the headset.
+
+## Stop/wait lifecycle correction in 0.3.11
+
+Review against [Windows' remove-IRP ordering](https://learn.microsoft.com/en-us/windows-hardware/drivers/kernel/understanding-when-remove-irps-are-issued) does not establish a normal surprise-remove mapping-revocation race: final removal follows handle closure. The source preserves the mapping during stop/surprise-stop. No exception-swallowing guard or new mapping lifetime was added.
+
+A separate source defect was confirmed: an existing control handle could queue `WAIT_FORMAT` after stop's final drain, because only final removal was checked. Readiness changes and wait insertion now use the same spin lock. Stopped devices reject new control operations, while unmap/cleanup remain available; a late connection update cannot mark a stopped endpoint connected. Startup makes control readiness visible before announcing its interface.
+
+On format-wait failure, the service now preserves the Win32 error, stops the encoder, releases the old mapping/handle, and retries through its existing connection state machine. The waiter stays quiescent until that release completes, and actual PCM metadata is retained. Build checks cover compilation and linked descriptors; they do not exercise Windows PnP stop/restart timing or establish successful reconnection. Those hardware checks remain deferred.
 
 ## Do not load candidate 0.3.5
 

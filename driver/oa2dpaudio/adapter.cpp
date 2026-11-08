@@ -445,7 +445,7 @@ RebuildWork
     KeReleaseSpinLock(&dev->Lock, irql);
 
     Oa2dpLock(&dev->FilterLock);
-    if (dev->Started && !dev->Removed && dev->NameChanged && dev->Streams == 0 && dev->WavePort)
+    if (NT_SUCCESS(Oa2dpControlStatus(dev, FALSE)) && dev->NameChanged && dev->Streams == 0 && dev->WavePort)
     {
         // The endpoint builder reads the device's friendly name when the KS
         // interfaces arrive; re-registering makes a new name show at once.
@@ -582,11 +582,7 @@ Routine Description:
         ntStatus = Oa2dpControlStart(dev);
     }
 
-    if (NT_SUCCESS(ntStatus))
-    {
-        dev->Started = TRUE;
-    }
-    else
+    if (!NT_SUCCESS(ntStatus))
     {
         Oa2dpLock(&dev->FilterLock);
         RemoveFilters(dev);
@@ -606,7 +602,6 @@ StopDevice
 {
     PAGED_CODE();
 
-    dev->Started = FALSE;
     Oa2dpControlStop(dev);
     Oa2dpLock(&dev->FilterLock);
     RemoveFilters(dev);

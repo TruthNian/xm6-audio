@@ -90,8 +90,8 @@ public:
     bool map_ring();
     void unmap_ring();
     oa2dp_pcm_ring *ring() const { return ring_; }
-    // true with a new format, false on cancel/error
-    bool wait_format(OA2DP_FORMAT_CHANGE &out, HANDLE cancel);
+    // ERROR_SUCCESS with a new format; preserve the native cancel/device error.
+    DWORD wait_format(OA2DP_FORMAT_CHANGE &out, HANDLE cancel);
     void cancel_all() { dev_.cancel_all(); }
 
 private:

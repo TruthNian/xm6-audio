@@ -369,12 +369,14 @@ void AudioEndpoint::unmap_ring()
     ring_ = nullptr;
 }
 
-bool AudioEndpoint::wait_format(OA2DP_FORMAT_CHANGE &out, HANDLE cancel)
+DWORD AudioEndpoint::wait_format(OA2DP_FORMAT_CHANGE &out, HANDLE cancel)
 {
     DWORD n = 0;
-    return dev_.ioctl(IOCTL_OA2DP_AUDIO_WAIT_FORMAT, nullptr, 0, &out, sizeof(out), &n, INFINITE,
-                      cancel) == ERROR_SUCCESS &&
-           n == sizeof(out);
+    DWORD error = dev_.ioctl(IOCTL_OA2DP_AUDIO_WAIT_FORMAT, nullptr, 0, &out, sizeof(out), &n,
+                              INFINITE, cancel);
+    if (error != ERROR_SUCCESS)
+        return error;
+    return n == sizeof(out) ? ERROR_SUCCESS : ERROR_INVALID_DATA;
 }
 
 }  // namespace oa2dp

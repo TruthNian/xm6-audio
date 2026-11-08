@@ -111,6 +111,9 @@ VOID Oa2dpLoadSettings(_Inout_ OA2DP_AUDIO_DEVICE *dev);
 NTSTATUS Oa2dpControlStart(_Inout_ OA2DP_AUDIO_DEVICE *dev);
 VOID Oa2dpControlStop(_Inout_ OA2DP_AUDIO_DEVICE *dev);
 VOID Oa2dpControlRemove(_Inout_ OA2DP_AUDIO_DEVICE *dev);
+/* The Locked variant requires dev->Lock. Release-only permits UNMAP on stop. */
+NTSTATUS Oa2dpControlStatusLocked(_In_ const OA2DP_AUDIO_DEVICE *dev, _In_ BOOLEAN releaseOnly);
+NTSTATUS Oa2dpControlStatus(_Inout_ OA2DP_AUDIO_DEVICE *dev, _In_ BOOLEAN releaseOnly);
 BOOLEAN Oa2dpControlIsCreate(_In_ PIRP irp);
 BOOLEAN Oa2dpControlOwns(_In_ OA2DP_AUDIO_DEVICE *dev, _In_ PIRP irp);
 NTSTATUS Oa2dpControlDispatch(_Inout_ OA2DP_AUDIO_DEVICE *dev, _Inout_ PIRP irp);
@@ -131,7 +134,7 @@ VOID Oa2dpUnlock(_Inout_ PKEVENT lock);
 VOID Oa2dpScheduleRebuild(_Inout_ OA2DP_AUDIO_DEVICE *dev);
 /* Tell the audio engine that the supported formats changed. */
 VOID Oa2dpWaveFormatsChanged(_Inout_ OA2DP_AUDIO_DEVICE *dev);
-VOID Oa2dpSetConnected(_Inout_ OA2DP_AUDIO_DEVICE *dev, _In_ BOOLEAN connected);
+NTSTATUS Oa2dpSetConnected(_Inout_ OA2DP_AUDIO_DEVICE *dev, _In_ BOOLEAN connected);
 
 #ifdef __cplusplus
 }
