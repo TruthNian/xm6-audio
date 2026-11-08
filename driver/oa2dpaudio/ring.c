@@ -45,7 +45,10 @@ NTSTATUS Oa2dpRingCreate(_Inout_ OA2DP_AUDIO_RING *r, _In_ ULONG rate, _In_ USHO
         return STATUS_INSUFFICIENT_RESOURCES;
     }
     RtlZeroMemory(ring, bytes);
-    if (oa2dp_ring_init(ring, RING_FRAMES, rate, channels, format) != OA2DP_OK) {
+    /* Initialize the immutable storage stride from the allocation, not the
+     * active format: a persisted mono preference must still allow stereo. */
+    if (oa2dp_ring_init(ring, RING_FRAMES, rate, OA2DP_RING_MAX_CHANNELS, format) != OA2DP_OK ||
+        oa2dp_ring_set_format(ring, rate, channels, format) < 0) {
         MmFreePagesFromMdl(mdl);
         ExFreePool(mdl);
         return STATUS_INVALID_PARAMETER;
