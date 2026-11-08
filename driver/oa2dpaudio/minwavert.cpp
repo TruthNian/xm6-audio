@@ -28,6 +28,7 @@ Abstract:
 #include "minwavert.h"
 #include "minwavertstream.h"
 #include "wavtable.h"
+#include "trace.h"
 
 #ifndef VT_ILLEGAL
 #define VT_ILLEGAL 0xffff
@@ -260,6 +261,9 @@ CMiniportWaveRT::NewStream
 
     *OutStream = NULL;
 
+    TraceLoggingWrite(g_Oa2dpAudioTrace, "NewStream",
+        TraceLoggingUInt32(Pin, "Pin"), TraceLoggingBool(Capture, "Capture"));
+
     if (Capture || Pin != OA2DP_WAVE_PIN_SINK)
     {
         return STATUS_INVALID_PARAMETER;
@@ -267,6 +271,8 @@ CMiniportWaveRT::NewStream
 
     // Determine if the format is valid.
     ntStatus = IsFormatSupported(DataFormat, &format);
+    TraceLoggingWrite(g_Oa2dpAudioTrace, "StreamFormat",
+        TraceLoggingNTStatus(ntStatus, "Status"));
 
     // Instantiate a stream. Stream must be in NonPagedPool(Nx): the position
     // timer runs at DISPATCH_LEVEL.
@@ -277,6 +283,8 @@ CMiniportWaveRT::NewStream
         {
             stream->AddRef();
             ntStatus = stream->Init(this, OuterUnknown, &format);
+            TraceLoggingWrite(g_Oa2dpAudioTrace, "StreamInit",
+                TraceLoggingNTStatus(ntStatus, "Status"));
         }
         else
         {

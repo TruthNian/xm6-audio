@@ -29,6 +29,10 @@ Abstract:
 #include "driver.h"
 #include <devpkey.h>
 #include "minwavert.h"
+#include "trace.h"
+
+TRACELOGGING_DEFINE_PROVIDER(g_Oa2dpAudioTrace, "XM6Audio.WaveRT",
+    (0xad2dba1f, 0x78a1, 0x4d25, 0xa6, 0x6e, 0xd3, 0x19, 0x5b, 0x9b, 0x1f, 0x72));
 
 #define OA2DP_MAX_MINIPORTS 4   // wave + topology, with room for a re-registration
 
@@ -65,6 +69,7 @@ void DriverUnload
     {
         gPCDriverUnloadRoutine(DriverObject);
     }
+    TraceLoggingUnregister(g_Oa2dpAudioTrace);
 }
 
 //=============================================================================
@@ -109,6 +114,9 @@ Routine Description:
     // Hook the port class unload function
     gPCDriverUnloadRoutine = DriverObject->DriverUnload;
     DriverObject->DriverUnload = DriverUnload;
+
+    // Diagnostics must never prevent the audio driver from loading.
+    (void)TraceLoggingRegister(g_Oa2dpAudioTrace);
 
     return STATUS_SUCCESS;
 } // DriverEntry
@@ -161,7 +169,19 @@ Oa2dpDispatch
     {
         return Oa2dpControlDispatch(dev, Irp);
     }
-    return gPcDispatch[sp->MajorFunction](DeviceObject, Irp);
+    // PortCls may complete/free the IRP. Save only scalar input before forwarding.
+    const UCHAR major = sp->MajorFunction;
+    const BOOLEAN related = sp->FileObject && sp->FileObject->RelatedFileObject;
+    const USHORT nameBytes = sp->FileObject ? sp->FileObject->FileName.Length : 0;
+    NTSTATUS status = gPcDispatch[major](DeviceObject, Irp);
+    if (major == IRP_MJ_CREATE)
+    {
+        TraceLoggingWrite(g_Oa2dpAudioTrace, "PortCreate",
+            TraceLoggingBool(related, "Related"),
+            TraceLoggingUInt16(nameBytes, "NameBytes"),
+            TraceLoggingNTStatus(status, "Status"));
+    }
+    return status;
 }
 
 //=============================================================================
