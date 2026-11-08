@@ -24,6 +24,7 @@ NTSTATUS Oa2dpEvtDeviceAdd(_In_ WDFDRIVER Driver, _Inout_ PWDFDEVICE_INIT Device
     WDF_OBJECT_ATTRIBUTES attrs;
     WDF_PNPPOWER_EVENT_CALLBACKS pnp;
     WDF_IO_QUEUE_CONFIG qcfg;
+    WDF_FILEOBJECT_CONFIG files;
     OA2DP_DEVICE_CONTEXT *dev;
     UNREFERENCED_PARAMETER(Driver);
     PAGED_CODE();
@@ -32,6 +33,12 @@ NTSTATUS Oa2dpEvtDeviceAdd(_In_ WDFDRIVER Driver, _Inout_ PWDFDEVICE_INIT Device
     pnp.EvtDevicePrepareHardware = Oa2dpEvtPrepareHardware;
     pnp.EvtDeviceReleaseHardware = Oa2dpEvtReleaseHardware;
     WdfDeviceInitSetPnpPowerEventCallbacks(DeviceInit, &pnp);
+    WDF_FILEOBJECT_CONFIG_INIT(&files, WDF_NO_EVENT_CALLBACK, WDF_NO_EVENT_CALLBACK,
+                               Oa2dpEvtFileCleanup);
+    WDF_OBJECT_ATTRIBUTES_INIT(&attrs);
+    attrs.ExecutionLevel = WdfExecutionLevelPassive;
+    WdfDeviceInitSetFileObjectConfig(DeviceInit, &files, &attrs);
+    WdfDeviceInitSetExclusive(DeviceInit, TRUE);
 
     /* Only the service (LocalSystem) and administrators may open us. */
     {
@@ -124,6 +131,12 @@ NTSTATUS Oa2dpEvtReleaseHardware(_In_ WDFDEVICE Device, _In_ WDFCMRESLIST Transl
 
 /* ------------------------------------------------------------------------ */
 
+VOID Oa2dpEvtFileCleanup(_In_ WDFFILEOBJECT file)
+{
+    /* A crashed/restarted service must not inherit orphaned open channels. */
+    Oa2dpCloseAllChannels(Oa2dpGetDevice(WdfFileObjectGetDevice(file)));
+}
+
 static VOID CompleteEvent(_In_ WDFREQUEST req, _In_ const OA2DP_EVENT *event)
 {
     OA2DP_EVENT *ev;
@@ -135,9 +148,33 @@ static VOID CompleteEvent(_In_ WDFREQUEST req, _In_ const OA2DP_EVENT *event)
     WdfRequestCompleteWithInformation(req, STATUS_SUCCESS, sizeof(*ev));
 }
 
+static VOID DeliverPendingEvents(_In_ OA2DP_DEVICE_CONTEXT *dev)
+{
+    for (;;) {
+        WDFREQUEST req = NULL;
+        OA2DP_EVENT event;
+        WdfSpinLockAcquire(dev->Lock);
+        if ((!dev->EventCount && !dev->EventOverflow) ||
+            !NT_SUCCESS(WdfIoQueueRetrieveNextRequest(dev->EventQueue, &req))) {
+            WdfSpinLockRelease(dev->Lock);
+            return;
+        }
+        if (dev->EventOverflow) {
+            RtlZeroMemory(&event, sizeof(event));
+            event.Type = Oa2dpEventStateLost;
+            dev->EventOverflow = FALSE;
+        } else {
+            event = dev->Events[dev->EventHead];
+            dev->EventHead = (dev->EventHead + 1) % OA2DP_EVENT_CAPACITY;
+            --dev->EventCount;
+        }
+        WdfSpinLockRelease(dev->Lock);
+        CompleteEvent(req, &event);
+    }
+}
+
 VOID Oa2dpPostEvent(_In_ OA2DP_DEVICE_CONTEXT *dev, _In_ ULONG type, _In_ OA2DP_CHANNEL *ch)
 {
-    WDFREQUEST req = NULL;
     OA2DP_EVENT event;
     RtlZeroMemory(&event, sizeof(event));
     event.Type = type;
@@ -148,60 +185,39 @@ VOID Oa2dpPostEvent(_In_ OA2DP_DEVICE_CONTEXT *dev, _In_ ULONG type, _In_ OA2DP_
         event.Channel.OutMtu = ch->OutMtu;
         event.Channel.InMtu = ch->InMtu;
     }
-    if (!NT_SUCCESS(WdfIoQueueRetrieveNextRequest(dev->EventQueue, &req))) {
-        /* Buffer gaps between waits, including connections arriving before
-         * the service starts. GET_INFO does not replay channel transitions. */
-        if (type == Oa2dpEventDeviceGone) {
+    if (type == Oa2dpEventDeviceGone) {
+        dev->EventHead = dev->EventCount = 0;
+        dev->EventOverflow = FALSE;
+    }
+    if (!dev->EventOverflow) {
+        if (dev->EventCount == OA2DP_EVENT_CAPACITY) {
             dev->EventHead = dev->EventCount = 0;
-            dev->EventOverflow = FALSE;
+            dev->EventOverflow = TRUE;
+        } else {
+            ULONG tail = (dev->EventHead + dev->EventCount) % OA2DP_EVENT_CAPACITY;
+            dev->Events[tail] = event;
+            ++dev->EventCount;
         }
-        if (!dev->EventOverflow) {
-            if (dev->EventCount == OA2DP_EVENT_CAPACITY) {
-                dev->EventHead = dev->EventCount = 0;
-                dev->EventOverflow = TRUE;
-            } else {
-                ULONG tail = (dev->EventHead + dev->EventCount) % OA2DP_EVENT_CAPACITY;
-                dev->Events[tail] = event;
-                ++dev->EventCount;
-            }
-        }
-        req = NULL;
     }
     WdfSpinLockRelease(dev->Lock);
-    if (req)
-        CompleteEvent(req, &event);
+    DeliverPendingEvents(dev);
 }
 
 static VOID WaitEvent(_In_ OA2DP_DEVICE_CONTEXT *dev, _In_ WDFREQUEST request)
 {
-    OA2DP_EVENT event;
     OA2DP_EVENT *out;
-    BOOLEAN deliver = FALSE;
     NTSTATUS status = WdfRequestRetrieveOutputBuffer(request, sizeof(*out), (PVOID *)&out, NULL);
     if (!NT_SUCCESS(status)) {
         WdfRequestComplete(request, status);
         return;
     }
-    WdfSpinLockAcquire(dev->Lock);
-    if (dev->EventOverflow) {
-        RtlZeroMemory(&event, sizeof(event));
-        event.Type = Oa2dpEventStateLost;
-        dev->EventOverflow = FALSE;
-        deliver = TRUE;
-    } else if (dev->EventCount) {
-        event = dev->Events[dev->EventHead];
-        dev->EventHead = (dev->EventHead + 1) % OA2DP_EVENT_CAPACITY;
-        --dev->EventCount;
-        deliver = TRUE;
-    } else {
-        /* Forwarding and checking the backlog share the producer's lock:
-         * no notification can fall between the check and waiter insertion. */
-        status = WdfRequestForwardToIoQueue(request, dev->EventQueue);
-    }
-    WdfSpinLockRelease(dev->Lock);
-    if (deliver)
-        CompleteEvent(request, &event);
-    else if (!NT_SUCCESS(status))
+    /* Forward can dispatch another source-queue callback synchronously.
+     * Never hold our lock across it. Both paths drain under the same lock
+     * afterwards, so an event arriving before insertion is still delivered. */
+    status = WdfRequestForwardToIoQueue(request, dev->EventQueue);
+    if (NT_SUCCESS(status))
+        DeliverPendingEvents(dev);
+    else
         WdfRequestComplete(request, status);
 }
 
