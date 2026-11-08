@@ -53,7 +53,7 @@ Get-ChildItem -LiteralPath $output -Recurse -File | ForEach-Object {
     $files[$relative] = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
 }
 $manifest = [ordered]@{
-    project = 'XM6 Audio'; version = '0.3.1'; architecture = 'x64'
+    project = 'XM6 Audio'; version = '0.3.2'; architecture = 'x64'
     commit = (& git -C $repo rev-parse HEAD)
     upstream = 'RafiMota/open-a2dp@167ebc0e2c89fec570eec535fefdade72bd9e416'
     libldac = (& git -C "$repo\third_party\libldac" rev-parse HEAD)

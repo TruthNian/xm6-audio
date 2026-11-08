@@ -409,6 +409,7 @@ bool Session::setup_audio_endpoint()
             continue;
         static const OA2DP_FORMAT representations[] = {
             {0, 0, 32, 32, OA2DP_PCM_FLOAT}, {0, 0, 32, 32, OA2DP_PCM_INTEGER},
+            {0, 0, 32, 24, OA2DP_PCM_INTEGER},
             {0, 0, 24, 24, OA2DP_PCM_INTEGER}, {0, 0, 16, 16, OA2DP_PCM_INTEGER}};
         for (const OA2DP_FORMAT &representation : representations) {
             USHORT depth = representation.BitsPerSample;
