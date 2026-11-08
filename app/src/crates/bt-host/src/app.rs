@@ -2055,7 +2055,7 @@ impl HostApp {
                     return;
                 }
                 let (Some(op), Some(pressed)) = (u8_at(p, 5), u8_at(p, 6)) else { return };
-                tracing::debug!("AVRCP operation 0x{op:02X} {}", if pressed != 0 { "pressed" } else { "released" });
+                tracing::info!("AVRCP operation 0x{op:02X} {}", if pressed != 0 { "pressed" } else { "released" });
                 self.on_button(stack, op, pressed != 0);
             }
             Some(AVRCP_SUBEVENT_PLAY_STATUS_QUERY) => {

@@ -137,6 +137,7 @@ fn main() {
     build.file(patched_sm(&btstack));
     build.files(CLASSIC.iter().map(|f| match *f {
         "a2dp.c" => patched_a2dp(&btstack),
+        "avrcp_target.c" => patched_avrcp_target(&btstack),
         f => btstack.join("src/classic").join(f),
     }));
     build.file(btstack.join("platform/windows/btstack_run_loop_windows.c"));
@@ -204,6 +205,24 @@ fn patched_a2dp(btstack: &Path) -> PathBuf {
         );
     }
     let path = PathBuf::from(env::var("OUT_DIR").unwrap()).join("a2dp.c");
+    std::fs::write(&path, source).unwrap();
+    path
+}
+
+/// A pass-through response echoes the complete operation octet, including
+/// its release bit. Upstream masks it for the operation event and also
+/// (incorrectly) reuses that masked value for the response. A controller
+/// waiting for the matching release can then stop sending further keys.
+fn patched_avrcp_target(btstack: &Path) -> PathBuf {
+    const FILE: &str = "avrcp_target.c";
+    let mut source = std::fs::read_to_string(btstack.join("src/classic/avrcp_target.c")).unwrap();
+    for (response, count) in [("REJECTED", 2), ("ACCEPTED", 1), ("NOT_IMPLEMENTED", 1)] {
+        let from = format!("AVRCP_CTYPE_RESPONSE_{response}, operation_id,");
+        let to = format!("AVRCP_CTYPE_RESPONSE_{response}, (avrcp_operation_id_t) operation,");
+        assert_eq!(source.matches(&from).count(), count, "{FILE}: pass-through reply changed upstream");
+        source = source.replace(&from, &to);
+    }
+    let path = PathBuf::from(env::var("OUT_DIR").unwrap()).join(FILE);
     std::fs::write(&path, source).unwrap();
     path
 }

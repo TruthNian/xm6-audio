@@ -129,7 +129,11 @@ fn classic_session_command(key: MediaKey) -> bool {
     pin_dll_of("session manager", &manager);
     let Ok(session) = manager.GetCurrentSession() else { return false };
     let accepted = match key {
-        MediaKey::PlayPause => wait_result!(session.TryTogglePlayPauseAsync()),
+        MediaKey::PlayPause => match session.GetPlaybackInfo().and_then(|info| info.PlaybackStatus()) {
+            Ok(PlaybackStatus::Playing) => wait_result!(session.TryPauseAsync()),
+            Ok(PlaybackStatus::Paused | PlaybackStatus::Stopped) => wait_result!(session.TryPlayAsync()),
+            _ => wait_result!(session.TryTogglePlayPauseAsync()),
+        },
         MediaKey::Stop => wait_result!(session.TryStopAsync()),
         MediaKey::Next => wait_result!(session.TrySkipNextAsync()),
         MediaKey::Previous => wait_result!(session.TrySkipPreviousAsync()),
