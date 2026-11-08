@@ -1,6 +1,6 @@
-# Free-signing feasibility inquiry — DRAFT, NOT SENT
+# Free-signing feasibility inquiry — published with user authorization
 
-Proposed channel: a public issue in the Foundation's own [SignPath/fdn-website](https://github.com/SignPath/fdn-website) repository, where driver eligibility questions are already being raised. Publishing requires the user's explicit authorization. This is a feasibility question, not an application or binary submission. No private hardware information, account credentials, licenses or signing material is included.
+Published on 2026-11-08 as [SignPath/fdn-website#28](https://github.com/SignPath/fdn-website/issues/28), after explicit user authorization. This is a feasibility question, not an application or binary submission. No private hardware information, account credentials, licenses or signing material is included. No signing approval has been received.
 
 Subject: Free Microsoft kernel-attestation route for an open-source Windows Bluetooth audio project?
 

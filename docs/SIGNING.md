@@ -1,6 +1,6 @@
 # Kernel signing and free channels
 
-Research date: 2026-11-08. No application, email, external issue or binary submission has been sent. No new paid service is authorized.
+Research date: 2026-11-08. An explicitly authorized public feasibility inquiry has been published as [SignPath/fdn-website#28](https://github.com/SignPath/fdn-website/issues/28). No signing application or binary submission has been made, and no new paid service is authorized. A reply/approval is still pending.
 
 The listening machine currently uses the Microsoft inbox A2DP driver, with normal Bluetooth and audible XM6 sound restored. That recovery does not establish LDAC support. The native candidate must not replace it until the two drivers have a valid Microsoft kernel-policy signature and a controlled hardware acceptance path.
 
@@ -13,7 +13,7 @@ The listening machine currently uses the Microsoft inbox A2DP driver, with norma
 | [OSSign](https://ossign.org/) | Publicly offers free OSS signing and EV/attestation for selected projects. Applications currently suspended; minimum six months activity applies to account/organization/project, including forks without prior upstream involvement. | A real candidate in principle, unavailable immediately and this new project does not meet published history requirements. Do not claim an application or exception exists. |
 | [SignPath Foundation](https://signpath.org/terms) | Free OSS signing subject to review, provenance, project reputation and rules for modified upstream sources. Its public terms require upstream signed releases for certain fork-signing cases. | Public material does not confirm a free Microsoft kernel-attestation path for these two drivers. Eligibility and technical coverage need confirmation; no acceptance is implied. |
 
-No immediately available, confirmed free route has been found. A signing sponsor collaborating with the upstream project is a possible route to investigate, not an obtained signature or an installation workaround. A reviewable [inquiry draft](SIGNING-INQUIRY.md) is provided; sending it requires explicit user authorization.
+No immediately available, confirmed free route has been found. A signing sponsor collaborating with the upstream project is a possible route to investigate, not an obtained signature or an installation workaround. The [approved inquiry text](SIGNING-INQUIRY.md) is retained for traceability; publication is not approval or a signed package.
 
 ## A vendor signature cannot be transferred
 
@@ -48,5 +48,6 @@ Recovery switches the selected headset back to Microsoft A2DP and makes the nati
 - Hardware validation of native endpoint name, volume/mute, retained AVRCP play/pause/next/previous, actual sound and source-rate transitions.
 - Headset off/on, disconnect state notification, sleep/resume and service restart without stale PCM or silent-success status.
 - Shared/exclusive audio and video timing; no claim to infer file format from Windows shared-mode PCM.
+- Integer/float32 and 24-in-32 endpoint acceptance; visible input/container/encoder precision; honest LDAC/AAC/SBC negotiation and fixed-profile rejection.
 
 The WaveRT topology now implements KS jack presence properties and standard jack-change events. The service marks the endpoint disconnected on link failure; control-handle cleanup also handles a crashed service. These paths have not yet been exercised on hardware. Retaining Windows AVRCP services is an architectural prerequisite, not evidence that headset buttons already control this new endpoint on hardware.
