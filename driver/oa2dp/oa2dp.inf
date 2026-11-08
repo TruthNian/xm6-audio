@@ -14,7 +14,7 @@ Class       = Bluetooth
 ClassGuid   = {e0cbf06c-cd8b-4647-bb8a-263b43f0f974}
 Provider    = %ProviderName%
 CatalogFile = oa2dp.cat
-DriverVer   = 11/08/2026,0.3.0.0
+DriverVer   = 11/08/2026,0.3.1.0
 PnpLockdown = 1
 
 [DestinationDirs]
@@ -53,7 +53,7 @@ sbc.dll
 AddReg = Oa2dp_HW_AddReg
 
 [Oa2dp_HW_AddReg]
-; Same security as the device object SDDL in driver.c
+; PnP applies this ACL to the device stack; driver.c keeps its FDO unnamed.
 HKR,,Security,,"D:P(A;;GA;;;SY)(A;;GA;;;BA)"
 
 [Oa2dp_Install.NT.Services]

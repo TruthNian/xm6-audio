@@ -40,13 +40,10 @@ NTSTATUS Oa2dpEvtDeviceAdd(_In_ WDFDRIVER Driver, _Inout_ PWDFDEVICE_INIT Device
     WdfDeviceInitSetFileObjectConfig(DeviceInit, &files, &attrs);
     WdfDeviceInitSetExclusive(DeviceInit, TRUE);
 
-    /* Only the service (LocalSystem) and administrators may open us. */
-    {
-        DECLARE_CONST_UNICODE_STRING(sddl, L"D:P(A;;GA;;;SY)(A;;GA;;;BA)");
-        status = WdfDeviceInitAssignSDDLString(DeviceInit, &sddl);
-        if (!NT_SUCCESS(status))
-            return status;
-    }
+    /* The INF supplies SYSTEM/admin access for this PnP stack. Assigning
+     * SDDL to this unnamed FDO makes WdfDeviceCreate fail with
+     * STATUS_INVALID_SECURITY_DESCR. Enforce the stack ACL on child opens. */
+    WdfDeviceInitSetCharacteristics(DeviceInit, FILE_DEVICE_SECURE_OPEN, TRUE);
 
     /* Every request carries a context for its BRB. */
     WDF_OBJECT_ATTRIBUTES_INIT_CONTEXT_TYPE(&attrs, OA2DP_REQUEST_CONTEXT);

@@ -63,11 +63,24 @@ namespace Xm6Audio {
     public static class NativeStore {
         [DllImport("setupapi.dll", CharSet=CharSet.Unicode, SetLastError=true)]
         [return: MarshalAs(UnmanagedType.Bool)]
+        static extern bool SetupCopyOEMInf(string source, string media, uint mediaType,
+            uint flags, StringBuilder destination, uint capacity, out uint required, IntPtr component);
+        [DllImport("setupapi.dll", CharSet=CharSet.Unicode, SetLastError=true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
         static extern bool SetupGetInfDriverStoreLocation(string inf, IntPtr platform,
             string locale, StringBuilder buffer, uint capacity, out uint required);
         public static string Locate(string inf) {
-            var buffer = new StringBuilder(32768); uint required;
-            if (!SetupGetInfDriverStoreLocation(inf, IntPtr.Zero, null, buffer,
+            // The store lookup accepts a published OEM INF, not a loose source
+            // path. Resolve the exact INF/catalog pair already staged above.
+            var published = new StringBuilder(32768); uint required;
+            if (!SetupCopyOEMInf(inf, null, 1, 8, published,
+                    (uint)published.Capacity, out required, IntPtr.Zero)) {
+                int error = Marshal.GetLastWin32Error();
+                if (error != 80) throw new Win32Exception(error); // ERROR_FILE_EXISTS
+            }
+            if (published.Length == 0) throw new InvalidOperationException("No published driver INF returned.");
+            var buffer = new StringBuilder(32768);
+            if (!SetupGetInfDriverStoreLocation(published.ToString(), IntPtr.Zero, null, buffer,
                     (uint)buffer.Capacity, out required))
                 throw new Win32Exception(Marshal.GetLastWin32Error());
             return System.IO.Path.GetDirectoryName(buffer.ToString());
@@ -98,6 +111,11 @@ try {
     $oldService = Get-Service oa2dpsvc -ErrorAction SilentlyContinue
     if ($oldService -and $oldService.Status -ne 'Stopped') { Stop-Service oa2dpsvc }
     Invoke-Checked $ctl @('use',$address)
+    $problem = (Get-PnpDeviceProperty -InstanceId $headset[0].InstanceId -KeyName DEVPKEY_Device_ProblemCode).Data
+    if ($problem -ne 0) {
+        $problemStatus = (Get-PnpDeviceProperty -InstanceId $headset[0].InstanceId -KeyName DEVPKEY_Device_ProblemStatus).Data
+        throw ('Native transport failed to start: problem {0}, status 0x{1:X8}.' -f $problem,[uint32]$problemStatus)
+    }
     $service = Get-Service oa2dpsvc
     if ($service.Status -eq 'Stopped') { Start-Service oa2dpsvc }
     $service.WaitForStatus('Running',[TimeSpan]::FromSeconds(30))
