@@ -1,10 +1,13 @@
-# Native lifecycle review, 0.3.31
+# Native lifecycle review, 0.3.32
 
-This source batch is not a declaration of hardware acceptance. Source review
-and focused offline checks precede another hardware trial. Versions 0.3.23
-through 0.3.31 have not been installed on the host. The host was restored to Microsoft
-BthA2dp; the custom codec service is stopped. Current host audio is not evidence
-of native LDAC. No further installation or reboot is part of this source review.
+This source batch is not a declaration of hardware acceptance. Versions 0.3.23
+through 0.3.30 were not installed. A controlled 0.3.31 hot-binding trial returned
+installer code 3010, but the installation log also established a real start
+failure: CM_PROB_FAILED_START, status 0xC0000184. It was rolled back without a
+system reboot; the Microsoft binding was started and both custom images were
+absent afterward. Version 0.3.32 corrects a confirmed pre-enumeration property
+assignment defect. A reboot cannot repair that source defect; successful
+startup, actual sound and Settings behavior still require acceptance.
 
 ## Confirmed source defects and corrections
 
@@ -30,6 +33,7 @@ of native LDAC. No further installation or reboot is part of this source review.
 | Server/PSM allocation or registration/unregistration fails | Setup ignored registration failure; cleanup erased ownership even when no unregister BRB could be allocated | Transactional registration state shared with off-host failure injection; retain each resource until confirmed release, gate admission through prepare and finish old ownership before a new registration |
 | Repeated PrepareHardware on the same device object | Each query acquired another Bluetooth interface reference and overwrote the previous import; no matching dereference existed | Import the BRB allocation interface once per WDFDEVICE and release it during final device destruction |
 | Headset establishes ACL after an unsuccessful page | The service waited for its periodic connection retry even though Windows had a fresh link notification | Subscribe to public target-device HCI notifications; accelerate the existing session's retry with peer-initiator grace, preserving explicit disconnect and actual channel ownership |
+| Create the render PDO after the 0.3.21 identity change | WdfDeviceAssignProperty ran before the PDO was known to PnP, deterministically returning STATUS_INVALID_DEVICE_STATE | Assign the two Bluetooth identity properties through IoSetDevicePropertyData during IRP_MN_DEVICE_ENUMERATED, then return the IRP to WDF |
 
 Channel close work is preallocated rather than allocated in a disconnect
 indication. Allocation failure can no longer fabricate a completed remote

@@ -7,6 +7,7 @@ TRACELOGGING_DEFINE_PROVIDER(g_Oa2dpTransportTrace, "XM6Audio.Transport",
     (0xbd2386c3, 0x72bc, 0x4f90, 0x82, 0x92, 0x24, 0x76, 0x26, 0x36, 0x2c, 0xb2));
 
 static EVT_WDF_DRIVER_UNLOAD Oa2dpEvtDriverUnload;
+static EVT_WDFDEVICE_WDM_IRP_PREPROCESS Oa2dpChildEnumerated;
 
 static VOID Oa2dpEvtDriverUnload(WDFDRIVER driver)
 {
@@ -205,11 +206,19 @@ NTSTATUS Oa2dpEvtPrepareHardware(_In_ WDFDEVICE Device, _In_ WDFCMRESLIST Raw,
     Oa2dpPublishConnected(dev, FALSE, 0);
 
     status = Oa2dpMpmStart(dev);
+    TraceLoggingWrite(g_Oa2dpTransportTrace, "PrepareStepResult",
+        TraceLoggingUInt32(1, "Step"), TraceLoggingNTStatus(status, "Status"));
     if (!NT_SUCCESS(status))
         return status;
     /* Establish policy before allowing peer-initiated channels. */
     status = Oa2dpRegisterServer(dev);
-    if (NT_SUCCESS(status)) status = Oa2dpCreateAudioChild(dev);
+    TraceLoggingWrite(g_Oa2dpTransportTrace, "PrepareStepResult",
+        TraceLoggingUInt32(2, "Step"), TraceLoggingNTStatus(status, "Status"));
+    if (NT_SUCCESS(status)) {
+        status = Oa2dpCreateAudioChild(dev);
+        TraceLoggingWrite(g_Oa2dpTransportTrace, "PrepareStepResult",
+            TraceLoggingUInt32(3, "Step"), TraceLoggingNTStatus(status, "Status"));
+    }
     if (!NT_SUCCESS(status)) {
         (void)Oa2dpUnregisterServer(dev);
         Oa2dpMpmStop(dev);
@@ -470,6 +479,44 @@ static VOID WaitEvent(_In_ OA2DP_DEVICE_CONTEXT *dev, _In_ WDFREQUEST request)
         WdfRequestComplete(request, status);
 }
 
+static NTSTATUS Oa2dpChildEnumerated(WDFDEVICE child, PIRP irp)
+{
+    OA2DP_DEVICE_CONTEXT *dev = Oa2dpGetDevice(WdfPdoGetParent(child));
+    PDEVICE_OBJECT pdo = WdfDeviceWdmGetDeviceObject(child);
+    WCHAR address[13];
+    ULONG property = 0;
+    NTSTATUS status;
+    PAGED_CODE();
+
+    /* PnP now knows this PDO. A WDF property wrapper is still too early in
+     * this preprocess callback: WDF has not processed DEVICE_ENUMERATED yet.
+     * The documented WDM enumeration contract permits setting PDO properties
+     * here, before user mode is notified and the audio FDO is installed. */
+    status = RtlStringCchPrintfW(address, ARRAYSIZE(address), L"%012I64x",
+                                (ULONGLONG)dev->RemoteAddress);
+    if (NT_SUCCESS(status)) {
+        property = 1;
+        status = IoSetDevicePropertyData(pdo, &BluetoothAddressKey,
+            LOCALE_NEUTRAL, 0, DEVPROP_TYPE_STRING, sizeof(address), address);
+    }
+    if (NT_SUCCESS(status)) {
+        property = 2;
+        status = IoSetDevicePropertyData(pdo, &BluetoothServiceKey,
+            LOCALE_NEUTRAL, 0, DEVPROP_TYPE_GUID, sizeof(AudioSinkService), (PVOID)&AudioSinkService);
+    }
+    TraceLoggingWrite(g_Oa2dpTransportTrace, "ChildIdentityResult",
+        TraceLoggingUInt32(property, "PropertyIndex"),
+        TraceLoggingNTStatus(status, "Status"));
+    if (!NT_SUCCESS(status)) {
+        irp->IoStatus.Status = status;
+        irp->IoStatus.Information = 0;
+        IoCompleteRequest(irp, IO_NO_INCREMENT);
+        return status;
+    }
+    IoSkipCurrentIrpStackLocation(irp);
+    return WdfDeviceWdmDispatchPreprocessedIrp(child, irp);
+}
+
 NTSTATUS Oa2dpCreateAudioChild(_In_ OA2DP_DEVICE_CONTEXT *dev)
 {
     NTSTATUS status;
@@ -499,6 +546,11 @@ NTSTATUS Oa2dpCreateAudioChild(_In_ OA2DP_DEVICE_CONTEXT *dev)
         RtlInitUnicodeString(&id, instance);
         status = WdfPdoInitAssignInstanceID(init, &id);
     }
+    if (NT_SUCCESS(status)) {
+        UCHAR minor = IRP_MN_DEVICE_ENUMERATED;
+        status = WdfDeviceInitAssignWdmIrpPreprocessCallback(init, Oa2dpChildEnumerated,
+                                                           IRP_MJ_PNP, &minor, 1);
+    }
     if (!NT_SUCCESS(status)) {
         WdfDeviceInitFree(init);
         return status;
@@ -519,26 +571,6 @@ NTSTATUS Oa2dpCreateAudioChild(_In_ OA2DP_DEVICE_CONTEXT *dev)
         WDF_DEVICE_PNP_CAPABILITIES_INIT(&caps);
         caps.UniqueID = WdfTrue;
         WdfDeviceSetPnpCapabilities(child, &caps);
-    }
-    {
-        WDF_DEVICE_PROPERTY_DATA property;
-        WCHAR address[13];
-        status = RtlStringCchPrintfW(address, ARRAYSIZE(address), L"%012I64x",
-                                     (ULONGLONG)dev->RemoteAddress);
-        if (NT_SUCCESS(status)) {
-            WDF_DEVICE_PROPERTY_DATA_INIT(&property, &BluetoothAddressKey);
-            status = WdfDeviceAssignProperty(child, &property,
-                DEVPROP_TYPE_STRING, sizeof(address), address);
-        }
-        if (NT_SUCCESS(status)) {
-            WDF_DEVICE_PROPERTY_DATA_INIT(&property, &BluetoothServiceKey);
-            status = WdfDeviceAssignProperty(child, &property,
-                DEVPROP_TYPE_GUID, sizeof(AudioSinkService), (PVOID)&AudioSinkService);
-        }
-        if (!NT_SUCCESS(status)) {
-            WdfObjectDelete(child);
-            return status;
-        }
     }
     status = Oa2dpRegisterBusInterface(dev, child);
     if (!NT_SUCCESS(status)) {

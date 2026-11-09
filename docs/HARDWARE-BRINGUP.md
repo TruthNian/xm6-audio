@@ -2,10 +2,11 @@
 
 The controlled developer trial targets WH-1000XM6 on Windows 10 x64, build 19045. It uses a local development signature under explicitly authorized test signing. This is separate from the production installer, which still requires Microsoft-signed catalogs.
 
-Latest source audit: [0.3.30 lifecycle review](LIFECYCLE-REVIEW.md). Versions
-0.3.23 through 0.3.30 have not been deployed. The host is restored to Microsoft BthA2dp
-and the custom codec service is stopped. The earlier 0.3.21 staging state is
-historical, not the selected driver for the next ordinary boot.
+Latest source audit: [0.3.32 lifecycle review](LIFECYCLE-REVIEW.md). Versions
+0.3.23 through 0.3.30 were not deployed. A controlled 0.3.31 warm-binding trial
+failed during initialization and was rolled back without a system reboot.
+The earlier 0.3.21 staging state is historical, not the selected driver for
+the next ordinary boot.
 Do not treat source, staging, CI or backend commands as completed hardware/UI
 acceptance. The observations below retain their original tested versions.
 
@@ -13,7 +14,7 @@ acceptance. The observations below retain their original tested versions.
 
 The installed audio package is source commit `2cb9079edb146e6b41b25144a2c0cd4f9c104050`, built by [CI run 42635173749](https://github.com/TruthNian/xm6-audio/actions/runs/42635173749). After the authorized restart, actual kernel-module paths and on-disk image hashes matched both locally signed candidate drivers. The audio topology returned the new 88-byte support description: two channels with MULTICHANNEL and UNIFORM flags. This distinguishes the loaded update from a staged package or a service ImagePath setting.
 
-The native codec service started during boot without a manual launch. At this check, the paired headset was disconnected and outgoing signalling attempts returned paging timeouts. The service being alive does not establish headset availability or audible startup. Post-restart playback and Windows settings disconnect/reconnect therefore remain unaccepted, pending the headset availability check.
+The native codec service started during boot without a manual launch. The initial availability check found the headset disconnected and outgoing signalling attempts timed out. The user subsequently confirmed audible music/video with normal quality after this restart. Windows Settings per-device disconnect/connect still reported an error or an incorrect button state. Service startup alone did not establish sound; the subsequent audible confirmation does not establish correct reconnection.
 
 Before that restart, the user explicitly confirmed bidirectional headset/Windows master volume. That supersedes the earlier volume failure recorded below. The application volume remains independently scoped. PotPlayer had also become audible after a one-time reopen; this does not establish automatic recovery for existing players. Reconnect acceptance requires retaining the endpoint identity and application processes without individual repair.
 
