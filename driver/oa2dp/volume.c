@@ -7,6 +7,7 @@
  */
 #include <ntifs.h>
 #include "oa2dp.h"
+#include <windef.h>
 #include <ks.h>
 #include <ksmedia.h>
 #include <devpropdef.h>
