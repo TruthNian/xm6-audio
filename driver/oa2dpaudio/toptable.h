@@ -83,7 +83,28 @@ static PCPIN_DESCRIPTOR Oa2dpTopoMiniportPins[] =
 
 static PCCONNECTION_DESCRIPTOR Oa2dpTopoMiniportConnections[] =
 {
-    { PCFILTER_NODE, OA2DP_TOPO_PIN_IN, PCFILTER_NODE, OA2DP_TOPO_PIN_OUT }
+    { PCFILTER_NODE, OA2DP_TOPO_PIN_IN, 0, 1 },
+    { 0, 0, 1, 1 },
+    { 1, 0, PCFILTER_NODE, OA2DP_TOPO_PIN_OUT }
+};
+
+static PCPROPERTY_ITEM Oa2dpVolumeProperties[] = {
+    { &KSPROPSETID_Audio, KSPROPERTY_AUDIO_VOLUMELEVEL,
+      KSPROPERTY_TYPE_GET | KSPROPERTY_TYPE_SET | KSPROPERTY_TYPE_BASICSUPPORT, PropertyHandler_Volume }
+};
+static PCPROPERTY_ITEM Oa2dpMuteProperties[] = {
+    { &KSPROPSETID_Audio, KSPROPERTY_AUDIO_MUTE,
+      KSPROPERTY_TYPE_GET | KSPROPERTY_TYPE_SET | KSPROPERTY_TYPE_BASICSUPPORT, PropertyHandler_Volume }
+};
+static PCEVENT_ITEM Oa2dpVolumeEvents[] = {
+    { &KSEVENTSETID_AudioControlChange, KSEVENT_CONTROL_CHANGE,
+      KSEVENT_TYPE_ENABLE | KSEVENT_TYPE_BASICSUPPORT, EventHandler_Volume }
+};
+DEFINE_PCAUTOMATION_TABLE_PROP_EVENT(Oa2dpVolumeAutomation, Oa2dpVolumeProperties, Oa2dpVolumeEvents);
+DEFINE_PCAUTOMATION_TABLE_PROP_EVENT(Oa2dpMuteAutomation, Oa2dpMuteProperties, Oa2dpVolumeEvents);
+static PCNODE_DESCRIPTOR Oa2dpTopoNodes[] = {
+    { 0, &Oa2dpVolumeAutomation, &KSNODETYPE_VOLUME, NULL },
+    { 0, &Oa2dpMuteAutomation, &KSNODETYPE_MUTE, NULL }
 };
 
 static PCPROPERTY_ITEM Oa2dpJackProperties[] =
@@ -116,8 +137,8 @@ static PCFILTER_DESCRIPTOR Oa2dpTopoMiniportFilterDescriptor =
     RTL_NUMBER_OF(Oa2dpTopoMiniportPins),           // PinCount
     Oa2dpTopoMiniportPins,                          // Pins
     sizeof(PCNODE_DESCRIPTOR),                      // NodeSize
-    0,                                              // NodeCount
-    NULL,                                           // Nodes
+    RTL_NUMBER_OF(Oa2dpTopoNodes),                   // NodeCount
+    Oa2dpTopoNodes,                                  // Nodes
     RTL_NUMBER_OF(Oa2dpTopoMiniportConnections),    // ConnectionCount
     Oa2dpTopoMiniportConnections,                   // Connections
     0,                                              // CategoryCount

@@ -33,12 +33,16 @@ NTSTATUS Oa2dpEvtDeviceAdd(_In_ WDFDRIVER Driver, _Inout_ PWDFDEVICE_INIT Device
     pnp.EvtDevicePrepareHardware = Oa2dpEvtPrepareHardware;
     pnp.EvtDeviceReleaseHardware = Oa2dpEvtReleaseHardware;
     WdfDeviceInitSetPnpPowerEventCallbacks(DeviceInit, &pnp);
-    WDF_FILEOBJECT_CONFIG_INIT(&files, WDF_NO_EVENT_CALLBACK, WDF_NO_EVENT_CALLBACK,
+    WDF_FILEOBJECT_CONFIG_INIT(&files, Oa2dpEvtFileCreate, WDF_NO_EVENT_CALLBACK,
                                Oa2dpEvtFileCleanup);
-    WDF_OBJECT_ATTRIBUTES_INIT(&attrs);
+    WDF_OBJECT_ATTRIBUTES_INIT_CONTEXT_TYPE(&attrs, OA2DP_FILE_CONTEXT);
     attrs.ExecutionLevel = WdfExecutionLevelPassive;
     WdfDeviceInitSetFileObjectConfig(DeviceInit, &files, &attrs);
-    WdfDeviceInitSetExclusive(DeviceInit, TRUE);
+    WdfDeviceInitSetExclusive(DeviceInit, FALSE); // one control owner + native AVRCP volume clients
+    status = WdfDeviceInitAssignWdmIrpPreprocessCallback(DeviceInit, Oa2dpVolumePreprocess,
+                                                       IRP_MJ_DEVICE_CONTROL, NULL, 0);
+    if (!NT_SUCCESS(status))
+        return status;
 
     /* The INF supplies SYSTEM/admin access for this PnP stack. Assigning
      * SDDL to this unnamed FDO makes WdfDeviceCreate fail with
@@ -58,6 +62,8 @@ NTSTATUS Oa2dpEvtDeviceAdd(_In_ WDFDRIVER Driver, _Inout_ PWDFDEVICE_INIT Device
     RtlZeroMemory(dev, sizeof(*dev));
     dev->Device = device;
     dev->IoTarget = WdfDeviceGetIoTarget(device);
+    InitializeListHead(&dev->VolumeFiles);
+    dev->VolumeDb = -30L * 65536L;
     for (ULONG i = 0; i < Oa2dpChannelCount; i++) {
         dev->Channels[i].Dev = dev;
         dev->Channels[i].Kind = (OA2DP_CHANNEL_KIND)i;
@@ -83,7 +89,8 @@ NTSTATUS Oa2dpEvtDeviceAdd(_In_ WDFDRIVER Driver, _Inout_ PWDFDEVICE_INIT Device
     if (!NT_SUCCESS(status))
         return status;
 
-    return WdfDeviceCreateDeviceInterface(device, &GUID_DEVINTERFACE_OA2DP_TRANSPORT, NULL);
+    status = WdfDeviceCreateDeviceInterface(device, &GUID_DEVINTERFACE_OA2DP_TRANSPORT, NULL);
+    return NT_SUCCESS(status) ? Oa2dpRegisterVolumeInterface(dev) : status;
 }
 
 NTSTATUS Oa2dpEvtPrepareHardware(_In_ WDFDEVICE Device, _In_ WDFCMRESLIST Raw,
@@ -107,6 +114,7 @@ NTSTATUS Oa2dpEvtPrepareHardware(_In_ WDFDEVICE Device, _In_ WDFCMRESLIST Raw,
     status = Oa2dpQueryRemoteAddress(dev);
     if (!NT_SUCCESS(status))
         return status;
+    Oa2dpPublishConnected(dev, FALSE);
 
     /* Accepting headset-initiated connections is best effort: if another
      * driver already owns PSM 0x19 we still work as connection initiator. */
@@ -121,6 +129,7 @@ NTSTATUS Oa2dpEvtReleaseHardware(_In_ WDFDEVICE Device, _In_ WDFCMRESLIST Transl
     UNREFERENCED_PARAMETER(Translated);
     PAGED_CODE();
     Oa2dpCloseAllChannels(dev);
+    Oa2dpPublishConnected(dev, FALSE);
     Oa2dpUnregisterServer(dev);
     Oa2dpPostEvent(dev, Oa2dpEventDeviceGone, NULL);
     return STATUS_SUCCESS;
@@ -131,7 +140,15 @@ NTSTATUS Oa2dpEvtReleaseHardware(_In_ WDFDEVICE Device, _In_ WDFCMRESLIST Transl
 VOID Oa2dpEvtFileCleanup(_In_ WDFFILEOBJECT file)
 {
     /* A crashed/restarted service must not inherit orphaned open channels. */
-    Oa2dpCloseAllChannels(Oa2dpGetDevice(WdfFileObjectGetDevice(file)));
+    OA2DP_DEVICE_CONTEXT *dev = Oa2dpGetDevice(WdfFileObjectGetDevice(file));
+    const BOOLEAN control = Oa2dpGetFile(file)->ControlClient;
+    Oa2dpVolumeFileCleanup(dev, file);
+    if (control) {
+        Oa2dpCloseAllChannels(dev);
+        WdfSpinLockAcquire(dev->Lock);
+        if (dev->ServiceFile == file) dev->ServiceFile = NULL;
+        WdfSpinLockRelease(dev->Lock);
+    }
 }
 
 static VOID CompleteEvent(_In_ WDFREQUEST req, _In_ const OA2DP_EVENT *event)
@@ -268,6 +285,11 @@ NTSTATUS Oa2dpCreateAudioChild(_In_ OA2DP_DEVICE_CONTEXT *dev)
         caps.UniqueID = WdfTrue;
         WdfDeviceSetPnpCapabilities(child, &caps);
     }
+    status = Oa2dpRegisterBusInterface(dev, child);
+    if (!NT_SUCCESS(status)) {
+        WdfObjectDelete(child);
+        return status;
+    }
     status = WdfFdoAddStaticChild(dev->Device, child);
     if (NT_SUCCESS(status))
         dev->AudioChild = child;
@@ -284,6 +306,12 @@ VOID Oa2dpEvtIoDeviceControl(_In_ WDFQUEUE Queue, _In_ WDFREQUEST Request,
     ULONG_PTR info = 0;
     UNREFERENCED_PARAMETER(OutLen);
     UNREFERENCED_PARAMETER(InLen);
+
+    WDFFILEOBJECT file = WdfRequestGetFileObject(Request);
+    if (!file || !Oa2dpGetFile(file)->ControlClient) {
+        WdfRequestComplete(Request, STATUS_ACCESS_DENIED);
+        return;
+    }
 
     switch (Code) {
     case IOCTL_OA2DP_GET_INFO: {

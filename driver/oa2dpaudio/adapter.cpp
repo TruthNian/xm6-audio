@@ -486,7 +486,58 @@ extern "C" VOID Oa2dpScheduleRebuild(_Inout_ OA2DP_AUDIO_DEVICE *dev)
 }
 
 //=============================================================================
+#pragma code_seg()
+static NTSTATUS BusQueryComplete(PDEVICE_OBJECT, PIRP, PVOID context)
+{
+    KeSetEvent((PKEVENT)context, IO_NO_INCREMENT, FALSE);
+    return STATUS_MORE_PROCESSING_REQUIRED;
+}
+
 #pragma code_seg("PAGE")
+static NTSTATUS QueryVolumeBus(_Inout_ OA2DP_AUDIO_DEVICE *dev)
+{
+    PAGED_CODE();
+    KEVENT event;
+    KeInitializeEvent(&event, NotificationEvent, FALSE);
+    RtlZeroMemory(&dev->Bus, sizeof(dev->Bus));
+    PIRP irp = IoAllocateIrp(dev->Pdo->StackSize, FALSE);
+    if (!irp) return STATUS_INSUFFICIENT_RESOURCES;
+    irp->IoStatus.Status = STATUS_NOT_SUPPORTED;
+    irp->RequestorMode = KernelMode;
+    PIO_STACK_LOCATION stack = IoGetNextIrpStackLocation(irp);
+    stack->MajorFunction = IRP_MJ_PNP;
+    stack->MinorFunction = IRP_MN_QUERY_INTERFACE;
+    stack->Parameters.QueryInterface.InterfaceType = &GUID_OA2DP_BUS_INTERFACE;
+    stack->Parameters.QueryInterface.Size = sizeof(dev->Bus);
+    stack->Parameters.QueryInterface.Version = OA2DP_BUS_VERSION;
+    stack->Parameters.QueryInterface.Interface = (PINTERFACE)&dev->Bus;
+    stack->Parameters.QueryInterface.InterfaceSpecificData = NULL;
+    IoSetCompletionRoutine(irp, BusQueryComplete, &event, TRUE, TRUE, TRUE);
+    NTSTATUS status = IoCallDriver(dev->Pdo, irp);
+    if (status == STATUS_PENDING)
+        KeWaitForSingleObject(&event, Executive, KernelMode, FALSE, NULL);
+    status = irp->IoStatus.Status;
+    IoFreeIrp(irp);
+    if (!NT_SUCCESS(status)) return status;
+    if (dev->Bus.Header.Version != OA2DP_BUS_VERSION || dev->Bus.Header.Size != sizeof(dev->Bus) ||
+        !dev->Bus.Header.InterfaceReference || !dev->Bus.Header.InterfaceDereference ||
+        !dev->Bus.GetVolume || !dev->Bus.SetVolume || !dev->Bus.SetConnected ||
+        !dev->Bus.RegisterAudio || !dev->Bus.UnregisterAudio) {
+        if (dev->Bus.Header.InterfaceDereference)
+            dev->Bus.Header.InterfaceDereference(dev->Bus.Header.Context);
+        RtlZeroMemory(&dev->Bus, sizeof(dev->Bus));
+        return STATUS_REVISION_MISMATCH;
+    }
+    return STATUS_SUCCESS;
+}
+
+static VOID ReleaseVolumeBus(_Inout_ OA2DP_AUDIO_DEVICE *dev)
+{
+    if (dev->Bus.Header.InterfaceDereference)
+        dev->Bus.Header.InterfaceDereference(dev->Bus.Header.Context);
+    RtlZeroMemory(&dev->Bus, sizeof(dev->Bus));
+}
+
 static NTSTATUS
 InitDevice
 (
@@ -509,10 +560,14 @@ InitDevice
 
     Oa2dpControlInit(dev);
     KeInitializeEvent(&dev->FilterLock, SynchronizationEvent, TRUE);
+    ntStatus = QueryVolumeBus(dev);
+    if (!NT_SUCCESS(ntStatus))
+        return ntStatus;
 
     dev->WorkItem = IoAllocateWorkItem(DeviceObject);
     if (dev->WorkItem == NULL)
     {
+        ReleaseVolumeBus(dev);
         return STATUS_INSUFFICIENT_RESOURCES;
     }
 
@@ -528,6 +583,7 @@ InitDevice
     {
         IoFreeWorkItem(dev->WorkItem);
         dev->WorkItem = NULL;
+        ReleaseVolumeBus(dev);
         return ntStatus;
     }
 
@@ -632,6 +688,7 @@ RemoveDevice
     // Unmaps the service's view of the ring (even from another process) and
     // frees it.
     Oa2dpControlRemove(dev);
+    ReleaseVolumeBus(dev);
 
     if (dev->WorkItem)
     {

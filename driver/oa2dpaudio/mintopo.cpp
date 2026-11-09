@@ -14,14 +14,15 @@ Abstract:
 /*
  * Derived from the SYSVAD sample (Windows-driver-samples/audio/sysvad,
  * commit 2dc3fd3a, MS-PL — see LICENSE.MS-PL in this folder): mintopo.cpp
- * and basetopo.cpp. Modified for OpenA2DP: a fixed two-pin topology
- * (wave bridge in, headphones out) with no nodes; volume and mute are left
- * to the audio engine's software endpoint volume.
+ * and basetopo.cpp. Modified for OpenA2DP: a headphone topology with hardware
+ * volume/mute backed by the parent A2DP volume cache and Windows' AVRCP.
  */
 #include "driver.h"
 static NTSTATUS PropertyHandler_Jack(_In_ PPCPROPERTY_REQUEST Request);
 static NTSTATUS EventHandler_Jack(_In_ PPCEVENT_REQUEST Request);
 static NTSTATUS PropertyHandler_Bluetooth(_In_ PPCPROPERTY_REQUEST Request);
+static NTSTATUS PropertyHandler_Volume(_In_ PPCPROPERTY_REQUEST Request);
+static NTSTATUS EventHandler_Volume(_In_ PPCEVENT_REQUEST Request);
 #include "toptable.h"
 
 class CMiniportTopology : public IMiniportTopology, public CUnknown
@@ -29,13 +30,40 @@ class CMiniportTopology : public IMiniportTopology, public CUnknown
 public:
     DECLARE_STD_UNKNOWN();
     DEFINE_STD_CONSTRUCTOR(CMiniportTopology);
-    ~CMiniportTopology() { SAFE_RELEASE(Events); }
+    ~CMiniportTopology()
+    {
+        if (Attached) VolumeBus.UnregisterAudio(VolumeBus.Header.Context, this);
+        SAFE_RELEASE(Events);
+        if (VolumeBus.Header.InterfaceDereference)
+            VolumeBus.Header.InterfaceDereference(VolumeBus.Header.Context);
+    }
 
     OA2DP_AUDIO_DEVICE *Device = NULL;
     PPORTEVENTS Events = NULL;
+    OA2DP_BUS_INTERFACE VolumeBus{};
+    BOOLEAN Attached = FALSE;
+    static VOID VolumeChanged(PVOID context);
+    static NTSTATUS ConnectionRequested(PVOID context, BOOLEAN enabled);
 
     IMP_IMiniportTopology;
 };
+
+#pragma code_seg()
+VOID CMiniportTopology::VolumeChanged(PVOID context)
+{
+    CMiniportTopology *mini = static_cast<CMiniportTopology *>(context);
+    if (mini->Events) {
+        mini->Events->GenerateEventList((GUID *)&KSEVENTSETID_AudioControlChange,
+            KSEVENT_CONTROL_CHANGE, FALSE, 0, TRUE, 0);
+        mini->Events->GenerateEventList((GUID *)&KSEVENTSETID_AudioControlChange,
+            KSEVENT_CONTROL_CHANGE, FALSE, 0, TRUE, 1);
+    }
+}
+
+NTSTATUS CMiniportTopology::ConnectionRequested(PVOID context, BOOLEAN enabled)
+{
+    return Oa2dpRequestConnection(static_cast<CMiniportTopology *>(context)->Device, enabled);
+}
 
 #pragma code_seg("PAGE")
 NTSTATUS CreateMiniportTopology(_Out_ PUNKNOWN *Out, _In_ OA2DP_AUDIO_DEVICE *Device)
@@ -102,9 +130,14 @@ CMiniportTopology::Init
     UNREFERENCED_PARAMETER(UnknownAdapter);
     UNREFERENCED_PARAMETER(ResourceList);
     PAGED_CODE();
-    if (!NT_SUCCESS(Port->QueryInterface(IID_IPortEvents, (PVOID *)&Events)))
-        Events = NULL;
-    return STATUS_SUCCESS;
+    NTSTATUS status = Port->QueryInterface(IID_IPortEvents, (PVOID *)&Events);
+    if (!NT_SUCCESS(status)) return status;
+    VolumeBus = Device->Bus;
+    VolumeBus.Header.InterfaceReference(VolumeBus.Header.Context);
+    status = VolumeBus.RegisterAudio(VolumeBus.Header.Context, this,
+                                    VolumeChanged, ConnectionRequested);
+    Attached = NT_SUCCESS(status);
+    return status;
 }
 
 #pragma code_seg("PAGE")
@@ -266,6 +299,102 @@ NTSTATUS Oa2dpBluetoothProperty(_Inout_ OA2DP_AUDIO_DEVICE *dev,
     return Oa2dpRequestConnection(dev, id == KSPROPERTY_ONESHOT_RECONNECT);
 }
 
+static NTSTATUS PropertyHandler_Volume(_In_ PPCPROPERTY_REQUEST request)
+{
+    PAGED_CODE();
+    CMiniportTopology *mini = reinterpret_cast<CMiniportTopology *>(request->MajorTarget);
+    if (!mini || !mini->Attached) return STATUS_DEVICE_NOT_READY;
+    const BOOLEAN volume = request->Node == 0 && request->PropertyItem->Id == KSPROPERTY_AUDIO_VOLUMELEVEL;
+    const BOOLEAN mute = request->Node == 1 && request->PropertyItem->Id == KSPROPERTY_AUDIO_MUTE;
+    if (!volume && !mute) return STATUS_INVALID_DEVICE_REQUEST;
+    if (request->Verb & KSPROPERTY_TYPE_BASICSUPPORT) {
+        const ULONG flags = KSPROPERTY_TYPE_GET | KSPROPERTY_TYPE_SET | KSPROPERTY_TYPE_BASICSUPPORT;
+        const ULONG full = sizeof(KSPROPERTY_DESCRIPTION) +
+            (volume ? sizeof(KSPROPERTY_MEMBERSHEADER) + sizeof(KSPROPERTY_STEPPING_LONG) : 0);
+        if (request->ValueSize < sizeof(ULONG)) {
+            request->ValueSize = 0;
+            return STATUS_BUFFER_TOO_SMALL;
+        }
+        if (request->ValueSize < sizeof(KSPROPERTY_DESCRIPTION)) {
+            *(PULONG)request->Value = flags;
+            request->ValueSize = sizeof(ULONG);
+            return STATUS_SUCCESS;
+        }
+        auto desc = static_cast<PKSPROPERTY_DESCRIPTION>(request->Value);
+        RtlZeroMemory(desc, sizeof(*desc));
+        desc->AccessFlags = flags;
+        desc->DescriptionSize = full;
+        desc->PropTypeSet.Set = KSPROPTYPESETID_General;
+        desc->PropTypeSet.Id = volume ? VT_I4 : VT_BOOL;
+        desc->MembersListCount = volume ? 1 : 0;
+        if (volume && request->ValueSize >= full) {
+            auto members = reinterpret_cast<PKSPROPERTY_MEMBERSHEADER>(desc + 1);
+            RtlZeroMemory(members, sizeof(*members));
+            members->MembersFlags = KSPROPERTY_MEMBER_STEPPEDRANGES;
+            members->MembersSize = sizeof(KSPROPERTY_STEPPING_LONG);
+            members->MembersCount = 1;
+            auto range = reinterpret_cast<PKSPROPERTY_STEPPING_LONG>(members + 1);
+            RtlZeroMemory(range, sizeof(*range));
+            range->SteppingDelta = OA2DP_VOLUME_STEP_DB;
+            range->Bounds.SignedMinimum = OA2DP_VOLUME_MIN_DB;
+            range->Bounds.SignedMaximum = OA2DP_VOLUME_MAX_DB;
+            request->ValueSize = full;
+        } else {
+            request->ValueSize = sizeof(*desc);
+        }
+        return STATUS_SUCCESS;
+    }
+    if (request->InstanceSize < sizeof(ULONG)) return STATUS_INVALID_PARAMETER;
+    const ULONG channel = *(PULONG)request->Instance;
+    if (channel != ULONG(-1) && channel > 1) return STATUS_INVALID_PARAMETER;
+    if (!request->ValueSize) {
+        request->ValueSize = sizeof(LONG);
+        return STATUS_BUFFER_OVERFLOW;
+    }
+    if (request->ValueSize < sizeof(LONG)) {
+        request->ValueSize = 0;
+        return STATUS_BUFFER_TOO_SMALL;
+    }
+    LONG db;
+    BOOLEAN muted;
+    mini->VolumeBus.GetVolume(mini->VolumeBus.Header.Context, &db, &muted);
+    if (request->Verb & KSPROPERTY_TYPE_GET) {
+        *(PLONG)request->Value = volume ? db : (muted ? TRUE : FALSE);
+    } else if (request->Verb & KSPROPERTY_TYPE_SET) {
+        const LONG value = *(PLONG)request->Value;
+        if (volume) {
+            db = value;
+            muted = db <= OA2DP_VOLUME_MIN_DB;
+        } else {
+            muted = value != 0;
+        }
+        mini->VolumeBus.SetVolume(mini->VolumeBus.Header.Context, db, muted, TRUE);
+    } else {
+        return STATUS_INVALID_DEVICE_REQUEST;
+    }
+    request->ValueSize = sizeof(LONG);
+    return STATUS_SUCCESS;
+}
+
+static NTSTATUS EventHandler_Volume(_In_ PPCEVENT_REQUEST request)
+{
+    CMiniportTopology *mini = reinterpret_cast<CMiniportTopology *>(request->MajorTarget);
+    if (!mini || *request->EventItem->Set != KSEVENTSETID_AudioControlChange ||
+        request->EventItem->Id != KSEVENT_CONTROL_CHANGE)
+        return STATUS_INVALID_PARAMETER;
+    switch (request->Verb) {
+    case PCEVENT_VERB_SUPPORT:
+    case PCEVENT_VERB_REMOVE:
+        return STATUS_SUCCESS;
+    case PCEVENT_VERB_ADD:
+        if (!request->EventEntry || !mini->Events) return STATUS_INVALID_DEVICE_STATE;
+        mini->Events->AddEventToEventList(request->EventEntry);
+        return STATUS_SUCCESS;
+    default:
+        return STATUS_INVALID_PARAMETER;
+    }
+}
+
 static NTSTATUS EventHandler_Jack(_In_ PPCEVENT_REQUEST request)
 {
     CMiniportTopology *mini = reinterpret_cast<CMiniportTopology *>(request->MajorTarget);
@@ -301,6 +430,8 @@ extern "C" NTSTATUS Oa2dpSetConnected(_Inout_ OA2DP_AUDIO_DEVICE *dev, _In_ BOOL
     LONG value = connected ? 1 : 0;
     const BOOLEAN changed = InterlockedExchange(&dev->Connected, value) != value;
     KeReleaseSpinLock(&dev->Lock, irql);
+    if (dev->Bus.SetConnected)
+        dev->Bus.SetConnected(dev->Bus.Header.Context, connected);
     if (!changed)
         return STATUS_SUCCESS;
     PPORTEVENTS events = NULL;

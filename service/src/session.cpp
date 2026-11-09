@@ -790,6 +790,10 @@ void Session::end_streaming()
     streaming_ = false;
     if (stream_.joinable())
         stream_.join();
+    {
+        std::lock_guard<std::mutex> lock(status_mu_);
+        status_.bitrate = 0;
+    }
     publish("open");
 }
 

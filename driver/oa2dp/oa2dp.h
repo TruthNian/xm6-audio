@@ -21,6 +21,7 @@
 #include <bthddi.h>
 
 #include "../common/oa2dp_ioctl.h"
+#include "../common/oa2dp_bus.h"
 
 #define OA2DP_POOL_TAG 'pd2A'
 #define OA2DP_AVDTP_PSM 0x0019
@@ -75,9 +76,27 @@ struct _OA2DP_DEVICE_CONTEXT {
     volatile LONG64 TxFailed;
 
     WDFDEVICE AudioChild;
+    WDFFILEOBJECT ServiceFile;
+    LIST_ENTRY VolumeFiles;       /* native AVRCP clients, protected by Lock */
+    ULONG VolumeFileCount;
+    LONG VolumeDb;
+    BOOLEAN VolumeMuted;
+    PVOID AudioContext;
+    OA2DP_VOLUME_NOTIFY AudioVolumeNotify;
+    OA2DP_CONNECTION_REQUEST AudioConnectionRequest;
 };
 
 WDF_DECLARE_CONTEXT_TYPE_WITH_NAME(OA2DP_DEVICE_CONTEXT, Oa2dpGetDevice)
+
+typedef struct _OA2DP_FILE_CONTEXT {
+    BOOLEAN VolumeClient;
+    BOOLEAN ControlClient;
+    BOOLEAN Closing;
+    BOOLEAN Listed;
+    LIST_ENTRY Entry;
+    PKEVENT VolumeEvent;
+} OA2DP_FILE_CONTEXT;
+WDF_DECLARE_CONTEXT_TYPE_WITH_NAME(OA2DP_FILE_CONTEXT, Oa2dpGetFile)
 
 /* Per-request context for BRB-backed transfers. */
 typedef struct _OA2DP_REQUEST_CONTEXT {
@@ -99,6 +118,8 @@ EVT_WDF_DRIVER_DEVICE_ADD Oa2dpEvtDeviceAdd;
 EVT_WDF_DEVICE_PREPARE_HARDWARE Oa2dpEvtPrepareHardware;
 EVT_WDF_DEVICE_RELEASE_HARDWARE Oa2dpEvtReleaseHardware;
 EVT_WDF_FILE_CLEANUP Oa2dpEvtFileCleanup;
+EVT_WDF_DEVICE_FILE_CREATE Oa2dpEvtFileCreate;
+EVT_WDFDEVICE_WDM_IRP_PREPROCESS Oa2dpVolumePreprocess;
 EVT_WDF_IO_QUEUE_IO_DEVICE_CONTROL Oa2dpEvtIoDeviceControl;
 
 /* l2cap.c */
@@ -117,3 +138,7 @@ VOID Oa2dpTransfer(_In_ OA2DP_DEVICE_CONTEXT *dev, _In_ WDFREQUEST request,
 /* driver.c */
 VOID Oa2dpPostEvent(_In_ OA2DP_DEVICE_CONTEXT *dev, _In_ ULONG type, _In_ OA2DP_CHANNEL *ch);
 NTSTATUS Oa2dpCreateAudioChild(_In_ OA2DP_DEVICE_CONTEXT *dev);
+NTSTATUS Oa2dpRegisterVolumeInterface(_In_ OA2DP_DEVICE_CONTEXT *dev);
+NTSTATUS Oa2dpRegisterBusInterface(_In_ OA2DP_DEVICE_CONTEXT *dev, _In_ WDFDEVICE child);
+VOID Oa2dpVolumeFileCleanup(_In_ OA2DP_DEVICE_CONTEXT *dev, _In_ WDFFILEOBJECT file);
+VOID Oa2dpPublishConnected(_In_ OA2DP_DEVICE_CONTEXT *dev, _In_ BOOLEAN connected);

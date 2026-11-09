@@ -11,6 +11,7 @@
 
 #include "../../core/include/oa2dp/pcm_ring.h"
 #include "../common/oa2dp_ioctl.h"
+#include "../common/oa2dp_bus.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -54,6 +55,7 @@ typedef struct _OA2DP_AUDIO_DEVICE {
     /* Immutable while the KS filters are registered. */
     GUID ContainerId;
     BOOLEAN ContainerIdValid;
+    OA2DP_BUS_INTERFACE Bus;
 
     /* Spin lock for everything below that streams read at DISPATCH_LEVEL. */
     KSPIN_LOCK Lock;

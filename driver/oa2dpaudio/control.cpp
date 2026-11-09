@@ -353,8 +353,8 @@ extern "C" NTSTATUS Oa2dpRequestConnection(_Inout_ OA2DP_AUDIO_DEVICE *dev,
     KeReleaseSpinLock(&dev->Lock, irql);
     if (irp)
         CompleteWait(irp, &ev);
-    if (!enabled)
-        Oa2dpSetConnected(dev, FALSE);
+    // The service publishes the jack state when the channel teardown completes.
+    // This notification path is also callable under the parent's spin lock.
     return STATUS_SUCCESS;
 }
 

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(XM6Audio VERSION 0.3.14 LANGUAGES C CXX)
+project(XM6Audio VERSION 0.3.15 LANGUAGES C CXX)
 
 set(CMAKE_C_STANDARD 99)
 set(CMAKE_CXX_STANDARD 17)
@@ -160,7 +160,8 @@ endif()
 if(OA2DP_BUILD_DRIVERS)
     list(APPEND CMAKE_MODULE_PATH ${OA2DP_THIRD_PARTY}/FindWDK/cmake)
     find_package(WDK REQUIRED)
-    wdk_add_driver(oa2dp KMDF 1.15 driver/oa2dp/driver.c driver/oa2dp/l2cap.c native-version.rc)
+    wdk_add_driver(oa2dp KMDF 1.15 WINVER 0x0A00 NTDDI_VERSION 0x0A000008
+        driver/oa2dp/driver.c driver/oa2dp/l2cap.c driver/oa2dp/volume.c native-version.rc)
 
     # Virtual render endpoint: PortCls/WaveRT, derived from SYSVAD (MS-PL).
     # NTDDI 10.0.19041 for ExAllocatePool2; matches the INF decoration.

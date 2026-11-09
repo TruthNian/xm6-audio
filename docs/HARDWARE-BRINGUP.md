@@ -32,6 +32,18 @@ This source requires direct KS command and Windows Bluetooth UI acceptance. It d
 
 References: [one-shot disconnect](https://learn.microsoft.com/en-us/windows-hardware/drivers/audio/ksproperty-oneshot-disconnect), [one-shot reconnect](https://learn.microsoft.com/en-us/windows-hardware/drivers/audio/ksproperty-oneshot-reconnect).
 
+Direct KS support queries and actual one-shot disconnect/reconnect succeeded on 0.3.14. Disconnect suppressed retries until a reconnect command, after which nonzero QQ Music audio returned over LDAC. **The Windows Bluetooth UI still failed:** it reported `Couldn't disconnect` after audio stopped and retained the Disconnect button, preventing reconnection there. This remains a failed acceptance item; a working diagnostic command is insufficient.
+
+## Native volume integration work in 0.3.15
+
+Windows' AVRCP volume controller discovers the A2DP Bluetooth service devnode, then its audio control interface. The PortCls child alone does not satisfy that discovery path. The transport now provides a control-only KS volume-cache interface on the actual Bluetooth service node. A referenced, versioned kernel bus interface shares the cache with standard PortCls volume/mute nodes and node-change events. Host writes notify Windows AVRCP; remote writes notify the Windows audio engine without reflecting the write back to AVRCP. The audio engine can therefore use hardware volume instead of adding software gain before the headset's own gain.
+
+This retains Microsoft's AVRCP protocol driver and service. The Windows 10 volume-cache property/event GUID and Bluetooth connection property are compatibility details observed in the local Windows implementation and its public Microsoft symbols; they are not a documented cross-version public ABI. No vendor binary, signature or private key is copied. This path requires hardware validation on the target Windows build before it can be described as working.
+
+The control-only reference admits LOCAL SERVICE under the device ACL. Transport control still requires SYSTEM/admin and one owner; volume clients cannot issue transport IOCTLs. METHOD_NEITHER KS requests copy bounded structures in the caller's context, probe user addresses, reference event objects and release them on cleanup. File cleanup and topology-notification removal synchronize with volume changes under the parent lock. These are implementation properties, not a general driver-safety guarantee.
+
+The same native interface accepts one-shot connection commands. The driver publishes its actual AVDTP readiness on the Bluetooth service node; complete Windows multi-profile state/UI acceptance is still required.
+
 ## Earlier investigation, before 0.3.12
 
 - The KMDF transport and PortCls/WaveRT child load and enumerate through the Windows Bluetooth stack. Windows retains the radio, pairing and AVRCP profiles.
