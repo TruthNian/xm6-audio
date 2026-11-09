@@ -185,6 +185,8 @@ uint8_t Session::cb_check(void *user, uint8_t seid, const oa2dp_avdtp_caps *cfg,
 {
     auto *s = static_cast<Session *>(user);
     *cat = OA2DP_AVDTP_CAT_MEDIA_CODEC;
+    if (!s->connection_enabled_)
+        return OA2DP_AVDTP_BAD_STATE;
     auto it = s->sep_codec_.find(seid);
     oa2dp_codec_caps want{}, local{};
     if (it == s->sep_codec_.end() || oa2dp_codec_parse(cfg->codec, cfg->codec_len, &want) != OA2DP_OK)
@@ -381,7 +383,7 @@ bool Session::configure_as_initiator()
     return false;
 }
 
-bool Session::setup_audio_endpoint()
+bool Session::ensure_audio_endpoint()
 {
     if (!audio_ready_) {
         bool opened = false;
@@ -398,8 +400,24 @@ bool Session::setup_audio_endpoint()
             audio_.set_name(name_);
         if (!audio_.map_ring())
             return false;
+        OA2DP_FORMAT_CHANGE state{};
+        if (!audio_.get_state(state)) {
+            audio_.close();
+            return false;
+        }
+        connection_enabled_ = state.ConnectionEnabled != 0;
+        connection_serial_ = state.ConnectionSerial;
+        audio_format_ = state.Format;
+        audio_running_ = state.Running != 0;
         audio_ready_ = true;
     }
+    return true;
+}
+
+bool Session::setup_audio_endpoint()
+{
+    if (!ensure_audio_endpoint() || !connection_enabled_)
+        return false;
 
     // Offer every rate the headset accepts for this codec, so Windows can
     // switch rate and we follow with RECONFIGURE instead of resampling.
@@ -445,7 +463,7 @@ bool Session::setup_audio_endpoint()
 bool Session::start_stream()
 {
     oa2dp_avdtp_sep *sep = oa2dp_avdtp_sep_get(&av_, local_seid_);
-    if (!sep || sep->state != OA2DP_SEP_OPEN || !media_open_)
+    if (!connection_enabled_ || !sep || sep->state != OA2DP_SEP_OPEN || !media_open_)
         return false;
     oa2dp_avdtp_event r{};
     if (!request(oa2dp_avdtp_start(&av_, local_seid_), r)) {
@@ -528,6 +546,10 @@ void Session::handle(const Command &c)
 {
     switch (c.cmd) {
     case Cmd::SignalingOpenedByPeer:
+        if (!connection_enabled_) {
+            tr_.close_channel(Oa2dpChannelSignaling);
+            break;
+        }
         sig_mtu_ = c.channel.OutMtu;
         av_.out_mtu = sig_mtu_ < 48 ? 48 : sig_mtu_;
         sig_open_ = true;
@@ -536,6 +558,10 @@ void Session::handle(const Command &c)
         LOGI("headset opened signalling");
         break;
     case Cmd::MediaOpenedByPeer:
+        if (!connection_enabled_) {
+            tr_.close_channel(Oa2dpChannelMedia);
+            break;
+        }
         media_mtu_ = c.channel.OutMtu;
         media_open_ = true;
         setup_audio_endpoint();
@@ -557,6 +583,21 @@ void Session::handle(const Command &c)
         SetEvent(stop_event_);
         break;
     case Cmd::AudioFormat:
+        connection_enabled_ = c.format.ConnectionEnabled != 0;
+        if (connection_serial_ != c.format.ConnectionSerial) {
+            connection_serial_ = c.format.ConnectionSerial;
+            LOGI("Windows requested Bluetooth audio %s",
+                 connection_enabled_ ? "connect" : "disconnect");
+            if (connection_enabled_)
+                next_reconnect_ = GetTickCount();
+        }
+        if (!connection_enabled_) {
+            audio_format_ = c.format.Format;
+            audio_running_ = c.format.Running != 0;
+            teardown("Windows requested disconnect");
+            publish("user-disconnected");
+            break;
+        }
         if (streaming_ && !oa2dp_pcm_format_same(&audio_format_, &c.format.Format))
             suspend_stream();
         audio_format_ = c.format.Format;
@@ -661,7 +702,12 @@ void Session::main_loop()
         // Opening L2CAP establishes the ACL link when needed. Waiting for
         // BluetoothGetDeviceInfo.fConnected first deadlocks reconnect when
         // this profile is the only component that could create that link.
-        if (!sig_open_ && is_after(GetTickCount(), next_reconnect_)) {
+        if (!audio_ready_ && is_after(GetTickCount(), next_reconnect_)) {
+            if (!ensure_audio_endpoint())
+                next_reconnect_ = GetTickCount() + kReconnectPollMs;
+        }
+        if (audio_ready_ && connection_enabled_ && !sig_open_ &&
+            is_after(GetTickCount(), next_reconnect_)) {
             next_reconnect_ = GetTickCount() + kReconnectPollMs;
             if (connect_signaling())
                 init_deadline_ = GetTickCount() + kPeerConfigGraceMs;
@@ -670,6 +716,8 @@ void Session::main_loop()
             init_deadline_ = 0;
             if (!configure_as_initiator())
                 teardown("configuration failed");
+            else if (audio_running_)
+                start_stream();
         }
         if (need_remote_caps_ && local_seid_) {
             need_remote_caps_ = false;
@@ -721,7 +769,7 @@ void Session::main_loop()
 
 void Session::begin_streaming()
 {
-    if (streaming_ || !media_open_ || !audio_ready_)
+    if (!connection_enabled_ || streaming_ || !media_open_ || !audio_ready_)
         return;
     if (audio_format_.SampleRate &&
         audio_format_.SampleRate != oa2dp_codec_sample_rate(&config_)) {

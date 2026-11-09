@@ -277,6 +277,16 @@ static VOID CsqCompleteCanceled(_In_ PIO_CSQ csq, _In_ PIRP irp)
     IoCompleteRequest(irp, IO_NO_INCREMENT);
 }
 
+static VOID SnapshotStateLocked(_In_ const OA2DP_AUDIO_DEVICE *dev,
+                                _Out_ OA2DP_FORMAT_CHANGE *ev)
+{
+    RtlZeroMemory(ev, sizeof(*ev));
+    ev->Format = dev->Current;
+    ev->Running = dev->Running ? 1 : 0;
+    ev->ConnectionEnabled = dev->ConnectionEnabled ? 1 : 0;
+    ev->ConnectionSerial = dev->ConnectionSerial;
+}
+
 static VOID CompleteWait(_Inout_ PIRP irp, _In_ const OA2DP_FORMAT_CHANGE *ev)
 {
     RtlCopyMemory(irp->AssociatedIrp.SystemBuffer, ev, sizeof(*ev));
@@ -304,12 +314,10 @@ extern "C" VOID Oa2dpReportStream(_Inout_ OA2DP_AUDIO_DEVICE *dev, _In_ const OA
     KIRQL irql;
     PIRP irp;
 
-    RtlZeroMemory(&ev, sizeof(ev));
-    ev.Format = *format;
-    ev.Running = running ? 1 : 0;
     KeAcquireSpinLock(&dev->Lock, &irql);
     dev->Current = *format;
     dev->Running = running;
+    SnapshotStateLocked(dev, &ev);
     irp = dev->Started ? IoCsqRemoveNextIrp(&dev->WaitCsq, NULL) : NULL;
     if (!irp) {
         dev->Event = ev;
@@ -322,6 +330,34 @@ extern "C" VOID Oa2dpReportStream(_Inout_ OA2DP_AUDIO_DEVICE *dev, _In_ const OA
 
 /* ---- lifetime ---------------------------------------------------------------- */
 
+extern "C" NTSTATUS Oa2dpRequestConnection(_Inout_ OA2DP_AUDIO_DEVICE *dev,
+                                           _In_ BOOLEAN enabled)
+{
+    KIRQL irql;
+    PIRP irp;
+    OA2DP_FORMAT_CHANGE ev;
+    KeAcquireSpinLock(&dev->Lock, &irql);
+    NTSTATUS status = Oa2dpControlStatusLocked(dev, FALSE);
+    if (!NT_SUCCESS(status)) {
+        KeReleaseSpinLock(&dev->Lock, irql);
+        return status;
+    }
+    dev->ConnectionEnabled = enabled;
+    ++dev->ConnectionSerial;
+    SnapshotStateLocked(dev, &ev);
+    irp = IoCsqRemoveNextIrp(&dev->WaitCsq, NULL);
+    if (!irp) {
+        dev->Event = ev;
+        dev->EventPending = TRUE;
+    }
+    KeReleaseSpinLock(&dev->Lock, irql);
+    if (irp)
+        CompleteWait(irp, &ev);
+    if (!enabled)
+        Oa2dpSetConnected(dev, FALSE);
+    return STATUS_SUCCESS;
+}
+
 extern "C" VOID Oa2dpControlInit(_Inout_ OA2DP_AUDIO_DEVICE *dev)
 {
     KeInitializeSpinLock(&dev->Lock);
@@ -332,6 +368,8 @@ extern "C" VOID Oa2dpControlInit(_Inout_ OA2DP_AUDIO_DEVICE *dev)
                           CsqRelease, CsqCompleteCanceled);
     DefaultFormats(&dev->Formats);
     dev->Current = dev->Formats.Formats[dev->Formats.Preferred];
+    dev->ConnectionEnabled = TRUE;
+    dev->ConnectionSerial = 0;
 }
 
 extern "C" NTSTATUS Oa2dpControlStart(_Inout_ OA2DP_AUDIO_DEVICE *dev)
@@ -470,12 +508,8 @@ static NTSTATUS ControlCreate(_Inout_ OA2DP_AUDIO_DEVICE *dev, _In_ PIRP irp, _I
         sp->FileObject->FsContext = &dev->ControlTag;
         /* A new consumer starts from the current state, so a service that
          * (re)starts while Windows is already playing still connects. */
-        dev->EventPending = dev->Running;
-        if (dev->Running) {
-            RtlZeroMemory(&dev->Event, sizeof(dev->Event));
-            dev->Event.Format = dev->Current;
-            dev->Event.Running = 1;
-        }
+        dev->EventPending = TRUE;
+        SnapshotStateLocked(dev, &dev->Event);
     }
     KeReleaseSpinLock(&dev->Lock, irql);
     Oa2dpUnlock(&dev->ControlLock);
@@ -646,6 +680,19 @@ static NTSTATUS ControlIoctl(_Inout_ OA2DP_AUDIO_DEVICE *dev, _Inout_ PIRP irp, 
         break;
     case IOCTL_OA2DP_AUDIO_WAIT_FORMAT:
         return WaitFormat(dev, irp, buf ? outLen : 0);
+    case IOCTL_OA2DP_AUDIO_GET_STATE:
+        if (!buf || outLen < sizeof(OA2DP_FORMAT_CHANGE)) {
+            status = STATUS_BUFFER_TOO_SMALL;
+            break;
+        }
+        KeAcquireSpinLock(&dev->Lock, &irql);
+        status = Oa2dpControlStatusLocked(dev, FALSE);
+        if (NT_SUCCESS(status)) {
+            SnapshotStateLocked(dev, (OA2DP_FORMAT_CHANGE *)buf);
+            info = sizeof(OA2DP_FORMAT_CHANGE);
+        }
+        KeReleaseSpinLock(&dev->Lock, irql);
+        break;
     case IOCTL_OA2DP_AUDIO_SET_CONNECTED:
         if (inLen < sizeof(ULONG) || !buf) {
             status = STATUS_BUFFER_TOO_SMALL;

@@ -22,6 +22,16 @@ The native render PDO already has the physical headset's Bluetooth container ID,
 
 Reference: [Microsoft's audio endpoint container ID contract](https://learn.microsoft.com/en-us/windows-hardware/drivers/audio/audio-endpoint-container-id).
 
+The local 0.3.13 deployment corrected the MMDEVAPI endpoint's container ID to match the physical Bluetooth device. Windows now names that endpoint after WH-1000XM6, and QQ Music still has an active, nonzero native LDAC stream. The user explicitly confirmed that this identity fix **did not** synchronize headset volume with Windows. Windows AVRCP's A2DP volume interface is a separate integration requirement, not something provided by retaining its transport driver alone.
+
+## Windows one-shot connection control in 0.3.14
+
+Both native KS filters now expose `KSPROPSETID_BtAudio` one-shot reconnect/disconnect as GET commands without a property value. A disconnect disables outbound retries and rejects late connected=true updates; a reconnect enables attempts immediately. Stream notifications carry the current connection policy and command serial through the existing waiter. The service reads that state before initiating a connection, including after a service restart, rather than overriding an explicit disconnect with its retry loop. This extends the driver/service IOCTL contract to version 4; mismatched transport and service versions are rejected.
+
+This source requires direct KS command and Windows Bluetooth UI acceptance. It does not claim complete Windows multi-profile-manager integration or absolute-volume synchronization.
+
+References: [one-shot disconnect](https://learn.microsoft.com/en-us/windows-hardware/drivers/audio/ksproperty-oneshot-disconnect), [one-shot reconnect](https://learn.microsoft.com/en-us/windows-hardware/drivers/audio/ksproperty-oneshot-reconnect).
+
 ## Earlier investigation, before 0.3.12
 
 - The KMDF transport and PortCls/WaveRT child load and enumerate through the Windows Bluetooth stack. Windows retains the radio, pairing and AVRCP profiles.

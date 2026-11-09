@@ -35,6 +35,13 @@ Abstract:
 #define VT_ILLEGAL 0xffff
 #endif
 
+NTSTATUS PropertyHandler_WaveBluetooth(_In_ PPCPROPERTY_REQUEST request)
+{
+    PAGED_CODE();
+    CMiniportWaveRT *mini = reinterpret_cast<CMiniportWaveRT *>(request->MajorTarget);
+    return mini ? Oa2dpBluetoothProperty(mini->Device(), request) : STATUS_INVALID_DEVICE_STATE;
+}
+
 //=============================================================================
 #pragma code_seg("PAGE")
 NTSTATUS

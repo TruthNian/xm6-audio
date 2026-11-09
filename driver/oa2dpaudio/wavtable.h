@@ -27,6 +27,7 @@ Abstract:
 #define OA2DP_MAX_STREAMS 1
 
 NTSTATUS PropertyHandler_WaveFilter(_In_ PPCPROPERTY_REQUEST PropertyRequest);
+NTSTATUS PropertyHandler_WaveBluetooth(_In_ PPCPROPERTY_REQUEST PropertyRequest);
 NTSTATUS EventHandler_PinCapsChange(_In_ PPCEVENT_REQUEST EventRequest);
 
 static KSDATARANGE_AUDIO Oa2dpPinDataRangesStream[] =
@@ -182,7 +183,11 @@ static PCPROPERTY_ITEM PropertiesOa2dpWaveFilter[] =
         KSPROPERTY_PIN_PROPOSEDATAFORMAT2,
         KSPROPERTY_TYPE_GET | KSPROPERTY_TYPE_BASICSUPPORT,
         PropertyHandler_WaveFilter
-    }
+    },
+    { &KSPROPSETID_BtAudio, KSPROPERTY_ONESHOT_RECONNECT,
+      KSPROPERTY_TYPE_GET | KSPROPERTY_TYPE_BASICSUPPORT, PropertyHandler_WaveBluetooth },
+    { &KSPROPSETID_BtAudio, KSPROPERTY_ONESHOT_DISCONNECT,
+      KSPROPERTY_TYPE_GET | KSPROPERTY_TYPE_BASICSUPPORT, PropertyHandler_WaveBluetooth }
 };
 
 static PCEVENT_ITEM Oa2dpFormatChangePinEvent[] =

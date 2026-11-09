@@ -64,6 +64,7 @@ private:
     bool configure_as_initiator();
     bool open_media_channel();
     bool setup_audio_endpoint();
+    bool ensure_audio_endpoint();
     bool start_stream();
     void suspend_stream();
     void reconfigure_rate(uint32_t rate);
@@ -99,6 +100,8 @@ private:
     oa2dp_codec_caps remote_caps_{};  // capabilities of the peer SEP we use
     bool have_remote_caps_ = false;
     bool audio_running_ = false;
+    bool connection_enabled_ = true;
+    ULONG connection_serial_ = 0;
     OA2DP_FORMAT audio_format_{};  // actual Windows stream, not file metadata
     DWORD idle_since_ = 0;
     DWORD init_deadline_ = 0;      // become INT if the peer has not configured us by then

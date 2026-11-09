@@ -9,7 +9,7 @@
 #ifndef OA2DP_IOCTL_H
 #define OA2DP_IOCTL_H
 
-#define OA2DP_IOCTL_VERSION 3
+#define OA2DP_IOCTL_VERSION 4
 
 #include "../../core/include/oa2dp/pcm_format.h"
 
@@ -102,6 +102,7 @@ typedef struct _OA2DP_TX_STATE {
 #define IOCTL_OA2DP_AUDIO_WAIT_FORMAT  OA2DP_CTL(36, METHOD_BUFFERED)
 #define IOCTL_OA2DP_AUDIO_SET_NAME     OA2DP_CTL(37, METHOD_BUFFERED)
 #define IOCTL_OA2DP_AUDIO_SET_CONNECTED OA2DP_CTL(38, METHOD_BUFFERED)
+#define IOCTL_OA2DP_AUDIO_GET_STATE     OA2DP_CTL(39, METHOD_BUFFERED)
 
 typedef struct _OA2DP_RING_MAPPING {
     ULONGLONG Address;        /* user-mode address of oa2dp_pcm_ring */
@@ -126,6 +127,8 @@ typedef struct _OA2DP_LATENCY {
 typedef struct _OA2DP_FORMAT_CHANGE {
     OA2DP_FORMAT Format;
     ULONG Running;            /* 1 = stream started, 0 = stopped */
+    ULONG ConnectionEnabled;  /* Windows one-shot disconnect suppresses retries */
+    ULONG ConnectionSerial;   /* distinguishes an explicit reconnect request */
 } OA2DP_FORMAT_CHANGE;
 
 typedef struct _OA2DP_ENDPOINT_NAME {

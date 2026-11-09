@@ -323,6 +323,13 @@ bool AudioEndpoint::set_connected(bool connected)
                       nullptr, 5000) == ERROR_SUCCESS;
 }
 
+bool AudioEndpoint::get_state(OA2DP_FORMAT_CHANGE &out)
+{
+    DWORD bytes = 0;
+    return dev_.ioctl(IOCTL_OA2DP_AUDIO_GET_STATE, nullptr, 0, &out, sizeof(out),
+                      &bytes, 5000) == ERROR_SUCCESS && bytes == sizeof(out);
+}
+
 bool AudioEndpoint::set_formats(const OA2DP_FORMAT_LIST &list)
 {
     return dev_.ioctl(IOCTL_OA2DP_AUDIO_SET_FORMATS, &list, sizeof(list), nullptr, 0, nullptr,

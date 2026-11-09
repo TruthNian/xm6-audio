@@ -21,6 +21,7 @@ Abstract:
 #include "driver.h"
 static NTSTATUS PropertyHandler_Jack(_In_ PPCPROPERTY_REQUEST Request);
 static NTSTATUS EventHandler_Jack(_In_ PPCEVENT_REQUEST Request);
+static NTSTATUS PropertyHandler_Bluetooth(_In_ PPCPROPERTY_REQUEST Request);
 #include "toptable.h"
 
 class CMiniportTopology : public IMiniportTopology, public CUnknown
@@ -222,6 +223,49 @@ static NTSTATUS PropertyHandler_Jack(_In_ PPCPROPERTY_REQUEST request)
     return STATUS_SUCCESS;
 }
 
+static NTSTATUS PropertyHandler_Bluetooth(_In_ PPCPROPERTY_REQUEST request)
+{
+    PAGED_CODE();
+    CMiniportTopology *mini = reinterpret_cast<CMiniportTopology *>(request->MajorTarget);
+    return mini ? Oa2dpBluetoothProperty(mini->Device, request) : STATUS_INVALID_DEVICE_STATE;
+}
+
+NTSTATUS Oa2dpBluetoothProperty(_Inout_ OA2DP_AUDIO_DEVICE *dev,
+                               _In_ PPCPROPERTY_REQUEST request)
+{
+    PAGED_CODE();
+    if (!dev)
+        return STATUS_INVALID_DEVICE_STATE;
+    const ULONG id = request->PropertyItem->Id;
+    if (id != KSPROPERTY_ONESHOT_RECONNECT && id != KSPROPERTY_ONESHOT_DISCONNECT)
+        return STATUS_INVALID_DEVICE_REQUEST;
+    // These commands are GET requests with no property value, per ksmedia.h.
+    if (request->Verb & KSPROPERTY_TYPE_BASICSUPPORT) {
+        const ULONG flags = KSPROPERTY_TYPE_GET | KSPROPERTY_TYPE_BASICSUPPORT;
+        if (request->ValueSize >= sizeof(KSPROPERTY_DESCRIPTION)) {
+            PKSPROPERTY_DESCRIPTION desc = (PKSPROPERTY_DESCRIPTION)request->Value;
+            RtlZeroMemory(desc, sizeof(*desc));
+            desc->AccessFlags = flags;
+            desc->DescriptionSize = sizeof(*desc);
+            desc->PropTypeSet.Set = KSPROPTYPESETID_General;
+            desc->PropTypeSet.Id = VT_ILLEGAL;
+            request->ValueSize = sizeof(*desc);
+            return STATUS_SUCCESS;
+        }
+        if (request->ValueSize < sizeof(ULONG)) {
+            request->ValueSize = 0;
+            return STATUS_BUFFER_TOO_SMALL;
+        }
+        *(PULONG)request->Value = flags;
+        request->ValueSize = sizeof(ULONG);
+        return STATUS_SUCCESS;
+    }
+    if (!(request->Verb & KSPROPERTY_TYPE_GET) || request->InstanceSize != 0)
+        return STATUS_INVALID_PARAMETER;
+    request->ValueSize = 0;
+    return Oa2dpRequestConnection(dev, id == KSPROPERTY_ONESHOT_RECONNECT);
+}
+
 static NTSTATUS EventHandler_Jack(_In_ PPCEVENT_REQUEST request)
 {
     CMiniportTopology *mini = reinterpret_cast<CMiniportTopology *>(request->MajorTarget);
@@ -248,6 +292,8 @@ extern "C" NTSTATUS Oa2dpSetConnected(_Inout_ OA2DP_AUDIO_DEVICE *dev, _In_ BOOL
     KIRQL irql;
     KeAcquireSpinLock(&dev->Lock, &irql);
     NTSTATUS status = connected ? Oa2dpControlStatusLocked(dev, FALSE) : STATUS_SUCCESS;
+    if (NT_SUCCESS(status) && connected && !dev->ConnectionEnabled)
+        status = STATUS_CONNECTION_DISCONNECTED;
     if (!NT_SUCCESS(status)) {
         KeReleaseSpinLock(&dev->Lock, irql);
         return status;

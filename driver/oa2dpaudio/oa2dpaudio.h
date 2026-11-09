@@ -61,6 +61,8 @@ typedef struct _OA2DP_AUDIO_DEVICE {
     OA2DP_LATENCY Latency;
     OA2DP_FORMAT Current;       /* format of the open (or last) stream */
     BOOLEAN Running;
+    BOOLEAN ConnectionEnabled;
+    ULONG ConnectionSerial;
     volatile LONG Connected;  /* standard KS jack presence, initially false */
     BOOLEAN EventPending;       /* Event not yet picked up by WAIT_FORMAT */
     OA2DP_FORMAT_CHANGE Event;
@@ -138,6 +140,7 @@ VOID Oa2dpScheduleRebuild(_Inout_ OA2DP_AUDIO_DEVICE *dev);
 /* Tell the audio engine that the supported formats changed. */
 VOID Oa2dpWaveFormatsChanged(_Inout_ OA2DP_AUDIO_DEVICE *dev);
 NTSTATUS Oa2dpSetConnected(_Inout_ OA2DP_AUDIO_DEVICE *dev, _In_ BOOLEAN connected);
+NTSTATUS Oa2dpRequestConnection(_Inout_ OA2DP_AUDIO_DEVICE *dev, _In_ BOOLEAN enabled);
 
 #ifdef __cplusplus
 }

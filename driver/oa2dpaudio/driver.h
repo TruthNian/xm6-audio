@@ -32,3 +32,5 @@ class CMiniportWaveRT;
 
 NTSTATUS CreateMiniportWaveRT(_Out_ CMiniportWaveRT **Out, _In_ OA2DP_AUDIO_DEVICE *Device);
 NTSTATUS CreateMiniportTopology(_Out_ PUNKNOWN *Out, _In_ OA2DP_AUDIO_DEVICE *Device);
+NTSTATUS Oa2dpBluetoothProperty(_Inout_ OA2DP_AUDIO_DEVICE *Device,
+                               _In_ PPCPROPERTY_REQUEST Request);
