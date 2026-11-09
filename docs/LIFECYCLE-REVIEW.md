@@ -126,6 +126,18 @@ These checks cover code paths and selected completion orders, not Windows
 Bluetooth scheduling, remote RF behavior, full WDF removal timing or perceived
 audio/video timing. They cannot prove those properties without hardware use.
 
+For 0.3.31, the complete native build also succeeded locally with MSVC 19.29,
+the Windows 10.0.19041 user-mode SDK and matching 10.0.26100 NuGet driver/shared
+headers and kernel libraries. All six CTest checks passed, including the
+linked PE/PDB descriptor check; both fake-API recovery/installation-state
+scripts passed. No built driver was staged or loaded. The
+[CI run](https://github.com/TruthNian/xm6-audio/actions/runs/42673358274)
+and a separate workflow dispatch failed with GitHub's internal server error
+before creating any jobs; they are not successful builds or compiler failures.
+The previous [0.3.30 CI build](https://github.com/TruthNian/xm6-audio/actions/runs/42671110002)
+passed. Local compilation and opt-in instrumentation still do not establish
+the Settings root cause or hardware acceptance.
+
 ## Outstanding acceptance
 
 ACL arrival notifications use the public BRB_GET_DEVICE_INTERFACE_STRING and
