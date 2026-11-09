@@ -1,8 +1,8 @@
-# Native lifecycle review, 0.3.24
+# Native lifecycle review, 0.3.25
 
 This source batch is not a declaration of hardware acceptance. Source review
-and focused offline checks precede another hardware trial. Neither 0.3.23 nor
-0.3.24 has been installed on the host. The host was restored to Microsoft
+and focused offline checks precede another hardware trial. Versions 0.3.23,
+0.3.24 and 0.3.25 have not been installed on the host. The host was restored to Microsoft
 BthA2dp; the custom codec service is stopped. Current host audio is not evidence
 of native LDAC. No further installation or reboot is part of this source review.
 
@@ -24,6 +24,7 @@ of native LDAC. No further installation or reboot is part of this source review.
 | CLOSE races transfer submission | Handle could close between validation and WdfRequestSend | Short per-channel submission leases, drained after Closing rejects admission; never wait for idle RECV completion |
 | Slow connection publication overlaps reconnect | An old FALSE could finish after a newer TRUE; event could be set after new OPEN cleared it | One passive publication lock, epoch-bound TRUE, post-call revalidation/repair, event update under OPEN's spin lock; bus ABI 4; serialize child jack updates too |
 | Signalling read fails | Synthetic close command had zero epoch and was rejected by the consumer | Tag the close with the failed read's owning connection |
+| Unsolicited state change or overlapping Windows requests | Every MPM connection update claimed to complete a requested operation | Distinguish unsolicited status from a matching pending request; serial-bound local retirement and failed outgoing OPEN completion |
 
 Channel close work is preallocated rather than allocated in a disconnect
 indication. Allocation failure can no longer fabricate a completed remote
@@ -52,6 +53,18 @@ MPM errors are returned/logged rather than silently treated as success. This
 does not prove the observed Windows-specific MPM contract is sufficient for
 Settings; that remains a hardware acceptance item.
 
+The observed inbox MPM call sites distinguish peer connect/disconnect
+indications (third argument 0) from requested-operation confirmations (1).
+This is an observed Windows 10 compatibility distinction, not a documented
+cross-version API. Our former unconditional 1 did not preserve it. The new
+production helper tracks an outstanding request, its target and serial; a
+failed outgoing signalling OPEN can complete the owning connect with FALSE.
+A stale OPEN failure cannot mark a replacement request failed, and a reentrant
+request cannot be locally retired by an older external call's return. These
+checks do not make the opaque MPM call transactional with policy callbacks or
+prove Settings behavior. Microsoft images/symbols remain private; no vendor
+A2DP driver was inspected and no disassembly is distributed.
+
 ## Offline checks
 
 - Shared driver lifecycle transitions: opening/disconnect/late success,
@@ -59,6 +72,9 @@ Settings; that remains a hardware acceptance item.
   generations and wraparound, mandatory data binding, close-before-submission
   return, and publication invalidation at close/reopen boundaries. The
   production helper is used by these checks; WDF/MPM calls are not emulated.
+- MPM request ownership: unsolicited/duplicate state, requested connect
+  failure, superseded failure, reentrant request during acknowledgement,
+  and serial wraparound use the production request-state helper.
 - Existing PCM format/ring and concurrency checks; Windows service and CLI
   builds; full kernel build and linked-descriptor checks in Windows CI.
 - Real installer state classifier exercised with fake device properties;

@@ -11,7 +11,8 @@ __declspec(dllimport) NTSTATUS NTAPI BtaMpmRegister(
     MPM_CALLBACK SuspendStatus, MPM_CALLBACK PlayStatus, PVOID Context, PVOID *Handle);
 __declspec(dllimport) NTSTATUS NTAPI BtaMpmUnregister(PVOID Handle);
 __declspec(dllimport) NTSTATUS NTAPI BtaMpmConnectionRequest(PVOID Handle, ULONG Connect, ULONG Automatic);
-__declspec(dllimport) NTSTATUS NTAPI BtaMpmUpdateConnectionStatus(PVOID Handle, ULONG Connected, ULONG Notify);
+__declspec(dllimport) NTSTATUS NTAPI BtaMpmUpdateConnectionStatus(
+    PVOID Handle, ULONG Connected, ULONG RequestedCompletion);
 __declspec(dllimport) NTSTATUS NTAPI BtaMpmUpdateSuspendStatus(PVOID Handle, ULONG Suspended, ULONG Notify);
 __declspec(dllimport) NTSTATUS NTAPI BtaMpmUpdatePlayStatus(PVOID Handle, ULONG Playing);
 
@@ -37,6 +38,7 @@ static NTSTATUS NTAPI ConnectionRequest(PVOID context, ULONG connect)
         status = STATUS_DELETE_PENDING;
     } else {
         dev->PolicyConnected = enabled;
+        (void)Oa2dpMpmBeginRequest(&dev->MpmRequest, enabled);
         if (!enabled) KeClearEvent(&dev->DisconnectedEvent);
         if (dev->AudioPolicyRequest)
             status = dev->AudioPolicyRequest(dev->AudioContext, enabled, dev->PolicySuspended);
@@ -94,6 +96,7 @@ NTSTATUS Oa2dpMpmStart(OA2DP_DEVICE_CONTEXT *dev)
     dev->PolicyConnected = TRUE;
     dev->PolicySuspended = FALSE;
     dev->MpmConnected = FALSE;
+    RtlZeroMemory(&dev->MpmRequest, sizeof(dev->MpmRequest));
     dev->MpmIsSuspended = TRUE;
     WdfObjectReference(dev->Device);
     // Profile 1 is A2DP on the tested Windows 10 build. Context is retained
@@ -151,14 +154,33 @@ NTSTATUS Oa2dpMpmRequestConnection(PVOID context, BOOLEAN enabled)
 NTSTATUS Oa2dpMpmConnected(OA2DP_DEVICE_CONTEXT *dev, BOOLEAN connected)
 {
     NTSTATUS status;
+    ULONG serial;
     if (!AcquireManager(dev)) return connected ? STATUS_DEVICE_NOT_READY : STATUS_SUCCESS;
-    status = BtaMpmUpdateConnectionStatus(dev->MpmHandle, connected, 1);
+    WdfSpinLockAcquire(dev->Lock);
+    serial = Oa2dpMpmCompletion(&dev->MpmRequest, connected);
+    WdfSpinLockRelease(dev->Lock);
+    // Observed inbox distinction: peer indications pass 0, requested
+    // confirmations pass 1. The last argument is not a generic "notify" flag.
+    status = BtaMpmUpdateConnectionStatus(dev->MpmHandle, connected, serial != 0);
     ExReleaseRundownProtection(&dev->MpmCalls);
     if (!NT_SUCCESS(status)) return status;
     WdfSpinLockAcquire(dev->Lock);
     dev->MpmConnected = connected;
+    // The external call may reenter policy. Never retire a replacement request.
+    (void)Oa2dpMpmFinishRequest(&dev->MpmRequest, serial);
     WdfSpinLockRelease(dev->Lock);
     return status;
+}
+
+VOID Oa2dpMpmOpenFailed(OA2DP_DEVICE_CONTEXT *dev, ULONG policySerial)
+{
+    BOOLEAN publish;
+    WdfSpinLockAcquire(dev->Lock);
+    publish = (BOOLEAN)Oa2dpMpmFailConnect(&dev->MpmRequest, policySerial);
+    WdfSpinLockRelease(dev->Lock);
+    // A requested connect that fails must also finish its MPM operation.
+    // The worker still validates actual closed channels before publishing.
+    if (publish) WdfWorkItemEnqueue(dev->PublicationWork);
 }
 
 VOID Oa2dpMpmPlaying(PVOID context, BOOLEAN playing)

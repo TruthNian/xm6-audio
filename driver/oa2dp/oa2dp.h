@@ -23,6 +23,7 @@
 #include "../common/oa2dp_ioctl.h"
 #include "../common/oa2dp_bus.h"
 #include "../common/channel_lifecycle.h"
+#include "../common/mpm_lifecycle.h"
 
 #define OA2DP_POOL_TAG 'pd2A'
 #define OA2DP_AVDTP_PSM 0x0019
@@ -93,6 +94,7 @@ struct _OA2DP_DEVICE_CONTEXT {
     BOOLEAN PolicyConnected;
     BOOLEAN PolicySuspended;
     BOOLEAN MpmConnected;
+    OA2DP_MPM_REQUEST MpmRequest;
     BOOLEAN MpmIsSuspended;
 };
 
@@ -114,6 +116,7 @@ typedef struct _OA2DP_REQUEST_CONTEXT {
     OA2DP_CHANNEL *Channel;
     ULONG Bytes;
     ULONG Generation;
+    ULONG PolicySerial;      /* owning Windows connect request, if any */
     WDFREQUEST UserRequest;   /* exact outgoing caller; never a replacement channel's request */
 } OA2DP_REQUEST_CONTEXT;
 
@@ -169,5 +172,6 @@ NTSTATUS Oa2dpMpmStart(OA2DP_DEVICE_CONTEXT *dev);
 VOID Oa2dpMpmStop(OA2DP_DEVICE_CONTEXT *dev);
 NTSTATUS Oa2dpMpmRequestConnection(PVOID context, BOOLEAN enabled);
 NTSTATUS Oa2dpMpmConnected(OA2DP_DEVICE_CONTEXT *dev, BOOLEAN connected);
+VOID Oa2dpMpmOpenFailed(OA2DP_DEVICE_CONTEXT *dev, ULONG policySerial);
 VOID Oa2dpMpmPlaying(PVOID context, BOOLEAN playing);
 VOID Oa2dpMpmSuspended(PVOID context, BOOLEAN suspended);

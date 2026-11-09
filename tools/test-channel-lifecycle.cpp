@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: MIT */
 #include "../driver/common/channel_lifecycle.h"
+#include "../driver/common/mpm_lifecycle.h"
 #include <cstdio>
 #include <cstdlib>
 #define REQUIRE(x) do { if (!(x)) { std::fprintf(stderr, "line %d: %s\n", __LINE__, #x); std::exit(1); } } while (0)
@@ -62,6 +63,25 @@ static void data_and_publication_boundaries()
 
 int main()
 {
+    OA2DP_MPM_REQUEST request{};
+    REQUIRE(!Oa2dpMpmCompletion(&request, 1)); // unsolicited peer connection
+    auto connect = Oa2dpMpmBeginRequest(&request, 1);
+    REQUIRE(!Oa2dpMpmCompletion(&request, 0)); // baseline FALSE is not connect failure
+    REQUIRE(Oa2dpMpmCompletion(&request, 1) == connect);
+    REQUIRE(!Oa2dpMpmFailConnect(&request, connect + 1));
+    REQUIRE(Oa2dpMpmFailConnect(&request, connect));
+    REQUIRE(Oa2dpMpmCompletion(&request, 0) == connect); // actual failed requested OPEN
+    auto disconnect = Oa2dpMpmBeginRequest(&request, 0);
+    REQUIRE(!Oa2dpMpmFailConnect(&request, connect)); // late OPEN failure
+    REQUIRE(Oa2dpMpmCompletion(&request, 0) == disconnect);
+    connect = Oa2dpMpmBeginRequest(&request, 1); // reentrant policy during external call
+    REQUIRE(!Oa2dpMpmFinishRequest(&request, disconnect));
+    REQUIRE(request.Pending && Oa2dpMpmCompletion(&request, 1) == connect);
+    REQUIRE(Oa2dpMpmFinishRequest(&request, connect));
+    REQUIRE(!Oa2dpMpmCompletion(&request, 0)); // later remote disconnect is unsolicited
+    REQUIRE(!Oa2dpMpmCompletion(&request, 1)); // duplicate status is not another completion
+    request.Serial = UINT32_MAX;
+    REQUIRE(Oa2dpMpmBeginRequest(&request, 0) == 1);
     data_and_publication_boundaries();
     OA2DP_CHANNEL_LIFECYCLE c{};
     REQUIRE(!Oa2dpChannelBeginOpen(&c, 0, 0)); // explicit user disconnect
