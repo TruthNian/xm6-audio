@@ -909,15 +909,16 @@ void Session::begin_streaming()
         LOGE("PCM format unavailable when starting the encoder");
         return;
     }
+    // Publish availability before admitting a new sender. Otherwise a cached
+    // suspended state could re-acknowledge HFP while this new thread starts.
+    if (!update_suspend_state()) {
+        publish("profile-policy-pending");
+        return;
+    }
     streaming_ = true;
     if (++stream_generation_ == 0) ++stream_generation_;
     context.generation = stream_generation_;
     stream_ = std::thread([this, context] { stream_loop(context); });
-    if (!update_suspend_state()) {
-        end_streaming();
-        publish("profile-policy-pending");
-        return;
-    }
     publish("streaming");
 }
 
