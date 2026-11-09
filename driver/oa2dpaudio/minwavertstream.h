@@ -16,8 +16,9 @@ Abstract:
  * commit 2dc3fd3a, MS-PL — see LICENSE.MS-PL in this folder). Modified for
  * OpenA2DP: instead of saving rendered audio to a file, the position timer
  * pumps it into the PCM ring shared with oa2dpsvc.exe; positions are kept
- * in frames (no drift); presentation position and hardware latency include
- * the Bluetooth transport and headset delay (IOCTL_OA2DP_AUDIO_SET_LATENCY).
+ * in frames (no drift). Presentation position includes the Bluetooth
+ * transport and headset delay (IOCTL_OA2DP_AUDIO_SET_LATENCY), while local
+ * hardware latency describes only the virtual WaveRT buffer path.
  */
 #pragma once
 

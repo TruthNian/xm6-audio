@@ -37,6 +37,14 @@ A separate source defect was confirmed: an existing control handle could queue `
 
 On format-wait failure, the service now preserves the Win32 error, stops the encoder, releases the old mapping/handle, and retries through its existing connection state machine. The waiter stays quiescent until that release completes, and actual PCM metadata is retained. Build checks cover compilation and linked descriptors; they do not exercise Windows PnP stop/restart timing or establish successful reconnection. Those hardware checks remain deferred.
 
+## Local WaveRT latency correction in 0.3.12
+
+Hardware investigation isolated a buffer-initialization rejection after successful KS pin creation and allocation. The miniport reported the remote Bluetooth/headset delay (about 200 ms in that test) as local WaveRT hardware latency. Windows rejected a normal 10–20 ms cyclic buffer because the reported local latency exceeded its size. This also prevented default mix-format discovery and endpoint-volume activation; successful AVDTP negotiation did not mean that music was using this endpoint.
+
+The virtual endpoint now reports zero local FIFO/chipset/codec delay, while retaining the downstream Bluetooth delay in its presentation-position calculation. This separates local buffer consumption from remote presentation without inflating the cyclic buffer. The fix requires actual WASAPI initialization, audible LDAC playback and video-timing checks before acceptance. Manual controls, wearing detection and reconnection remain separate hardware acceptance items.
+
+Reference: [Microsoft's WaveRT hardware-latency property](https://learn.microsoft.com/en-us/windows-hardware/drivers/audio/ksproperty-rtaudio-hwlatency).
+
 ## Do not load candidate 0.3.5
 
 A local crash dump identified a descriptor ABI error introduced in 0.3.5: its stream data-range pointer table used a serialized `KSMULTIPLE_ITEM` where PortCls expects a pointer-based `KSATTRIBUTE_LIST`. The kernel interpreted a length as a pointer while enumerating the attributes. The developer trial was rolled back to the Windows inbox driver.

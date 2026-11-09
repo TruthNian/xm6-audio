@@ -67,11 +67,14 @@ generator, file saving, KMDF.
    uses to connect on play and to suspend when idle. The latest state wins
    if the service has not picked up the previous one; a new control handle
    starts with the current state if a stream is running.
-5. **Latency** = `TransportUs + DeviceUs` from `IOCTL_OA2DP_AUDIO_SET_LATENCY`:
-   reported as `KSRTAUDIO_HWLATENCY.CodecDelay` (the engine adds it to the
-   stream latency) and subtracted from the
-   `KSPROPERTY_RTAUDIO_PRESENTATION_POSITION` the stream returns, so the
-   audio clock shows what the listener hears.
+5. **Latency.** The local virtual WaveRT path has no hardware FIFO, chipset
+   or DAC delay, so `KSRTAUDIO_HWLATENCY` reports zero for those fields.
+   Windows validates that local delay against its cyclic buffer size;
+   including a remote headset's delay can reject an otherwise valid buffer.
+   Downstream `TransportUs + DeviceUs`, supplied by
+   `IOCTL_OA2DP_AUDIO_SET_LATENCY`, is instead subtracted from
+   `KSPROPERTY_RTAUDIO_PRESENTATION_POSITION`, preserving the remote
+   presentation clock. End-to-end video timing still needs hardware testing.
 6. **Control interface.** Deviation from the earlier plan (a KMDF
    miniport-mode control device): a control device object cannot carry a
    per-PDO device interface, and the service picks the endpoint of a headset

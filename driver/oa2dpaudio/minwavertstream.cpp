@@ -24,8 +24,9 @@ Abstract:
  *  - SetState(RUN) / leaving RUN set OA2DP_RING_FLAG_RUNNING and complete
  *    IOCTL_OA2DP_AUDIO_WAIT_FORMAT; a new stream format rewrites the ring
  *    header in place (F4.3).
- *  - GetHWLatency and the presentation position include the Bluetooth
- *    transport and headset delay (IOCTL_OA2DP_AUDIO_SET_LATENCY, F4.4).
+ *  - GetHWLatency describes only the local cyclic buffer's hardware path.
+ *    The presentation position accounts for Bluetooth transport and headset
+ *    delay (IOCTL_OA2DP_AUDIO_SET_LATENCY, F4.4).
  *  - Capture, loopback, offload, tone generator, volume/peak meter, audio
  *    modules, DRM, ETW and sideband code removed.
  */
@@ -392,10 +393,12 @@ CMiniportWaveRTStream::GetHWLatency
     PAGED_CODE();
     ASSERT(Latency_);
 
-    // F4.4: encoder + packet queue + air (service) and the headset's AVDTP
-    // delay report. CodecDelay is in 100 ns units.
+    // This virtual endpoint has no local hardware FIFO, chipset or DAC.
+    // Windows compares these delays against the allocated WaveRT buffer;
+    // reporting the remote headset's delay here rejects ordinary buffers.
+    // Account for that downstream delay in the presentation position instead.
     Latency_->ChipsetDelay = 0;
-    Latency_->CodecDelay = Oa2dpLatencyUs(m_Device) * 10;
+    Latency_->CodecDelay = 0;
     Latency_->FifoSize = 0;
 }
 
