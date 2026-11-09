@@ -86,6 +86,7 @@ private:
     void on_avdtp_event(const oa2dp_avdtp_event &ev);
     void begin_streaming();
     void end_streaming();
+    bool update_suspend_state(); // profile availability is independent of idle PCM
     void publish(const char *state);
 
     // AVDTP callbacks
@@ -122,6 +123,7 @@ private:
     bool audio_running_ = false;
     bool connection_enabled_ = true;
     bool suspend_requested_ = false;
+    ULONG suspend_serial_ = 0;
     ULONG connection_serial_ = 0;
     OA2DP_FORMAT audio_format_{};  // actual Windows stream, not file metadata
     DWORD idle_since_ = 0;

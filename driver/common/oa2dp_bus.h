@@ -3,13 +3,14 @@
 #pragma once
 #include "oa2dp_ioctl.h"
 
-#define OA2DP_BUS_VERSION 4
+#define OA2DP_BUS_VERSION 5
 #define OA2DP_VOLUME_MIN_DB (-127L * 32768L)
 #define OA2DP_VOLUME_MAX_DB 0L
 #define OA2DP_VOLUME_STEP_DB 32768L
 
 typedef VOID (*OA2DP_VOLUME_NOTIFY)(PVOID Context);
-typedef NTSTATUS (*OA2DP_POLICY_REQUEST)(PVOID Context, BOOLEAN Enabled, BOOLEAN Suspended);
+typedef NTSTATUS (*OA2DP_POLICY_REQUEST)(PVOID Context, BOOLEAN Enabled, BOOLEAN Suspended,
+                                       ULONG SuspendSerial);
 typedef struct _OA2DP_BUS_INTERFACE {
     INTERFACE Header;
     VOID (*GetVolume)(PVOID Context, PLONG Db, PBOOLEAN Muted);
@@ -19,7 +20,9 @@ typedef struct _OA2DP_BUS_INTERFACE {
     PKEVENT DisconnectedEvent; /* parent remains referenced for this interface lifetime */
     NTSTATUS (*RequestConnection)(PVOID Context, BOOLEAN Enabled);
     VOID (*SetPlaying)(PVOID Context, BOOLEAN Playing);
-    VOID (*SetSuspended)(PVOID Context, BOOLEAN Suspended);
+    /* PASSIVE_LEVEL; result reflects the real profile-manager update. */
+    NTSTATUS (*SetSuspended)(PVOID Context, BOOLEAN Suspended, ULONG RequestSerial,
+                             ULONG ConnectionGeneration);
     NTSTATUS (*RegisterAudio)(PVOID Context, PVOID AudioContext,
                              OA2DP_VOLUME_NOTIFY Notify,
                              OA2DP_POLICY_REQUEST RequestPolicy);

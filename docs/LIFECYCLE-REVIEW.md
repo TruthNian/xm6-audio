@@ -1,8 +1,8 @@
-# Native lifecycle review, 0.3.26
+# Native lifecycle review, 0.3.27
 
 This source batch is not a declaration of hardware acceptance. Source review
 and focused offline checks precede another hardware trial. Versions 0.3.23
-through 0.3.26 have not been installed on the host. The host was restored to Microsoft
+through 0.3.27 have not been installed on the host. The host was restored to Microsoft
 BthA2dp; the custom codec service is stopped. Current host audio is not evidence
 of native LDAC. No further installation or reboot is part of this source review.
 
@@ -26,6 +26,7 @@ of native LDAC. No further installation or reboot is part of this source review.
 | Signalling read fails | Synthetic close command had zero epoch and was rejected by the consumer | Tag the close with the failed read's owning connection |
 | Unsolicited state change or overlapping Windows requests | Every MPM connection update claimed to complete a requested operation | Distinguish unsolicited status from a matching pending request; serial-bound local retirement and failed outgoing OPEN completion |
 | Device enters low power with idle receive/event wait | Power-managed queues had indefinite requests without EvtIoStop; no suspend/restart transport lifecycle | Explicit self-managed suspend/restart, non-power-managed control/event queues, gated/bounded Bluetooth teardown and current power state/serial in ABI 9 |
+| Music idles or HFP suspend/resume requests overlap | Encoder stop was equated with profile suspension; cache changed before MPM accepted it, and replies had no request identity | Separate profile availability from idle PCM, echo suspend request serial and link epoch in ABI 10/bus ABI 5, serialize MPM calls, retain failed updates and reject stale replies |
 
 Channel close work is preallocated rather than allocated in a disconnect
 indication. Allocation failure can no longer fabricate a completed remote
@@ -87,6 +88,23 @@ recovery and actual uninterrupted application recovery still need hardware
 validation; the helper tests do not exercise the kernel power state machine.
 
 ## Offline checks
+
+Profile availability and encoder activity are distinct: normal idle PCM leaves
+an otherwise configured A2DP profile available, and an HFP resume can complete
+while music remains paused. Suspend replies echo the request serial through the
+audio child and service, plus the owning signalling epoch. An older reply may
+report its actual state but cannot complete a newer request or publish a
+replacement link as unavailable. A matching reply can report failed resume as
+still suspended. Cache/request retirement occurs only after successful MPM
+return; the audio IOCTL returns native failures to the service. Policy callback
+re-acknowledgement uses the existing passive publication worker.
+
+The encoder is joined/drained before completing an HFP suspend. Ordinary
+encoder stop no longer publishes profile suspension. A new HFP request arriving
+during configuration can defer availability without destroying that valid
+configuration. These are source-level corrections; hardware SCO/A2DP switching
+and the meaning of the observed Windows-specific MPM contract remain acceptance
+items. The helper tests prove local request ownership, not external MPM timing.
 
 - Shared driver lifecycle transitions: opening/disconnect/late success,
   close failure/retry, stale completion and event publication, replacement

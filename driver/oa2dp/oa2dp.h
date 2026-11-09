@@ -101,6 +101,7 @@ struct _OA2DP_DEVICE_CONTEXT {
     BOOLEAN PolicySuspended;
     BOOLEAN MpmConnected;
     OA2DP_MPM_REQUEST MpmRequest;
+    OA2DP_MPM_REQUEST MpmSuspendRequest;
     BOOLEAN MpmIsSuspended;
 };
 
@@ -184,4 +185,6 @@ NTSTATUS Oa2dpMpmRequestConnection(PVOID context, BOOLEAN enabled);
 NTSTATUS Oa2dpMpmConnected(OA2DP_DEVICE_CONTEXT *dev, BOOLEAN connected);
 VOID Oa2dpMpmOpenFailed(OA2DP_DEVICE_CONTEXT *dev, ULONG policySerial);
 VOID Oa2dpMpmPlaying(PVOID context, BOOLEAN playing);
-VOID Oa2dpMpmSuspended(PVOID context, BOOLEAN suspended);
+NTSTATUS Oa2dpMpmSuspended(PVOID context, BOOLEAN suspended, ULONG requestSerial,
+                          ULONG connection);
+VOID Oa2dpMpmAcknowledgeSuspend(OA2DP_DEVICE_CONTEXT *dev);

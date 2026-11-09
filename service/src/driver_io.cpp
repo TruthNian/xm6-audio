@@ -334,11 +334,15 @@ bool AudioEndpoint::set_connected(bool connected, ULONG connection)
     return error == ERROR_SUCCESS;
 }
 
-bool AudioEndpoint::set_suspended(bool suspended)
+bool AudioEndpoint::set_suspended(bool suspended, ULONG request_serial, ULONG connection)
 {
-    ULONG value = suspended ? 1 : 0;
-    return dev_.ioctl(IOCTL_OA2DP_AUDIO_SET_SUSPENDED, &value, sizeof(value), nullptr, 0,
-                      nullptr, 5000) == ERROR_SUCCESS;
+    OA2DP_SUSPENDED_IN value{suspended ? 1UL : 0UL, request_serial, connection};
+    const DWORD error = dev_.ioctl(IOCTL_OA2DP_AUDIO_SET_SUSPENDED, &value, sizeof(value),
+                                   nullptr, 0, nullptr, 5000);
+    if (error != ERROR_SUCCESS)
+        LOGW("profile suspend publication (%u, request %lu, epoch %lu) failed: %lu",
+             suspended, request_serial, connection, error);
+    return error == ERROR_SUCCESS;
 }
 
 bool AudioEndpoint::get_state(OA2DP_FORMAT_CHANGE &out)

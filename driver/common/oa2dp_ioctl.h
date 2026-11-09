@@ -9,7 +9,7 @@
 #ifndef OA2DP_IOCTL_H
 #define OA2DP_IOCTL_H
 
-#define OA2DP_IOCTL_VERSION 9
+#define OA2DP_IOCTL_VERSION 10
 
 #include "../../core/include/oa2dp/pcm_format.h"
 
@@ -142,6 +142,12 @@ typedef struct _OA2DP_CONNECTED_IN {
     ULONG ConnectionGeneration; /* mandatory for TRUE, 0 for unavailable/closed */
 } OA2DP_CONNECTED_IN;
 
+typedef struct _OA2DP_SUSPENDED_IN {
+    ULONG Suspended;          /* profile unavailable for A2DP, not merely idle PCM */
+    ULONG RequestSerial;      /* 0 = unsolicited; echo the handled SuspendSerial */
+    ULONG ConnectionGeneration;
+} OA2DP_SUSPENDED_IN;
+
 /* Completed when Windows opens a stream with a new format (F4.3). */
 typedef struct _OA2DP_FORMAT_CHANGE {
     OA2DP_FORMAT Format;
@@ -149,6 +155,7 @@ typedef struct _OA2DP_FORMAT_CHANGE {
     ULONG ConnectionEnabled;  /* Windows one-shot disconnect suppresses retries */
     ULONG ConnectionSerial;   /* distinguishes an explicit reconnect request */
     ULONG SuspendRequested;   /* native multi-profile manager pauses A2DP for SCO */
+    ULONG SuspendSerial;      /* exact MPM suspend/resume request, echoed on completion */
 } OA2DP_FORMAT_CHANGE;
 
 typedef struct _OA2DP_ENDPOINT_NAME {

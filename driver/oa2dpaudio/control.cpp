@@ -286,6 +286,7 @@ static VOID SnapshotStateLocked(_In_ const OA2DP_AUDIO_DEVICE *dev,
     ev->ConnectionEnabled = dev->ConnectionEnabled ? 1 : 0;
     ev->ConnectionSerial = dev->ConnectionSerial;
     ev->SuspendRequested = dev->SuspendRequested ? 1 : 0;
+    ev->SuspendSerial = dev->SuspendSerial;
 }
 
 static VOID CompleteWait(_Inout_ PIRP irp, _In_ const OA2DP_FORMAT_CHANGE *ev)
@@ -334,7 +335,8 @@ extern "C" VOID Oa2dpReportStream(_Inout_ OA2DP_AUDIO_DEVICE *dev, _In_ const OA
 /* ---- lifetime ---------------------------------------------------------------- */
 
 extern "C" NTSTATUS Oa2dpApplyPolicy(_Inout_ OA2DP_AUDIO_DEVICE *dev,
-                                    _In_ BOOLEAN enabled, _In_ BOOLEAN suspended)
+                                    _In_ BOOLEAN enabled, _In_ BOOLEAN suspended,
+                                    ULONG suspendSerial)
 {
     KIRQL irql;
     PIRP irp;
@@ -349,6 +351,7 @@ extern "C" NTSTATUS Oa2dpApplyPolicy(_Inout_ OA2DP_AUDIO_DEVICE *dev,
     }
     dev->ConnectionEnabled = enabled;
     dev->SuspendRequested = suspended;
+    dev->SuspendSerial = suspendSerial;
     ++dev->ConnectionSerial;
     SnapshotStateLocked(dev, &ev);
     irp = dev->Started ? IoCsqRemoveNextIrp(&dev->WaitCsq, NULL) : NULL;
@@ -711,12 +714,15 @@ static NTSTATUS ControlIoctl(_Inout_ OA2DP_AUDIO_DEVICE *dev, _Inout_ PIRP irp, 
                                    ((OA2DP_CONNECTED_IN *)buf)->ConnectionGeneration);
         break;
     case IOCTL_OA2DP_AUDIO_SET_SUSPENDED:
-        if (inLen != sizeof(ULONG) || !buf || *(PULONG)buf > 1) {
+        if (inLen != sizeof(OA2DP_SUSPENDED_IN) || !buf ||
+            ((OA2DP_SUSPENDED_IN *)buf)->Suspended > 1) {
             status = STATUS_INVALID_PARAMETER;
             break;
         }
-        dev->Bus.SetSuspended(dev->Bus.Header.Context, *(PULONG)buf != 0);
-        status = STATUS_SUCCESS;
+        status = dev->Bus.SetSuspended(dev->Bus.Header.Context,
+            ((OA2DP_SUSPENDED_IN *)buf)->Suspended != 0,
+            ((OA2DP_SUSPENDED_IN *)buf)->RequestSerial,
+            ((OA2DP_SUSPENDED_IN *)buf)->ConnectionGeneration);
         break;
     case IOCTL_OA2DP_AUDIO_SET_NAME:
         if (inLen < sizeof(OA2DP_ENDPOINT_NAME) || !buf) {

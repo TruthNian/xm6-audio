@@ -277,6 +277,7 @@ void Session::on_avdtp_event(const oa2dp_avdtp_event &ev)
     case OA2DP_AVDTP_CLOSE:
     case OA2DP_AVDTP_ABORT:
         end_streaming();
+        update_suspend_state();
         break;
     case OA2DP_AVDTP_DELAYREPORT:
         delay_report_us_ = static_cast<uint32_t>(ev.delay) * 100;
@@ -420,6 +421,7 @@ bool Session::ensure_audio_endpoint()
         }
         connection_enabled_ = state.ConnectionEnabled != 0;
         suspend_requested_ = state.SuspendRequested != 0;
+        suspend_serial_ = state.SuspendSerial;
         connection_serial_ = state.ConnectionSerial;
         audio_format_ = state.Format;
         audio_running_ = state.Running != 0;
@@ -471,7 +473,11 @@ bool Session::setup_audio_endpoint()
         LOGE("cannot configure the native audio endpoint");
         return false;
     }
-    return audio_.set_connected(true, sig_generation_);
+    if (!audio_.set_connected(true, sig_generation_)) return false;
+    // A newer HFP request can arrive while configuring. Its policy update
+    // follows through WAIT_FORMAT; preserve this valid AVDTP configuration.
+    update_suspend_state();
+    return true;
 }
 
 bool Session::start_stream()
@@ -505,6 +511,7 @@ void Session::suspend_stream()
         LOGW("SUSPEND failed");
     else
         publish("suspended");
+    update_suspend_state();
 }
 
 void Session::reconfigure_rate(uint32_t rate)
@@ -569,6 +576,8 @@ void Session::teardown(const char *why)
     // The one-shot KS disconnect completes on this notification. Report it
     // after both synchronous channel closes, not before the link teardown.
     // Keep the audio handle, ring and PortCls filters for every existing app.
+    if (audio_ready_)
+        update_suspend_state();
     if (audio_ready_)
         audio_.set_connected(false);
     rx_failed_ = false;
@@ -656,6 +665,7 @@ void Session::handle(const Command &c)
     case Cmd::AudioFormat:
         connection_enabled_ = c.format.ConnectionEnabled != 0;
         suspend_requested_ = c.format.SuspendRequested != 0;
+        suspend_serial_ = c.format.SuspendSerial;
         if (connection_serial_ != c.format.ConnectionSerial) {
             connection_serial_ = c.format.ConnectionSerial;
             LOGI("Windows requested Bluetooth audio %s",
@@ -679,7 +689,7 @@ void Session::handle(const Command &c)
             suspend_stream();
             // Report stopped transport after the encoder has joined/drained.
             if (!streaming_ && audio_ready_)
-                audio_.set_suspended(true);
+                update_suspend_state();
             break;
         }
         if (audio_running_) {
@@ -692,6 +702,9 @@ void Session::handle(const Command &c)
                 start_stream();
         } else {
             idle_since_ = GetTickCount();
+            // No PCM does not mean that HFP still owns the profile. A resume
+            // request must complete even when the user has paused their music.
+            update_suspend_state();
         }
         break;
     case Cmd::AudioUnavailable:
@@ -900,7 +913,11 @@ void Session::begin_streaming()
     if (++stream_generation_ == 0) ++stream_generation_;
     context.generation = stream_generation_;
     stream_ = std::thread([this, context] { stream_loop(context); });
-    audio_.set_suspended(false);
+    if (!update_suspend_state()) {
+        end_streaming();
+        publish("profile-policy-pending");
+        return;
+    }
     publish("streaming");
 }
 
@@ -909,13 +926,19 @@ void Session::end_streaming()
     streaming_ = false;
     if (stream_.joinable())
         stream_.join();
-    if (audio_ready_)
-        audio_.set_suspended(true);
     {
         std::lock_guard<std::mutex> lock(status_mu_);
         status_.bitrate = 0;
     }
     publish("open");
+}
+
+bool Session::update_suspend_state()
+{
+    if (!audio_ready_) return false;
+    const bool unavailable = !connection_enabled_ || transport_suspended_ ||
+        suspend_requested_ || !sig_open_ || !media_open_;
+    return audio_.set_suspended(unavailable, suspend_serial_, sig_generation_);
 }
 
 void Session::stream_loop(const StreamContext &stream)

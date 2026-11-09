@@ -80,6 +80,18 @@ int main()
     REQUIRE(Oa2dpMpmFinishRequest(&request, connect));
     REQUIRE(!Oa2dpMpmCompletion(&request, 0)); // later remote disconnect is unsolicited
     REQUIRE(!Oa2dpMpmCompletion(&request, 1)); // duplicate status is not another completion
+    auto suspend = Oa2dpMpmBeginRequest(&request, 1);
+    REQUIRE(!Oa2dpMpmOwnedReply(&request, 0)); // ordinary music pause has no request completion
+    REQUIRE(Oa2dpMpmOwnedReply(&request, suspend) == suspend);
+    auto resume = Oa2dpMpmBeginRequest(&request, 0);
+    REQUIRE(!Oa2dpMpmOwnedReply(&request, suspend)); // old stop cannot acknowledge the new resume
+    REQUIRE(!Oa2dpMpmFinishRequest(&request, suspend));
+    REQUIRE(Oa2dpMpmOwnedReply(&request, resume) == resume);
+    // Caller retires only after the external update succeeds. On failure the
+    // same token remains pending; a normal idle/resume reply can retry it.
+    REQUIRE(request.Pending && Oa2dpMpmOwnedReply(&request, resume) == resume);
+    REQUIRE(Oa2dpMpmFinishRequest(&request, resume));
+    REQUIRE(!Oa2dpMpmOwnedReply(&request, resume));
     request.Serial = UINT32_MAX;
     REQUIRE(Oa2dpMpmBeginRequest(&request, 0) == 1);
     data_and_publication_boundaries();

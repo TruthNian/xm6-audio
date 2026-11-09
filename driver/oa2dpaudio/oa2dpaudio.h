@@ -66,6 +66,7 @@ typedef struct _OA2DP_AUDIO_DEVICE {
     BOOLEAN ConnectionEnabled;
     BOOLEAN SuspendRequested;
     ULONG ConnectionSerial;
+    ULONG SuspendSerial;
     volatile LONG Connected;  /* standard KS jack presence, initially false */
     BOOLEAN EventPending;       /* Event not yet picked up by WAIT_FORMAT */
     OA2DP_FORMAT_CHANGE Event;
@@ -139,7 +140,7 @@ VOID Oa2dpWaveFormatsChanged(_Inout_ OA2DP_AUDIO_DEVICE *dev);
 NTSTATUS Oa2dpSetConnected(_Inout_ OA2DP_AUDIO_DEVICE *dev, _In_ BOOLEAN connected,
                           ULONG connection);
 NTSTATUS Oa2dpApplyPolicy(_Inout_ OA2DP_AUDIO_DEVICE *dev, _In_ BOOLEAN enabled,
-                         _In_ BOOLEAN suspended);
+                         _In_ BOOLEAN suspended, ULONG suspendSerial);
 
 #ifdef __cplusplus
 }

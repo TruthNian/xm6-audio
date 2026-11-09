@@ -13,7 +13,8 @@ __declspec(dllimport) NTSTATUS NTAPI BtaMpmUnregister(PVOID Handle);
 __declspec(dllimport) NTSTATUS NTAPI BtaMpmConnectionRequest(PVOID Handle, ULONG Connect, ULONG Automatic);
 __declspec(dllimport) NTSTATUS NTAPI BtaMpmUpdateConnectionStatus(
     PVOID Handle, ULONG Connected, ULONG RequestedCompletion);
-__declspec(dllimport) NTSTATUS NTAPI BtaMpmUpdateSuspendStatus(PVOID Handle, ULONG Suspended, ULONG Notify);
+__declspec(dllimport) NTSTATUS NTAPI BtaMpmUpdateSuspendStatus(
+    PVOID Handle, ULONG Suspended, ULONG RequestedCompletion);
 __declspec(dllimport) NTSTATUS NTAPI BtaMpmUpdatePlayStatus(PVOID Handle, ULONG Playing);
 
 static BOOLEAN AcquireManager(OA2DP_DEVICE_CONTEXT *dev)
@@ -41,7 +42,8 @@ static NTSTATUS NTAPI ConnectionRequest(PVOID context, ULONG connect)
         (void)Oa2dpMpmBeginRequest(&dev->MpmRequest, enabled);
         if (!enabled) KeClearEvent(&dev->DisconnectedEvent);
         if (dev->AudioPolicyRequest)
-            status = dev->AudioPolicyRequest(dev->AudioContext, enabled, dev->PolicySuspended);
+            status = dev->AudioPolicyRequest(dev->AudioContext, enabled, dev->PolicySuspended,
+                                             dev->MpmSuspendRequest.Serial);
         acknowledge = NT_SUCCESS(status) && dev->MpmConnected == enabled &&
             (enabled || (dev->Channels[Oa2dpChannelSignaling].Life.State == ChannelClosed &&
                          dev->Channels[Oa2dpChannelMedia].Life.State == ChannelClosed));
@@ -66,12 +68,14 @@ static NTSTATUS NTAPI SuspendRequest(PVOID context, ULONG suspend)
         status = STATUS_DELETE_PENDING;
     } else {
         dev->PolicySuspended = suspended;
+        (void)Oa2dpMpmBeginRequest(&dev->MpmSuspendRequest, suspended);
         if (dev->AudioPolicyRequest)
-            status = dev->AudioPolicyRequest(dev->AudioContext, dev->PolicyConnected, suspended);
+            status = dev->AudioPolicyRequest(dev->AudioContext, dev->PolicyConnected, suspended,
+                                             dev->MpmSuspendRequest.Serial);
         acknowledge = NT_SUCCESS(status) && dev->MpmIsSuspended == suspended;
     }
     WdfSpinLockRelease(dev->Lock);
-    if (acknowledge) Oa2dpMpmSuspended(dev, suspended);
+    if (acknowledge) WdfWorkItemEnqueue(dev->PublicationWork);
     ExReleaseRundownProtection(&dev->MpmCallbacks);
     return status;
 }
@@ -97,6 +101,7 @@ NTSTATUS Oa2dpMpmStart(OA2DP_DEVICE_CONTEXT *dev)
     dev->PolicySuspended = FALSE;
     dev->MpmConnected = FALSE;
     RtlZeroMemory(&dev->MpmRequest, sizeof(dev->MpmRequest));
+    RtlZeroMemory(&dev->MpmSuspendRequest, sizeof(dev->MpmSuspendRequest));
     dev->MpmIsSuspended = TRUE;
     WdfObjectReference(dev->Device);
     // Profile 1 is A2DP on the tested Windows 10 build. Context is retained
@@ -191,13 +196,62 @@ VOID Oa2dpMpmPlaying(PVOID context, BOOLEAN playing)
     ExReleaseRundownProtection(&dev->MpmCalls);
 }
 
-VOID Oa2dpMpmSuspended(PVOID context, BOOLEAN suspended)
+/* Caller owns PublicationLock at PASSIVE_LEVEL. Cache only accepted updates,
+ * and never complete a policy request that this service reply did not handle. */
+static NTSTATUS PublishSuspended(OA2DP_DEVICE_CONTEXT *dev, BOOLEAN suspended,
+                                 ULONG requestSerial, ULONG connection)
+{
+    ULONG serial;
+    NTSTATUS status = STATUS_SUCCESS;
+    WdfSpinLockAcquire(dev->Lock);
+    OA2DP_CHANNEL *signal = &dev->Channels[Oa2dpChannelSignaling];
+    if ((connection && connection != signal->Life.ConnectionGeneration) ||
+        (!connection && signal->Life.State != ChannelClosed))
+        status = STATUS_DEVICE_NOT_READY;
+    if (!suspended && (dev->PolicySuspended ||
+        !Oa2dpConnectionReady(&signal->Life, &dev->Channels[Oa2dpChannelMedia].Life,
+            connection, dev->PolicyConnected, dev->TransportStopping || dev->MpmStopping)))
+        status = STATUS_DEVICE_NOT_READY;
+    serial = Oa2dpMpmOwnedReply(&dev->MpmSuspendRequest, requestSerial);
+    WdfSpinLockRelease(dev->Lock);
+    if (!NT_SUCCESS(status)) return status;
+    if (!AcquireManager(dev)) return STATUS_DEVICE_NOT_READY;
+    status = BtaMpmUpdateSuspendStatus(dev->MpmHandle, suspended, serial != 0);
+    ExReleaseRundownProtection(&dev->MpmCalls);
+    if (NT_SUCCESS(status)) {
+        WdfSpinLockAcquire(dev->Lock);
+        dev->MpmIsSuspended = suspended;
+        (void)Oa2dpMpmFinishRequest(&dev->MpmSuspendRequest, serial);
+        WdfSpinLockRelease(dev->Lock);
+    } else {
+        KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_WARNING_LEVEL,
+            "oa2dp: MPM suspend notification failed 0x%08X\n", status));
+    }
+    return status;
+}
+
+NTSTATUS Oa2dpMpmSuspended(PVOID context, BOOLEAN suspended, ULONG requestSerial,
+                          ULONG connection)
 {
     OA2DP_DEVICE_CONTEXT *dev = context;
+    NT_ASSERT(KeGetCurrentIrql() == PASSIVE_LEVEL);
+    WdfWaitLockAcquire(dev->PublicationLock, NULL);
+    NTSTATUS status = PublishSuspended(dev, suspended, requestSerial, connection);
+    WdfWaitLockRelease(dev->PublicationLock);
+    return status;
+}
+
+VOID Oa2dpMpmAcknowledgeSuspend(OA2DP_DEVICE_CONTEXT *dev)
+{
+    ULONG serial, connection;
+    BOOLEAN suspended;
+    WdfWaitLockAcquire(dev->PublicationLock, NULL);
     WdfSpinLockAcquire(dev->Lock);
-    dev->MpmIsSuspended = suspended;
+    suspended = dev->MpmIsSuspended;
+    serial = dev->MpmSuspendRequest.Pending && dev->MpmSuspendRequest.Target == suspended
+        ? dev->MpmSuspendRequest.Serial : 0;
+    connection = dev->Channels[Oa2dpChannelSignaling].Life.ConnectionGeneration;
     WdfSpinLockRelease(dev->Lock);
-    if (!AcquireManager(dev)) return;
-    (void)BtaMpmUpdateSuspendStatus(dev->MpmHandle, suspended, 1);
-    ExReleaseRundownProtection(&dev->MpmCalls);
+    if (serial) (void)PublishSuspended(dev, suspended, serial, connection);
+    WdfWaitLockRelease(dev->PublicationLock);
 }

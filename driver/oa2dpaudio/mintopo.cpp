@@ -43,7 +43,8 @@ public:
     OA2DP_BUS_INTERFACE VolumeBus{};
     BOOLEAN Attached = FALSE;
     static VOID VolumeChanged(PVOID context);
-    static NTSTATUS PolicyRequested(PVOID context, BOOLEAN enabled, BOOLEAN suspended);
+    static NTSTATUS PolicyRequested(PVOID context, BOOLEAN enabled, BOOLEAN suspended,
+                                    ULONG suspendSerial);
 
     IMP_IMiniportTopology;
 };
@@ -60,9 +61,11 @@ VOID CMiniportTopology::VolumeChanged(PVOID context)
     }
 }
 
-NTSTATUS CMiniportTopology::PolicyRequested(PVOID context, BOOLEAN enabled, BOOLEAN suspended)
+NTSTATUS CMiniportTopology::PolicyRequested(PVOID context, BOOLEAN enabled, BOOLEAN suspended,
+                                            ULONG suspendSerial)
 {
-    return Oa2dpApplyPolicy(static_cast<CMiniportTopology *>(context)->Device, enabled, suspended);
+    return Oa2dpApplyPolicy(static_cast<CMiniportTopology *>(context)->Device, enabled, suspended,
+                            suspendSerial);
 }
 
 #pragma code_seg("PAGE")

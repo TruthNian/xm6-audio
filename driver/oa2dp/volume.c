@@ -124,6 +124,7 @@ static VOID PublishWorkItem(WDFWORKITEM work)
     WdfSpinLockRelease(dev->Lock);
     if (!NT_SUCCESS(Oa2dpPublishConnected(dev, TRUE, connection)))
         (void)Oa2dpPublishConnected(dev, FALSE, 0);
+    Oa2dpMpmAcknowledgeSuspend(dev);
 }
 
 NTSTATUS Oa2dpInitializePublication(OA2DP_DEVICE_CONTEXT *dev)
@@ -195,7 +196,8 @@ static NTSTATUS BusRegisterAudio(PVOID context, PVOID audioContext,
         dev->AudioContext = audioContext;
         dev->AudioVolumeNotify = notify;
         dev->AudioPolicyRequest = request;
-        status = request(audioContext, dev->PolicyConnected, dev->PolicySuspended);
+        status = request(audioContext, dev->PolicyConnected, dev->PolicySuspended,
+                          dev->MpmSuspendRequest.Serial);
         if (!NT_SUCCESS(status)) {
             dev->AudioContext = NULL;
             dev->AudioVolumeNotify = NULL;

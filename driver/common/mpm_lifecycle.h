@@ -42,4 +42,10 @@ static inline int Oa2dpMpmFinishRequest(OA2DP_MPM_REQUEST *r, uint32_t serial)
     r->FailedConnect = 0;
     return 1;
 }
+/* A service reply explicitly identifies the request it handled. A mismatched
+ * result may report failure of that request, but cannot complete a newer one. */
+static inline uint32_t Oa2dpMpmOwnedReply(const OA2DP_MPM_REQUEST *r, uint32_t serial)
+{
+    return serial && r->Pending && serial == r->Serial ? serial : 0;
+}
 #endif
