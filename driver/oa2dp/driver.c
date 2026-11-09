@@ -71,6 +71,7 @@ NTSTATUS Oa2dpEvtDeviceAdd(_In_ WDFDRIVER Driver, _Inout_ PWDFDEVICE_INIT Device
     WdfDeviceInitSetRequestAttributes(DeviceInit, &attrs);
 
     WDF_OBJECT_ATTRIBUTES_INIT_CONTEXT_TYPE(&attrs, OA2DP_DEVICE_CONTEXT);
+    attrs.EvtDestroyCallback = Oa2dpEvtDeviceDestroy;
     status = WdfDeviceCreate(&DeviceInit, &attrs, &device);
     if (!NT_SUCCESS(status))
         return status;
@@ -144,11 +145,18 @@ NTSTATUS Oa2dpEvtPrepareHardware(_In_ WDFDEVICE Device, _In_ WDFCMRESLIST Raw,
     dev->PowerQuiesced = FALSE;
     dev->SurpriseRemoved = FALSE;
     WdfSpinLockRelease(dev->Lock);
-    status = WdfFdoQueryForInterface(Device, &GUID_BTHDDI_PROFILE_DRIVER_INTERFACE,
-                                     (PINTERFACE)&dev->Profile, sizeof(dev->Profile),
-                                     BTHDDI_PROFILE_DRIVER_INTERFACE_VERSION_FOR_QI, NULL);
-    if (!NT_SUCCESS(status))
-        return status;
+    // BTH's BRB allocation table is device-owned, not an individual hardware
+    // resource. Reuse this referenced import across prepare/rebalance cycles;
+    // replacing it would leak an import and could race a late BRB completion.
+    if (!dev->ProfileAcquired) {
+        status = WdfFdoQueryForInterface(Device, &GUID_BTHDDI_PROFILE_DRIVER_INTERFACE,
+                                         (PINTERFACE)&dev->Profile, sizeof(dev->Profile),
+                                         BTHDDI_PROFILE_DRIVER_INTERFACE_VERSION_FOR_QI, NULL);
+        if (!NT_SUCCESS(status)) return status;
+        dev->ProfileAcquired = TRUE;
+    }
+    if (!dev->Profile.BthAllocateBrb || !dev->Profile.BthFreeBrb)
+        return STATUS_INVALID_DEVICE_STATE;
 
     status = Oa2dpQueryLocalAddress(dev);
     if (!NT_SUCCESS(status))
@@ -287,6 +295,20 @@ NTSTATUS Oa2dpEvtReleaseHardware(_In_ WDFDEVICE Device, _In_ WDFCMRESLIST Transl
 }
 
 /* ------------------------------------------------------------------------ */
+
+VOID Oa2dpEvtDeviceDestroy(WDFOBJECT Object)
+{
+    OA2DP_DEVICE_CONTEXT *dev = Oa2dpGetDevice((WDFDEVICE)Object);
+    // WDF destroys child objects before their parent; device destruction is
+    // PASSIVE_LEVEL. Do not call methods on already-destroyed WDF children here.
+    if (dev->ProfileAcquired) {
+        INTERFACE imported = dev->Profile.Interface;
+        dev->ProfileAcquired = FALSE;
+        RtlZeroMemory(&dev->Profile, sizeof(dev->Profile));
+        if (imported.InterfaceDereference)
+            imported.InterfaceDereference(imported.Context);
+    }
+}
 
 VOID Oa2dpEvtFileCleanup(_In_ WDFFILEOBJECT file)
 {

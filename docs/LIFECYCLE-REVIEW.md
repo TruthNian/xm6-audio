@@ -1,8 +1,8 @@
-# Native lifecycle review, 0.3.28
+# Native lifecycle review, 0.3.29
 
 This source batch is not a declaration of hardware acceptance. Source review
 and focused offline checks precede another hardware trial. Versions 0.3.23
-through 0.3.28 have not been installed on the host. The host was restored to Microsoft
+through 0.3.29 have not been installed on the host. The host was restored to Microsoft
 BthA2dp; the custom codec service is stopped. Current host audio is not evidence
 of native LDAC. No further installation or reboot is part of this source review.
 
@@ -28,6 +28,7 @@ of native LDAC. No further installation or reboot is part of this source review.
 | Device enters low power with idle receive/event wait | Power-managed queues had indefinite requests without EvtIoStop; no suspend/restart transport lifecycle | Explicit self-managed suspend/restart, non-power-managed control/event queues, gated/bounded Bluetooth teardown and current power state/serial in ABI 9 |
 | Music idles or HFP suspend/resume requests overlap | Encoder stop was equated with profile suspension; cache changed before MPM accepted it, and replies had no request identity | Separate profile availability from idle PCM, echo suspend request serial and link epoch in ABI 10/bus ABI 5, serialize MPM calls, retain failed updates and reject stale replies |
 | Server/PSM allocation or registration/unregistration fails | Setup ignored registration failure; cleanup erased ownership even when no unregister BRB could be allocated | Transactional registration state shared with off-host failure injection; retain each resource until confirmed release, gate admission through prepare and finish old ownership before a new registration |
+| Repeated PrepareHardware on the same device object | Each query acquired another Bluetooth interface reference and overwrote the previous import; no matching dereference existed | Import the BRB allocation interface once per WDFDEVICE and release it during final device destruction |
 
 Channel close work is preallocated rather than allocated in a disconnect
 indication. Allocation failure can no longer fabricate a completed remote
@@ -126,6 +127,14 @@ audio/video timing. They cannot prove those properties without hardware use.
 
 ## Outstanding acceptance
 
+The Bluetooth allocation-interface reference now belongs to the device object,
+not a prepare/stop cycle. Rebalance does not overwrite the imported function
+table while a delayed BRB completion may still free its BRB. The device destroy
+callback dereferences the import once, at PASSIVE_LEVEL, without accessing WDF
+child objects. It relies on the existing channel/server callback teardown and
+WDF child-before-parent destruction; failed permanent-removal cleanup is still
+an acceptance item. No separate per-packet reference layer was added.
+
 L2CAP server registration now follows the documented server-then-PSM sequence
 with the explicit AVDTP PSM (0x19) for registration and unregister. The pure
 resource transaction is the one called by the kernel driver. Fake callbacks
@@ -167,3 +176,6 @@ and [self-managed restart](https://learn.microsoft.com/en-us/windows-hardware/dr
 Server ownership/order: [L2CAP server registration](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/bthddi/ns-bthddi-_brb_l2ca_register_server),
 [server unregister](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/bthddi/ns-bthddi-_brb_l2ca_unregister_server),
 and [PSM registration](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/bthddi/ns-bthddi-_brb_psm).
+Interface lifetime: [BTH profile interface](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/bthddi/ns-bthddi-_bth_profile_driver_interface),
+[INTERFACE reference contract](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/wdm/ns-wdm-_interface),
+and [WDF destroy callback](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/wdfobject/nc-wdfobject-evt_wdf_object_context_destroy).

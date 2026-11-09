@@ -94,7 +94,7 @@ NTSTATUS Oa2dpMpmStart(OA2DP_DEVICE_CONTEXT *dev)
     PVOID handle = NULL;
     NTSTATUS status;
     PAGED_CODE();
-    if (dev->MpmHandle) return STATUS_DEVICE_BUSY; // failed unregister still owns callbacks
+    if (dev->MpmHandle) return STATUS_DEVICE_BUSY; // do not overwrite a live registration
     ExInitializeRundownProtection(&dev->MpmCalls);
     ExInitializeRundownProtection(&dev->MpmCallbacks);
     dev->MpmStopping = FALSE;
