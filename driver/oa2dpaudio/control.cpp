@@ -368,6 +368,7 @@ extern "C" VOID Oa2dpControlInit(_Inout_ OA2DP_AUDIO_DEVICE *dev)
 {
     KeInitializeSpinLock(&dev->Lock);
     KeInitializeEvent(&dev->ControlLock, SynchronizationEvent, TRUE);
+    KeInitializeEvent(&dev->ConnectionLock, SynchronizationEvent, TRUE);
     KeInitializeSpinLock(&dev->WaitLock);
     InitializeListHead(&dev->WaitList);
     (void)IoCsqInitialize(&dev->WaitCsq, CsqInsert, CsqRemove, CsqPeekNext, CsqAcquire,
@@ -696,15 +697,18 @@ static NTSTATUS ControlIoctl(_Inout_ OA2DP_AUDIO_DEVICE *dev, _Inout_ PIRP irp, 
         KeReleaseSpinLock(&dev->Lock, irql);
         break;
     case IOCTL_OA2DP_AUDIO_SET_CONNECTED:
-        if (inLen < sizeof(ULONG) || !buf) {
+        if (inLen != sizeof(OA2DP_CONNECTED_IN) || !buf) {
             status = STATUS_BUFFER_TOO_SMALL;
             break;
         }
-        if (*(PULONG)buf > 1) {
+        if (((OA2DP_CONNECTED_IN *)buf)->Connected > 1 ||
+            (((OA2DP_CONNECTED_IN *)buf)->Connected &&
+             !((OA2DP_CONNECTED_IN *)buf)->ConnectionGeneration)) {
             status = STATUS_INVALID_PARAMETER;
             break;
         }
-        status = Oa2dpSetConnected(dev, *(PULONG)buf != 0);
+        status = Oa2dpSetConnected(dev, ((OA2DP_CONNECTED_IN *)buf)->Connected != 0,
+                                   ((OA2DP_CONNECTED_IN *)buf)->ConnectionGeneration);
         break;
     case IOCTL_OA2DP_AUDIO_SET_SUSPENDED:
         if (inLen != sizeof(ULONG) || !buf || *(PULONG)buf > 1) {

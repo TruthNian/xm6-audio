@@ -9,7 +9,7 @@
 #ifndef OA2DP_IOCTL_H
 #define OA2DP_IOCTL_H
 
-#define OA2DP_IOCTL_VERSION 7
+#define OA2DP_IOCTL_VERSION 8
 
 #include "../../core/include/oa2dp/pcm_format.h"
 
@@ -54,6 +54,7 @@ typedef struct _OA2DP_OPEN_CHANNEL_IN {
     ULONG Kind;               /* OA2DP_CHANNEL_KIND */
     USHORT InMtu;             /* our receive MTU, 0 = default (672 / 1005) */
     USHORT Reserved;
+    ULONG ConnectionGeneration; /* MEDIA must belong to this live signalling link; SIGNALING = 0 */
 } OA2DP_OPEN_CHANNEL_IN;
 
 typedef struct _OA2DP_CHANNEL_INFO {
@@ -78,6 +79,8 @@ typedef struct _OA2DP_CLOSE_CHANNEL_OUT {
  *       STATUS_CONNECTION_DISCONNECTED when the channel closes. */
 typedef struct _OA2DP_SEND_IN {
     ULONG Kind;
+    ULONG Generation;
+    ULONG ConnectionGeneration; /* both mandatory; stale SEND/RECV must not use a replacement */
 } OA2DP_SEND_IN, OA2DP_RECV_IN;
 
 typedef enum _OA2DP_EVENT_TYPE {
@@ -130,6 +133,11 @@ typedef struct _OA2DP_LATENCY {
     ULONG TransportUs;        /* encoder + packet queue + air */
     ULONG DeviceUs;           /* AVDTP delay report from the headset */
 } OA2DP_LATENCY;
+
+typedef struct _OA2DP_CONNECTED_IN {
+    ULONG Connected;
+    ULONG ConnectionGeneration; /* mandatory for TRUE, 0 for unavailable/closed */
+} OA2DP_CONNECTED_IN;
 
 /* Completed when Windows opens a stream with a new format (F4.3). */
 typedef struct _OA2DP_FORMAT_CHANGE {

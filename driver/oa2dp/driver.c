@@ -95,6 +95,9 @@ NTSTATUS Oa2dpEvtDeviceAdd(_In_ WDFDRIVER Driver, _Inout_ PWDFDEVICE_INIT Device
     status = WdfSpinLockCreate(&attrs, &dev->Lock);
     if (!NT_SUCCESS(status))
         return status;
+    status = Oa2dpInitializePublication(dev);
+    if (!NT_SUCCESS(status))
+        return status;
     status = Oa2dpInitializeChannels(dev);
     if (!NT_SUCCESS(status))
         return status;
@@ -145,7 +148,7 @@ NTSTATUS Oa2dpEvtPrepareHardware(_In_ WDFDEVICE Device, _In_ WDFCMRESLIST Raw,
     dev->EventHead = dev->EventCount = 0;
     dev->EventOverflow = FALSE;
     WdfSpinLockRelease(dev->Lock);
-    Oa2dpPublishConnected(dev, FALSE);
+    Oa2dpPublishConnected(dev, FALSE, 0);
 
     dev->TransportStopping = FALSE;
     status = Oa2dpMpmStart(dev);
@@ -173,7 +176,7 @@ NTSTATUS Oa2dpEvtReleaseHardware(_In_ WDFDEVICE Device, _In_ WDFCMRESLIST Transl
     Oa2dpCloseAllChannels(dev);
     for (ULONG i = 0; i < Oa2dpChannelCount; ++i)
         WdfWorkItemFlush(dev->Channels[i].CloseWork);
-    Oa2dpPublishConnected(dev, FALSE);
+    Oa2dpPublishConnected(dev, FALSE, 0);
     Oa2dpMpmStop(dev);
     Oa2dpPostEvent(dev, Oa2dpEventDeviceGone, NULL, 0);
     return STATUS_SUCCESS;
@@ -189,7 +192,7 @@ VOID Oa2dpEvtFileCleanup(_In_ WDFFILEOBJECT file)
     Oa2dpVolumeFileCleanup(dev, file);
     if (control) {
         Oa2dpCloseAllChannels(dev);
-        (void)Oa2dpPublishConnected(dev, FALSE);
+        (void)Oa2dpPublishConnected(dev, FALSE, 0);
         WdfSpinLockAcquire(dev->Lock);
         if (dev->ServiceFile == file) dev->ServiceFile = NULL;
         WdfSpinLockRelease(dev->Lock);
@@ -448,7 +451,7 @@ VOID Oa2dpEvtIoDeviceControl(_In_ WDFQUEUE Queue, _In_ WDFREQUEST Request,
         if (NT_SUCCESS(status) && in->Kind >= Oa2dpChannelCount)
             status = STATUS_INVALID_PARAMETER;
         if (NT_SUCCESS(status)) {
-            Oa2dpTransfer(dev, Request, (OA2DP_CHANNEL_KIND)in->Kind, Code == IOCTL_OA2DP_SEND);
+            Oa2dpTransfer(dev, Request, in, Code == IOCTL_OA2DP_SEND);
             return;
         }
         break;

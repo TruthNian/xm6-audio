@@ -94,6 +94,7 @@ NTSTATUS Oa2dpInitializeChannels(OA2DP_DEVICE_CONTEXT *dev)
     for (ULONG i = 0; i < Oa2dpChannelCount; ++i) {
         OA2DP_CHANNEL *ch = &dev->Channels[i];
         KeInitializeEvent(&ch->OpenFinished, NotificationEvent, TRUE);
+        KeInitializeEvent(&ch->SubmissionsIdle, NotificationEvent, TRUE);
         WDF_OBJECT_ATTRIBUTES_INIT(&attrs);
         attrs.ParentObject = dev->Device;
         status = WdfWaitLockCreate(&attrs, &ch->CloseLock);
@@ -139,7 +140,7 @@ static void AcceptIncoming(OA2DP_DEVICE_CONTEXT *dev, PINDICATION_PARAMETERS p)
     if (dev->PolicyConnected && !dev->TransportStopping) {
         ch = &dev->Channels[Oa2dpChannelSignaling];
         generation = Oa2dpChannelBeginOpen(&ch->Life, TRUE, FALSE);
-        if (!generation && ch->Life.State == ChannelOpen) {
+        if (!generation && ch->Life.State == ChannelOpen && !ch->Life.CloseRequested) {
             ch = &dev->Channels[Oa2dpChannelMedia];
             generation = Oa2dpChannelBeginOpen(&ch->Life, TRUE, FALSE);
         }
@@ -270,7 +271,7 @@ static VOID CloseWorkItem(_In_ WDFWORKITEM WorkItem)
     generation = ch->Life.CloseRequested ? ch->Life.Generation : 0;
     WdfSpinLockRelease(dev->Lock);
     if (generation && NT_SUCCESS(CloseChannelGeneration(dev, ch->Kind, generation, 0, NULL))) {
-        (void)Oa2dpPublishConnected(dev, FALSE);
+        (void)Oa2dpPublishConnected(dev, FALSE, 0);
     }
 }
 
@@ -355,6 +356,14 @@ VOID Oa2dpOpenChannel(_In_ OA2DP_DEVICE_CONTEXT *dev, _In_ WDFREQUEST request,
                                                             : OA2DP_DEFAULT_SIGNALING_MTU);
 
     WdfSpinLockAcquire(dev->Lock);
+    OA2DP_CHANNEL *signal = &dev->Channels[Oa2dpChannelSignaling];
+    if (in->Kind == Oa2dpChannelMedia &&
+        !Oa2dpChannelTransferCurrent(&signal->Life, in->ConnectionGeneration,
+                                     in->ConnectionGeneration)) {
+        WdfSpinLockRelease(dev->Lock);
+        WdfRequestComplete(request, STATUS_CONNECTION_DISCONNECTED);
+        return;
+    }
     generation = Oa2dpChannelBeginOpen(&ch->Life, dev->PolicyConnected,
                                       dev->TransportStopping);
     if (!generation) {
@@ -518,6 +527,11 @@ static NTSTATUS CloseChannelGeneration(OA2DP_DEVICE_CONTEXT *dev,
     handle = ch->Handle;
     WdfSpinLockRelease(dev->Lock);
 
+    // Closing rejects new leases under the same lock used by transfers. An
+    // already-admitted submit must reach BTHPORT before its handle is closed.
+    // Do not wait for transfer completion: an idle receive needs CLOSE to end.
+    (void)KeWaitForSingleObject(&ch->SubmissionsIdle, Executive, KernelMode, FALSE, NULL);
+
     brb = (struct _BRB_L2CA_CLOSE_CHANNEL *)dev->Profile.BthAllocateBrb(BRB_L2CA_CLOSE_CHANNEL,
                                                                         OA2DP_POOL_TAG);
     if (!brb) {
@@ -573,8 +587,9 @@ VOID Oa2dpCloseAllChannels(_In_ OA2DP_DEVICE_CONTEXT *dev)
 static EVT_WDF_REQUEST_COMPLETION_ROUTINE TransferDone;
 
 VOID Oa2dpTransfer(_In_ OA2DP_DEVICE_CONTEXT *dev, _In_ WDFREQUEST request,
-                   _In_ OA2DP_CHANNEL_KIND kind, _In_ BOOLEAN send)
+                   _In_ const OA2DP_SEND_IN *in, _In_ BOOLEAN send)
 {
+    const OA2DP_CHANNEL_KIND kind = (OA2DP_CHANNEL_KIND)in->Kind;
     OA2DP_CHANNEL *ch = &dev->Channels[kind];
     struct _BRB_L2CA_ACL_TRANSFER *brb;
     PMDL mdl;
@@ -593,10 +608,21 @@ VOID Oa2dpTransfer(_In_ OA2DP_DEVICE_CONTEXT *dev, _In_ WDFREQUEST request,
     WdfSpinLockAcquire(dev->Lock);
     handle = ch->Handle;
     outMtu = ch->OutMtu;
-    status = ch->Life.State == ChannelOpen ? STATUS_SUCCESS : STATUS_CONNECTION_DISCONNECTED;
-    WdfSpinLockRelease(dev->Lock);
+    status = Oa2dpChannelTransferCurrent(&ch->Life, in->Generation, in->ConnectionGeneration)
+        ? STATUS_SUCCESS : STATUS_CONNECTION_DISCONNECTED;
     if (NT_SUCCESS(status) && send && len > outMtu)
         status = STATUS_INVALID_BUFFER_SIZE;
+    if (NT_SUCCESS(status)) {
+        OA2DP_CHANNEL *signal = &dev->Channels[Oa2dpChannelSignaling];
+        if (dev->TransportStopping || !dev->PolicyConnected ||
+            !Oa2dpChannelTransferCurrent(&signal->Life, in->ConnectionGeneration,
+                                          in->ConnectionGeneration) ||
+            !Oa2dpChannelBeginSubmit(&ch->Life, in->Generation, in->ConnectionGeneration))
+            status = STATUS_CONNECTION_DISCONNECTED;
+        else if (ch->Life.Submissions == 1)
+            KeClearEvent(&ch->SubmissionsIdle);
+    }
+    WdfSpinLockRelease(dev->Lock);
     if (!NT_SUCCESS(status)) {
         WdfRequestComplete(request, status);
         return;
@@ -605,6 +631,9 @@ VOID Oa2dpTransfer(_In_ OA2DP_DEVICE_CONTEXT *dev, _In_ WDFREQUEST request,
     brb = (struct _BRB_L2CA_ACL_TRANSFER *)dev->Profile.BthAllocateBrb(BRB_L2CA_ACL_TRANSFER,
                                                                        OA2DP_POOL_TAG);
     if (!brb) {
+        WdfSpinLockAcquire(dev->Lock);
+        if (Oa2dpChannelEndSubmit(&ch->Life)) KeSetEvent(&ch->SubmissionsIdle, IO_NO_INCREMENT, FALSE);
+        WdfSpinLockRelease(dev->Lock);
         WdfRequestComplete(request, STATUS_INSUFFICIENT_RESOURCES);
         return;
     }
@@ -627,6 +656,11 @@ VOID Oa2dpTransfer(_In_ OA2DP_DEVICE_CONTEXT *dev, _In_ WDFREQUEST request,
         InterlockedExchangeAdd(&dev->TxQueuedBytes, (LONG)len);
     }
     status = SubmitBrbAsync(dev, request, (struct _BRB *)brb, sizeof(*brb), TransferDone, dev, 0);
+    // Completion may already have run and completed request. Only touch the
+    // stable channel/device here; the completion routine never owns this lease.
+    WdfSpinLockAcquire(dev->Lock);
+    if (Oa2dpChannelEndSubmit(&ch->Life)) KeSetEvent(&ch->SubmissionsIdle, IO_NO_INCREMENT, FALSE);
+    WdfSpinLockRelease(dev->Lock);
     if (status != STATUS_PENDING) {
         if (send && kind == Oa2dpChannelMedia) {
             InterlockedDecrement(&dev->TxQueuedPackets);

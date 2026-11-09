@@ -4,8 +4,65 @@
 #include <cstdlib>
 #define REQUIRE(x) do { if (!(x)) { std::fprintf(stderr, "line %d: %s\n", __LINE__, #x); std::exit(1); } } while (0)
 
+static OA2DP_CHANNEL_LIFECYCLE opened(uint32_t previous, uint32_t connection)
+{
+    OA2DP_CHANNEL_LIFECYCLE c{};
+    c.Generation = previous;
+    auto generation = Oa2dpChannelBeginOpen(&c, 1, 0);
+    c.ConnectionGeneration = connection ? connection : generation;
+    REQUIRE(Oa2dpChannelFinishOpen(&c, generation, 1));
+    return c;
+}
+
+static void data_and_publication_boundaries()
+{
+    auto signal = opened(7, 0);
+    auto media = opened(2, signal.Generation);
+    const auto epoch = signal.Generation;
+    const auto channel = media.Generation;
+    REQUIRE(Oa2dpConnectionReady(&signal, &media, epoch, 1, 0));
+    REQUIRE(!Oa2dpConnectionReady(&signal, &media, epoch - 1, 1, 0)); // old TRUE publisher
+    REQUIRE(!Oa2dpConnectionReady(&signal, &media, 0, 1, 0));
+    REQUIRE(!Oa2dpConnectionReady(&signal, &media, epoch, 0, 0));
+    REQUIRE(!Oa2dpConnectionReady(&signal, &media, epoch, 1, 1));
+    REQUIRE(!Oa2dpChannelBeginSubmit(&media, 0, epoch));
+    REQUIRE(!Oa2dpChannelBeginSubmit(&media, channel, 0));
+    REQUIRE(!Oa2dpChannelBeginSubmit(&media, channel, epoch - 1));
+    REQUIRE(Oa2dpChannelBeginSubmit(&media, channel, epoch));
+    REQUIRE(Oa2dpChannelBeginSubmit(&media, channel, epoch));
+    // CLOSE arrives after admission but before either WdfRequestSend returns.
+    Oa2dpChannelRequestClose(&media);
+    REQUIRE(!Oa2dpChannelBeginSubmit(&media, channel, epoch));
+    REQUIRE(!Oa2dpChannelFinishClose(&media, channel, 1));
+    REQUIRE(!Oa2dpChannelEndSubmit(&media));
+    REQUIRE(!Oa2dpChannelFinishClose(&media, channel, 1));
+    REQUIRE(!Oa2dpConnectionReady(&signal, &media, epoch, 1, 0)); // TRUE invalidated during publish
+    REQUIRE(!Oa2dpConnectionClosed(&signal, &media)); // FALSE cannot acknowledge yet
+    REQUIRE(Oa2dpChannelEndSubmit(&media)); // submission, not idle RECV completion
+    REQUIRE(Oa2dpChannelFinishClose(&media, channel, 1));
+    Oa2dpChannelRequestClose(&signal);
+    REQUIRE(Oa2dpChannelFinishClose(&signal, epoch, 1));
+    REQUIRE(Oa2dpConnectionClosed(&signal, &media));
+    auto replacement = Oa2dpChannelBeginOpen(&signal, 1, 0);
+    signal.ConnectionGeneration = replacement;
+    REQUIRE(!Oa2dpConnectionClosed(&signal, &media)); // delayed FALSE must not set the event
+    REQUIRE(Oa2dpChannelFinishOpen(&signal, replacement, 1));
+    auto next_media = Oa2dpChannelBeginOpen(&media, 1, 0);
+    media.ConnectionGeneration = replacement;
+    REQUIRE(Oa2dpChannelFinishOpen(&media, next_media, 1));
+    REQUIRE(!Oa2dpChannelBeginSubmit(&media, channel, epoch)); // retired encoder/read
+    REQUIRE(!Oa2dpChannelBeginSubmit(&media, next_media, epoch)); // matching channel, wrong link
+    REQUIRE(!Oa2dpConnectionReady(&signal, &media, epoch, 1, 0));
+    REQUIRE(Oa2dpConnectionReady(&signal, &media, replacement, 1, 0));
+    REQUIRE(Oa2dpChannelBeginSubmit(&media, next_media, replacement));
+    REQUIRE(Oa2dpChannelEndSubmit(&media));
+    media.ConnectionGeneration = epoch;
+    REQUIRE(!Oa2dpConnectionReady(&signal, &media, replacement, 1, 0)); // mismatched pair
+}
+
 int main()
 {
+    data_and_publication_boundaries();
     OA2DP_CHANNEL_LIFECYCLE c{};
     REQUIRE(!Oa2dpChannelBeginOpen(&c, 0, 0)); // explicit user disconnect
     REQUIRE(!Oa2dpChannelBeginOpen(&c, 1, 1)); // PnP stop

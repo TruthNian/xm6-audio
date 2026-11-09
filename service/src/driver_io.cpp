@@ -143,10 +143,11 @@ bool Transport::get_info(OA2DP_DEVICE_INFO &out)
            n == sizeof(out);
 }
 
-bool Transport::open_channel(OA2DP_CHANNEL_KIND kind, OA2DP_CHANNEL_INFO &out)
+bool Transport::open_channel(OA2DP_CHANNEL_KIND kind, OA2DP_CHANNEL_INFO &out, ULONG connection)
 {
     OA2DP_OPEN_CHANNEL_IN in{};
     in.Kind = kind;
+    in.ConnectionGeneration = connection;
     DWORD n = 0;
     // L2CAP connection setup can take a few seconds (paging, auth).
     DWORD err = dev_.ioctl(IOCTL_OA2DP_OPEN_CHANNEL, &in, sizeof(in), &out, sizeof(out), &n, 15000);
@@ -172,26 +173,28 @@ bool Transport::close_channel(OA2DP_CHANNEL_KIND kind, ULONG connection, ULONG *
     return ok;
 }
 
-bool Transport::send(OA2DP_CHANNEL_KIND kind, const uint8_t *data, size_t len)
+bool Transport::send(const OA2DP_SEND_IN &binding, const uint8_t *data, size_t len)
 {
-    OA2DP_SEND_IN in{};
-    in.Kind = kind;
+    OA2DP_SEND_IN in = binding;
     return dev_.ioctl(IOCTL_OA2DP_SEND, &in, sizeof(in), const_cast<uint8_t *>(data),
                       static_cast<DWORD>(len), nullptr, 5000) == ERROR_SUCCESS;
 }
 
-int Transport::recv(OA2DP_CHANNEL_KIND kind, uint8_t *buf, size_t cap, DWORD timeout_ms,
+int Transport::recv(const OA2DP_RECV_IN &binding, uint8_t *buf, size_t cap, DWORD timeout_ms,
                     HANDLE cancel)
 {
-    if (kind == Oa2dpChannelSignaling) {
+    if (binding.Kind == Oa2dpChannelSignaling) {
         Slot &s = receive_;
+        if (s.busy && (s.binding.Generation != binding.Generation ||
+                       s.binding.ConnectionGeneration != binding.ConnectionGeneration))
+            cancel_receive(); // never deliver an old pending read to a new AVDTP session
         if (!s.busy) {
             s.data.resize(cap);
             s.ov = OVERLAPPED{};
             s.ov.hEvent = s.event;
             ResetEvent(s.event);
-            static OA2DP_RECV_IN in = {Oa2dpChannelSignaling};
-            if (!DeviceIoControl(dev_.get(), IOCTL_OA2DP_RECV, &in, sizeof(in), s.data.data(),
+            s.binding = binding;
+            if (!DeviceIoControl(dev_.get(), IOCTL_OA2DP_RECV, &s.binding, sizeof(s.binding), s.data.data(),
                                  static_cast<DWORD>(cap), nullptr, &s.ov) &&
                 GetLastError() != ERROR_IO_PENDING)
                 return -1;
@@ -213,8 +216,7 @@ int Transport::recv(OA2DP_CHANNEL_KIND kind, uint8_t *buf, size_t cap, DWORD tim
         std::copy_n(s.data.data(), bytes, buf);
         return static_cast<int>(bytes);
     }
-    OA2DP_RECV_IN in{};
-    in.Kind = kind;
+    OA2DP_RECV_IN in = binding;
     DWORD n = 0;
     DWORD err = dev_.ioctl(IOCTL_OA2DP_RECV, &in, sizeof(in), buf, static_cast<DWORD>(cap), &n,
                            timeout_ms, cancel);
@@ -266,7 +268,7 @@ bool Transport::finish_slot(Slot &s, DWORD timeout_ms)
     return ok != FALSE;
 }
 
-bool Transport::send_media(const uint8_t *data, size_t len)
+bool Transport::send_media(const OA2DP_SEND_IN &binding, const uint8_t *data, size_t len)
 {
     Slot &s = slots_[next_slot_];
     next_slot_ = (next_slot_ + 1) % kSlots;
@@ -277,12 +279,12 @@ bool Transport::send_media(const uint8_t *data, size_t len)
         return false;
     }
 
-    static OA2DP_SEND_IN in = {Oa2dpChannelMedia};
+    s.binding = binding;
     s.data.assign(data, data + len);
     s.ov = OVERLAPPED{};
     s.ov.hEvent = s.event;
     ResetEvent(s.event);
-    if (!DeviceIoControl(dev_.get(), IOCTL_OA2DP_SEND, &in, sizeof(in), s.data.data(),
+    if (!DeviceIoControl(dev_.get(), IOCTL_OA2DP_SEND, &s.binding, sizeof(s.binding), s.data.data(),
                          static_cast<DWORD>(len), nullptr, &s.ov)) {
         DWORD err = GetLastError();
         if (err != ERROR_IO_PENDING)
@@ -322,11 +324,14 @@ void AudioEndpoint::close()
     dev_.close();
 }
 
-bool AudioEndpoint::set_connected(bool connected)
+bool AudioEndpoint::set_connected(bool connected, ULONG connection)
 {
-    ULONG value = connected ? 1 : 0;
-    return dev_.ioctl(IOCTL_OA2DP_AUDIO_SET_CONNECTED, &value, sizeof(value), nullptr, 0,
-                      nullptr, 5000) == ERROR_SUCCESS;
+    OA2DP_CONNECTED_IN value{connected ? 1UL : 0UL, connection};
+    const DWORD error = dev_.ioctl(IOCTL_OA2DP_AUDIO_SET_CONNECTED, &value, sizeof(value), nullptr, 0,
+                                   nullptr, 5000);
+    if (error != ERROR_SUCCESS)
+        LOGW("audio connection publication (%u, epoch %lu) failed: %lu", connected, connection, error);
+    return error == ERROR_SUCCESS;
 }
 
 bool AudioEndpoint::set_suspended(bool suspended)

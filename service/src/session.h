@@ -15,6 +15,7 @@
 #include "driver_io.h"
 #include "oa2dp/a2dp_codecs.h"
 #include "oa2dp/avdtp.h"
+#include "oa2dp/pcm_ring.h"
 #include "settings_store.h"
 
 namespace oa2dp {
@@ -53,7 +54,18 @@ private:
     void main_loop();
     void event_loop();
     void audio_loop();
-    void stream_loop(ULONG generation);
+    struct StreamContext {
+        ULONG generation;
+        OA2DP_SEND_IN media;
+        oa2dp_codec_caps config;
+        oa2dp_settings settings;
+        OA2DP_FORMAT pcm;
+        oa2dp_ring_format ring_format;
+        oa2dp_pcm_ring *ring;
+        USHORT mtu;
+        uint64_t address;
+    };
+    void stream_loop(const StreamContext &stream);
 
     // signalling helpers (main thread only)
     void post(const Command &c);

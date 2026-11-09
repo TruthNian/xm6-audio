@@ -47,19 +47,19 @@ public:
     void cancel_all() { dev_.cancel_all(); }
 
     bool get_info(OA2DP_DEVICE_INFO &out);
-    bool open_channel(OA2DP_CHANNEL_KIND kind, OA2DP_CHANNEL_INFO &out);
+    bool open_channel(OA2DP_CHANNEL_KIND kind, OA2DP_CHANNEL_INFO &out, ULONG connection = 0);
     bool close_channel(OA2DP_CHANNEL_KIND kind, ULONG connection = 0,
                         ULONG *closed_connection = nullptr);
-    bool send(OA2DP_CHANNEL_KIND kind, const uint8_t *data, size_t len);
+    bool send(const OA2DP_SEND_IN &binding, const uint8_t *data, size_t len);
     // > 0 bytes, 0 timeout, < 0 channel closed / error
-    int recv(OA2DP_CHANNEL_KIND kind, uint8_t *buf, size_t cap, DWORD timeout_ms,
+    int recv(const OA2DP_RECV_IN &binding, uint8_t *buf, size_t cap, DWORD timeout_ms,
              HANDLE cancel = nullptr);
     bool wait_event(OA2DP_EVENT &ev, HANDLE cancel);
     HANDLE signaling_event() const { return receive_.event; }
     bool tx_state(OA2DP_TX_STATE &out);
 
     // Media: up to kSlots sends in flight; blocks when all are busy.
-    bool send_media(const uint8_t *data, size_t len);
+    bool send_media(const OA2DP_SEND_IN &binding, const uint8_t *data, size_t len);
     void drain_media();
 
 private:
@@ -69,6 +69,7 @@ private:
         HANDLE event = nullptr;
         std::vector<uint8_t> data;
         bool busy = false;
+        OA2DP_SEND_IN binding{}; // stable for the entire overlapped request
     };
     bool finish_slot(Slot &s, DWORD timeout_ms);
     void cancel_receive();
@@ -87,7 +88,7 @@ public:
     bool set_formats(const OA2DP_FORMAT_LIST &list);
     bool set_latency(uint32_t transport_us, uint32_t device_us);
     bool set_name(const std::wstring &name);
-    bool set_connected(bool connected);
+    bool set_connected(bool connected, ULONG connection = 0);
     bool set_suspended(bool suspended);
     bool get_state(OA2DP_FORMAT_CHANGE &out);
     bool map_ring();

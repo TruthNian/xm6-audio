@@ -45,11 +45,9 @@ static NTSTATUS NTAPI ConnectionRequest(PVOID context, ULONG connect)
                          dev->Channels[Oa2dpChannelMedia].Life.State == ChannelClosed));
     }
     WdfSpinLockRelease(dev->Lock);
-    if (acknowledge && AcquireManager(dev)) {
-        (void)BtaMpmUpdateConnectionStatus(dev->MpmHandle, enabled, 1);
-        if (!enabled) KeSetEvent(&dev->DisconnectedEvent, IO_NO_INCREMENT, FALSE);
-        ExReleaseRundownProtection(&dev->MpmCalls);
-    }
+    // Policy callbacks may run above PASSIVE_LEVEL or reenter publication.
+    // Re-acknowledge through the same serialized, state-validating publisher.
+    if (acknowledge) WdfWorkItemEnqueue(dev->PublicationWork);
     ExReleaseRundownProtection(&dev->MpmCallbacks);
     return status;
 }
@@ -124,6 +122,8 @@ VOID Oa2dpMpmStop(OA2DP_DEVICE_CONTEXT *dev)
     handle = InterlockedExchangePointer(&dev->MpmHandle, NULL);
     if (handle) (void)BtaMpmUnregister(handle);
     ExWaitForRundownProtectionRelease(&dev->MpmCallbacks);
+    // No callback can enqueue a publication after this final drain.
+    WdfWorkItemFlush(dev->PublicationWork);
     WdfObjectDereference(dev->Device);
 }
 
@@ -148,14 +148,17 @@ NTSTATUS Oa2dpMpmRequestConnection(PVOID context, BOOLEAN enabled)
     return NT_SUCCESS(status) ? STATUS_SUCCESS : status;
 }
 
-VOID Oa2dpMpmConnected(OA2DP_DEVICE_CONTEXT *dev, BOOLEAN connected)
+NTSTATUS Oa2dpMpmConnected(OA2DP_DEVICE_CONTEXT *dev, BOOLEAN connected)
 {
+    NTSTATUS status;
+    if (!AcquireManager(dev)) return connected ? STATUS_DEVICE_NOT_READY : STATUS_SUCCESS;
+    status = BtaMpmUpdateConnectionStatus(dev->MpmHandle, connected, 1);
+    ExReleaseRundownProtection(&dev->MpmCalls);
+    if (!NT_SUCCESS(status)) return status;
     WdfSpinLockAcquire(dev->Lock);
     dev->MpmConnected = connected;
     WdfSpinLockRelease(dev->Lock);
-    if (!AcquireManager(dev)) return;
-    (void)BtaMpmUpdateConnectionStatus(dev->MpmHandle, connected, 1);
-    ExReleaseRundownProtection(&dev->MpmCalls);
+    return status;
 }
 
 VOID Oa2dpMpmPlaying(PVOID context, BOOLEAN playing)

@@ -26,21 +26,25 @@ static const GUID GeneralPropertyType = { STATIC_KSPROPTYPESETID_General };
 static const DEVPROPKEY AvdtpConnectedKey =
     {{0x29ce83d4,0x7a82,0x4744,{0xbd,0x1d,0xab,0xec,0x85,0x32,0x1d,0xd6}},2};
 
-NTSTATUS Oa2dpPublishConnected(OA2DP_DEVICE_CONTEXT *dev, BOOLEAN connected)
+/* Caller holds dev->Lock. TRUE requires the configured service's exact link. */
+static BOOLEAN ConnectionReady(OA2DP_DEVICE_CONTEXT *dev, ULONG connection)
 {
-    WdfSpinLockAcquire(dev->Lock);
-    const BOOLEAN open = dev->Channels[Oa2dpChannelSignaling].Life.State == ChannelOpen &&
-                         dev->Channels[Oa2dpChannelMedia].Life.State == ChannelOpen &&
-                         dev->Channels[Oa2dpChannelSignaling].Life.ConnectionGeneration ==
-                         dev->Channels[Oa2dpChannelMedia].Life.ConnectionGeneration;
-    const BOOLEAN closed = dev->Channels[Oa2dpChannelSignaling].Life.State == ChannelClosed &&
-                           dev->Channels[Oa2dpChannelMedia].Life.State == ChannelClosed;
-    NTSTATUS actual = connected
-        ? (open && dev->PolicyConnected && !dev->TransportStopping ? STATUS_SUCCESS : STATUS_DEVICE_NOT_READY)
-        : (closed ? STATUS_SUCCESS : STATUS_DEVICE_BUSY);
-    WdfSpinLockRelease(dev->Lock);
-    if (!NT_SUCCESS(actual)) return actual;
-    if (connected) KeClearEvent(&dev->DisconnectedEvent);
+    return (BOOLEAN)Oa2dpConnectionReady(&dev->Channels[Oa2dpChannelSignaling].Life,
+        &dev->Channels[Oa2dpChannelMedia].Life, connection,
+        dev->PolicyConnected, dev->TransportStopping || dev->MpmStopping);
+}
+
+static BOOLEAN ConnectionClosed(OA2DP_DEVICE_CONTEXT *dev)
+{
+    return (BOOLEAN)Oa2dpConnectionClosed(&dev->Channels[Oa2dpChannelSignaling].Life,
+        &dev->Channels[Oa2dpChannelMedia].Life);
+}
+
+/* PublicationLock serializes external calls; never hold the channel spin lock
+ * across registry/MPM calls, which may block or call profile policy back. */
+static NTSTATUS PublishState(OA2DP_DEVICE_CONTEXT *dev, BOOLEAN connected)
+{
+    NTSTATUS result = STATUS_SUCCESS;
     const DEVPROP_BOOLEAN value = connected ? DEVPROP_TRUE : DEVPROP_FALSE;
     for (ULONG i = 0; i < ARRAYSIZE(dev->AudioInterfacePaths); ++i) {
         if (dev->AudioInterfacePaths[i]) {
@@ -48,23 +52,96 @@ NTSTATUS Oa2dpPublishConnected(OA2DP_DEVICE_CONTEXT *dev, BOOLEAN connected)
             WdfStringGetUnicodeString(dev->AudioInterfacePaths[i], &path);
             NTSTATUS status = IoSetDeviceInterfacePropertyData(&path, &AvdtpConnectedKey,
                 LOCALE_NEUTRAL, 0, DEVPROP_TYPE_BOOLEAN, sizeof(value), (PVOID)&value);
-            if (!NT_SUCCESS(status))
+            if (!NT_SUCCESS(status)) {
+                if (NT_SUCCESS(result)) result = status;
                 KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_WARNING_LEVEL,
                     "oa2dp: interface connection notification failed 0x%08X\n", status));
+            }
         }
     }
     // Older candidates wrote the right key on the wrong object. Remove that
     // devnode-only value; the native contract belongs to the audio interface.
     (void)IoSetDevicePropertyData(WdfDeviceWdmGetPhysicalDevice(dev->Device),
         &AvdtpConnectedKey, LOCALE_NEUTRAL, 0, DEVPROP_TYPE_EMPTY, 0, NULL);
-    Oa2dpMpmConnected(dev, connected);
-    if (!connected) KeSetEvent(&dev->DisconnectedEvent, IO_NO_INCREMENT, FALSE);
-    return STATUS_SUCCESS;
+    NTSTATUS status = Oa2dpMpmConnected(dev, connected);
+    if (!NT_SUCCESS(status)) {
+        if (NT_SUCCESS(result)) result = status;
+        KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_WARNING_LEVEL,
+            "oa2dp: MPM connection notification failed 0x%08X\n", status));
+    }
+    return result;
 }
 
-static NTSTATUS BusSetConnected(PVOID context, BOOLEAN connected)
+_IRQL_requires_(PASSIVE_LEVEL)
+NTSTATUS Oa2dpPublishConnected(OA2DP_DEVICE_CONTEXT *dev, BOOLEAN connected, ULONG connection)
 {
-    return Oa2dpPublishConnected(context, connected);
+    NTSTATUS status;
+    BOOLEAN valid;
+    NT_ASSERT(KeGetCurrentIrql() == PASSIVE_LEVEL);
+    WdfWaitLockAcquire(dev->PublicationLock, NULL);
+    WdfSpinLockAcquire(dev->Lock);
+    valid = connected ? ConnectionReady(dev, connection) : ConnectionClosed(dev);
+    WdfSpinLockRelease(dev->Lock);
+    if (!valid) {
+        WdfWaitLockRelease(dev->PublicationLock);
+        return connected ? STATUS_DEVICE_NOT_READY : STATUS_DEVICE_BUSY;
+    }
+
+    status = PublishState(dev, connected);
+    WdfSpinLockAcquire(dev->Lock);
+    valid = connected ? ConnectionReady(dev, connection) : ConnectionClosed(dev);
+    if (connected && (!valid || !NT_SUCCESS(status))) {
+        // A slow TRUE write can outlive its link. Remove it before allowing
+        // a replacement TRUE publisher through this passive serialization.
+        dev->PublishedConnection = 0;
+        WdfSpinLockRelease(dev->Lock);
+        NTSTATUS repair = PublishState(dev, FALSE);
+        if (!NT_SUCCESS(repair)) status = repair;
+        else if (NT_SUCCESS(status)) status = STATUS_DEVICE_NOT_READY;
+        WdfSpinLockAcquire(dev->Lock);
+    } else {
+        dev->PublishedConnection = connected ? connection : 0;
+        if (!valid && NT_SUCCESS(status)) status = STATUS_DEVICE_BUSY;
+    }
+    // Validation and event update share OPEN's lock. A new OPEN can never
+    // clear the event immediately before an obsolete FALSE sets it again.
+    if (ConnectionClosed(dev))
+        KeSetEvent(&dev->DisconnectedEvent, IO_NO_INCREMENT, FALSE);
+    else
+        KeClearEvent(&dev->DisconnectedEvent);
+    WdfSpinLockRelease(dev->Lock);
+    WdfWaitLockRelease(dev->PublicationLock);
+    return status;
+}
+
+static EVT_WDF_WORKITEM PublishWorkItem;
+static VOID PublishWorkItem(WDFWORKITEM work)
+{
+    OA2DP_DEVICE_CONTEXT *dev = Oa2dpGetDevice((WDFDEVICE)WdfWorkItemGetParentObject(work));
+    ULONG connection;
+    WdfSpinLockAcquire(dev->Lock);
+    connection = dev->PublishedConnection;
+    WdfSpinLockRelease(dev->Lock);
+    if (!NT_SUCCESS(Oa2dpPublishConnected(dev, TRUE, connection)))
+        (void)Oa2dpPublishConnected(dev, FALSE, 0);
+}
+
+NTSTATUS Oa2dpInitializePublication(OA2DP_DEVICE_CONTEXT *dev)
+{
+    WDF_OBJECT_ATTRIBUTES attrs;
+    WDF_WORKITEM_CONFIG work;
+    WDF_OBJECT_ATTRIBUTES_INIT(&attrs);
+    attrs.ParentObject = dev->Device;
+    NTSTATUS status = WdfWaitLockCreate(&attrs, &dev->PublicationLock);
+    if (!NT_SUCCESS(status)) return status;
+    WDF_WORKITEM_CONFIG_INIT(&work, PublishWorkItem);
+    work.AutomaticSerialization = FALSE;
+    return WdfWorkItemCreate(&work, &attrs, &dev->PublicationWork);
+}
+
+static NTSTATUS BusSetConnected(PVOID context, BOOLEAN connected, ULONG connection)
+{
+    return Oa2dpPublishConnected(context, connected, connection);
 }
 
 static VOID BusReference(PVOID context) { WdfObjectReference(((OA2DP_DEVICE_CONTEXT *)context)->Device); }

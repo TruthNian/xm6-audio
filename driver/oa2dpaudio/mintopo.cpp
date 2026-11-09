@@ -444,9 +444,11 @@ static NTSTATUS EventHandler_Jack(_In_ PPCEVENT_REQUEST request)
     }
 }
 
-extern "C" NTSTATUS Oa2dpSetConnected(_Inout_ OA2DP_AUDIO_DEVICE *dev, _In_ BOOLEAN connected)
+extern "C" NTSTATUS Oa2dpSetConnected(_Inout_ OA2DP_AUDIO_DEVICE *dev, _In_ BOOLEAN connected,
+                                     ULONG connection)
 {
     PAGED_CODE();
+    Oa2dpLock(&dev->ConnectionLock);
     KIRQL irql;
     KeAcquireSpinLock(&dev->Lock, &irql);
     NTSTATUS status = connected ? Oa2dpControlStatusLocked(dev, FALSE) : STATUS_SUCCESS;
@@ -454,12 +456,16 @@ extern "C" NTSTATUS Oa2dpSetConnected(_Inout_ OA2DP_AUDIO_DEVICE *dev, _In_ BOOL
         status = STATUS_CONNECTION_DISCONNECTED;
     if (!NT_SUCCESS(status)) {
         KeReleaseSpinLock(&dev->Lock, irql);
+        Oa2dpUnlock(&dev->ConnectionLock);
         return status;
     }
     KeReleaseSpinLock(&dev->Lock, irql);
     if (dev->Bus.SetConnected) {
-        status = dev->Bus.SetConnected(dev->Bus.Header.Context, connected);
-        if (!NT_SUCCESS(status) && connected) return status;
+        status = dev->Bus.SetConnected(dev->Bus.Header.Context, connected, connection);
+        if (!NT_SUCCESS(status) && connected) {
+            Oa2dpUnlock(&dev->ConnectionLock);
+            return status;
+        }
     }
     // The transport validates completion first. Failed/unfinished channel
     // closes cannot acknowledge the KS disconnect. An unavailable encoder may
@@ -467,6 +473,7 @@ extern "C" NTSTATUS Oa2dpSetConnected(_Inout_ OA2DP_AUDIO_DEVICE *dev, _In_ BOOL
     LONG value = connected ? 1 : 0;
     const BOOLEAN changed = InterlockedExchange(&dev->Connected, value) != value;
     if (!changed) {
+        Oa2dpUnlock(&dev->ConnectionLock);
         return status;
     }
     PPORTEVENTS events = NULL;
@@ -479,5 +486,6 @@ extern "C" NTSTATUS Oa2dpSetConnected(_Inout_ OA2DP_AUDIO_DEVICE *dev, _In_ BOOL
             KSEVENT_PINCAPS_JACKINFOCHANGE, TRUE, OA2DP_TOPO_PIN_OUT, FALSE, ULONG(-1));
         events->Release();
     }
+    Oa2dpUnlock(&dev->ConnectionLock);
     return status;
 }

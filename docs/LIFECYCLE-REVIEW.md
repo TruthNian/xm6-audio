@@ -1,8 +1,10 @@
-# Native lifecycle review, 0.3.23
+# Native lifecycle review, 0.3.24
 
 This source batch is not a declaration of hardware acceptance. Source review
-and focused offline checks precede another hardware trial. No 0.3.23 driver has
-been installed on the host.
+and focused offline checks precede another hardware trial. Neither 0.3.23 nor
+0.3.24 has been installed on the host. The host was restored to Microsoft
+BthA2dp; the custom codec service is stopped. Current host audio is not evidence
+of native LDAC. No further installation or reboot is part of this source review.
 
 ## Confirmed source defects and corrections
 
@@ -18,6 +20,10 @@ been installed on the host.
 | Rapid interface removal/arrival | New session could lose the exclusive control-open race and exit permanently | Retry transient open errors on the existing session thread until stop/removal |
 | Earlier pending install, later installer returns success | Service/INF metadata was mistaken for active stack state; problem14 triggered rollback | Inspect devnode status/install flags, preserve 3010, defer service activation when reboot is pending |
 | Explicit 24-bit format selection | Container width excluded valid 24-in-32 PCM | Filter useful precision separately from container width |
+| Retired encoder/read reaches a reconnected channel | SEND/RECV selected whatever handle was current by kind | Mandatory channel/link binding in ABI 8, immutable per-encoder snapshot, persistent RECV binding and cancellation on epoch change; scope outgoing MEDIA OPEN to its signalling link |
+| CLOSE races transfer submission | Handle could close between validation and WdfRequestSend | Short per-channel submission leases, drained after Closing rejects admission; never wait for idle RECV completion |
+| Slow connection publication overlaps reconnect | An old FALSE could finish after a newer TRUE; event could be set after new OPEN cleared it | One passive publication lock, epoch-bound TRUE, post-call revalidation/repair, event update under OPEN's spin lock; bus ABI 4; serialize child jack updates too |
+| Signalling read fails | Synthetic close command had zero epoch and was rejected by the consumer | Tag the close with the failed read's owning connection |
 
 Channel close work is preallocated rather than allocated in a disconnect
 indication. Allocation failure can no longer fabricate a completed remote
@@ -33,11 +39,26 @@ state records the closed generation, preventing a queued old OPEN from
 recreating a phantom connection in the service. Lost event backlogs instead
 force cleanup of unknown generations before negotiating a new link.
 
+Data-plane binding is mandatory even when channel numbers happen to match.
+The submission lease ends when asynchronous submission returns, including its
+failure path, rather than when Bluetooth completes the transfer. The close
+path can therefore end an idle receive without deadlocking on that receive.
+No spin lock is held across WdfRequestSend or the external publication calls.
+
+Publication runs at PASSIVE_LEVEL. Policy callbacks enqueue a preallocated
+work item instead of directly publishing or acknowledging a stale snapshot.
+That worker is drained after MPM callbacks stop during removal. Interface and
+MPM errors are returned/logged rather than silently treated as success. This
+does not prove the observed Windows-specific MPM contract is sufficient for
+Settings; that remains a hardware acceptance item.
+
 ## Offline checks
 
 - Shared driver lifecycle transitions: opening/disconnect/late success,
   close failure/retry, stale completion and event publication, replacement
-  generations and wraparound. The production helper is used by these checks.
+  generations and wraparound, mandatory data binding, close-before-submission
+  return, and publication invalidation at close/reopen boundaries. The
+  production helper is used by these checks; WDF/MPM calls are not emulated.
 - Existing PCM format/ring and concurrency checks; Windows service and CLI
   builds; full kernel build and linked-descriptor checks in Windows CI.
 - Real installer state classifier exercised with fake device properties;
@@ -65,3 +86,5 @@ or interference; actual negotiated rate, quality and failures remain observable.
 References: Microsoft [device status and problem codes](https://learn.microsoft.com/en-us/windows-hardware/drivers/install/retrieving-the-status-and-problem-code-for-a-device-instance),
 [framework work items](https://learn.microsoft.com/en-us/windows-hardware/drivers/wdf/using-framework-work-items),
 and [WdfWorkItemFlush](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/wdfworkitem/nf-wdfworkitem-wdfworkitemflush).
+Submission/publication constraints: [WdfRequestSend](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/wdfrequest/nf-wdfrequest-wdfrequestsend)
+and [WdfWaitLockAcquire](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/wdfsync/nf-wdfsync-wdfwaitlockacquire).

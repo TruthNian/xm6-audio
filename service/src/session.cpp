@@ -172,7 +172,8 @@ void Session::audio_loop()
 int Session::cb_send(void *user, const uint8_t *pdu, size_t len)
 {
     auto *s = static_cast<Session *>(user);
-    return s->tr_.send(Oa2dpChannelSignaling, pdu, len) ? 0 : -1;
+    const OA2DP_SEND_IN binding{Oa2dpChannelSignaling, s->sig_generation_, s->sig_generation_};
+    return s->tr_.send(binding, pdu, len) ? 0 : -1;
 }
 
 uint32_t Session::cb_now(void *) { return GetTickCount(); }
@@ -202,11 +203,15 @@ bool Session::pump(DWORD timeout_ms)
     if (!sig_open_ || rx_failed_ || stopping_)
         return false;
     uint8_t pdu[OA2DP_AVDTP_MSG_MAX + 3];
-    int n = tr_.recv(Oa2dpChannelSignaling, pdu, sizeof(pdu), timeout_ms, stop_event_);
+    const OA2DP_RECV_IN binding{Oa2dpChannelSignaling, sig_generation_, sig_generation_};
+    int n = tr_.recv(binding, pdu, sizeof(pdu), timeout_ms, stop_event_);
     if (n <= 0) {
         if (n < 0 && !stopping_) {
             rx_failed_ = true;
-            post({Cmd::SignalingClosed});
+            Command command{Cmd::SignalingClosed};
+            command.channel.Generation = sig_generation_;
+            command.channel.ConnectionGeneration = sig_generation_;
+            post(command);
         }
         return false;
     }
@@ -306,7 +311,7 @@ bool Session::open_media_channel()
     if (media_open_)
         return true;
     OA2DP_CHANNEL_INFO ci{};
-    if (!tr_.open_channel(Oa2dpChannelMedia, ci))
+    if (!tr_.open_channel(Oa2dpChannelMedia, ci, sig_generation_))
         return false;
     media_generation_ = ci.Generation;
     media_mtu_ = ci.OutMtu;
@@ -463,7 +468,7 @@ bool Session::setup_audio_endpoint()
         LOGE("cannot configure the native audio endpoint");
         return false;
     }
-    return audio_.set_connected(true);
+    return audio_.set_connected(true, sig_generation_);
 }
 
 bool Session::start_stream()
@@ -851,10 +856,23 @@ void Session::begin_streaming()
     }
     if (stream_.joinable())  // previous loop exited on its own (encoder error)
         stream_.join();
+    StreamContext context{};
+    context.media = {Oa2dpChannelMedia, media_generation_, sig_generation_};
+    context.config = config_;
+    context.settings = settings_;
+    context.pcm = audio_format_;
+    context.ring = audio_.ring();
+    context.mtu = media_mtu_;
+    context.address = info_.RemoteAddress;
+    if (oa2dp_ring_snapshot(context.ring, &context.ring_format) != OA2DP_OK ||
+        context.ring_format.channels > 2) {
+        LOGE("PCM format unavailable when starting the encoder");
+        return;
+    }
     streaming_ = true;
     if (++stream_generation_ == 0) ++stream_generation_;
-    const ULONG generation = stream_generation_;
-    stream_ = std::thread([this, generation] { stream_loop(generation); });
+    context.generation = stream_generation_;
+    stream_ = std::thread([this, context] { stream_loop(context); });
     audio_.set_suspended(false);
     publish("streaming");
 }
@@ -873,22 +891,23 @@ void Session::end_streaming()
     publish("open");
 }
 
-void Session::stream_loop(ULONG generation)
+void Session::stream_loop(const StreamContext &stream)
 {
     AudioScheduling scheduling;
+    const ULONG generation = stream.generation;
     auto fail_stream = [this, generation] {
         Command command{Cmd::StreamFailed};
         command.channel.Generation = generation;
         post(command);
     };
-    const oa2dp_codec_caps cfg = config_;
-    oa2dp_settings set = settings_;
+    const oa2dp_codec_caps cfg = stream.config;
+    oa2dp_settings set = stream.settings;
     if (!set.bits)
-        set.bits = oa2dp_pcm_format_ldac_bits(&audio_format_);
-    oa2dp_pcm_ring *ring = audio_.ring();
+        set.bits = oa2dp_pcm_format_ldac_bits(&stream.pcm);
+    oa2dp_pcm_ring *ring = stream.ring;
 
     oa2dp_encoder *enc = nullptr;
-    int err = oa2dp_encoder_create(&cfg, &set, media_mtu_, &enc);
+    int err = oa2dp_encoder_create(&cfg, &set, stream.mtu, &enc);
     if (err != OA2DP_OK) {
         LOGE("encoder for %s failed: %s", oa2dp_codec_name(cfg.codec), oa2dp_strerror(err));
         fail_stream();
@@ -898,18 +917,12 @@ void Session::stream_loop(ULONG generation)
     const uint8_t encoder_bits = oa2dp_codec_pcm_bits(&cfg, &set);
     const uint32_t spc = info.samples_per_call;
     const uint32_t spf = info.samples_per_frame ? info.samples_per_frame : spc;
-    oa2dp_ring_format ring_format{};
-    if (oa2dp_ring_snapshot(ring, &ring_format) != OA2DP_OK || ring_format.channels > 2) {
-        LOGE("PCM format unavailable when starting the encoder");
-        oa2dp_encoder_destroy(enc);
-        fail_stream();
-        return;
-    }
+    const oa2dp_ring_format &ring_format = stream.ring_format;
     oa2dp_ring_discard(ring);
     const uint16_t ring_ch = ring_format.channels;
     const uint8_t ch = info.channels;
 
-    std::vector<uint8_t> pkt(media_mtu_), out(info.max_output);
+    std::vector<uint8_t> pkt(stream.mtu), out(info.max_output);
     std::vector<float> fbuf(static_cast<size_t>(spc) * ring_ch);
     std::vector<int32_t> pcm(static_cast<size_t>(spc) * std::max<uint16_t>(ring_ch, 2));
     oa2dp_rtp rtp{};
@@ -930,8 +943,8 @@ void Session::stream_loop(ULONG generation)
          info.sample_rate, ch, spc);
 
     auto send_packet = [&](size_t len) {
-        if (len) {
-            if (tr_.send_media(pkt.data(), len))
+        if (len && streaming_) {
+            if (tr_.send_media(stream.media, pkt.data(), len))
                 bytes_sent += len;
             else {
                 LOGE("Bluetooth media send failed");
@@ -1026,12 +1039,12 @@ void Session::stream_loop(ULONG generation)
             std::lock_guard<std::mutex> lock(status_mu_);
             status_.bitrate = static_cast<uint32_t>(bytes_sent * 8000 / (now - window_start));
             status_.abr_level = abr.level;
-            publish_status(info_.RemoteAddress, status_);
+            publish_status(stream.address, status_);
             bytes_sent = 0;
             window_start = now;
         }
     }
-    send_packet(oa2dp_rtp_flush(&rtp));
+    // Retired audio belongs to this encoder/link. Discard a partial packet.
     tr_.drain_media();
     oa2dp_encoder_destroy(enc);
 }

@@ -41,6 +41,7 @@ typedef struct _OA2DP_CHANNEL {
     USHORT OutMtu;
     USHORT InMtu;
     KEVENT OpenFinished;
+    KEVENT SubmissionsIdle;
     WDFWAITLOCK CloseLock;
     WDFWORKITEM CloseWork;
 } OA2DP_CHANNEL;
@@ -77,6 +78,9 @@ struct _OA2DP_DEVICE_CONTEXT {
     LONG VolumeDb;
     BOOLEAN VolumeMuted;
     KEVENT DisconnectedEvent;     /* actual AVDTP teardown, not command receipt */
+    WDFWAITLOCK PublicationLock;   /* PASSIVE_LEVEL external state publication */
+    WDFWORKITEM PublicationWork;
+    ULONG PublishedConnection;
     WDFSTRING AudioInterfacePaths[2]; /* audio + Windows Bluetooth-audio category */
     PVOID AudioContext;
     OA2DP_VOLUME_NOTIFY AudioVolumeNotify;
@@ -144,7 +148,7 @@ NTSTATUS Oa2dpCloseConnectionChannel(OA2DP_DEVICE_CONTEXT *dev, OA2DP_CHANNEL_KI
                                     ULONG expectedConnection, PULONG closedConnection);
 VOID Oa2dpCloseAllChannels(_In_ OA2DP_DEVICE_CONTEXT *dev);
 VOID Oa2dpTransfer(_In_ OA2DP_DEVICE_CONTEXT *dev, _In_ WDFREQUEST request,
-                   _In_ OA2DP_CHANNEL_KIND kind, _In_ BOOLEAN send);
+                   _In_ const OA2DP_SEND_IN *in, _In_ BOOLEAN send);
 
 /* driver.c */
 VOID Oa2dpPostEvent(_In_ OA2DP_DEVICE_CONTEXT *dev, _In_ ULONG type,
@@ -156,11 +160,14 @@ NTSTATUS Oa2dpCreateAudioChild(_In_ OA2DP_DEVICE_CONTEXT *dev);
 NTSTATUS Oa2dpRegisterVolumeInterface(_In_ OA2DP_DEVICE_CONTEXT *dev);
 NTSTATUS Oa2dpRegisterBusInterface(_In_ OA2DP_DEVICE_CONTEXT *dev, _In_ WDFDEVICE child);
 VOID Oa2dpVolumeFileCleanup(_In_ OA2DP_DEVICE_CONTEXT *dev, _In_ WDFFILEOBJECT file);
-NTSTATUS Oa2dpPublishConnected(_In_ OA2DP_DEVICE_CONTEXT *dev, _In_ BOOLEAN connected);
+NTSTATUS Oa2dpInitializePublication(OA2DP_DEVICE_CONTEXT *dev);
+_IRQL_requires_(PASSIVE_LEVEL)
+NTSTATUS Oa2dpPublishConnected(_In_ OA2DP_DEVICE_CONTEXT *dev, _In_ BOOLEAN connected,
+                               ULONG connection);
 /* mpm.c: observed Windows 10 profile-manager compatibility contract. */
 NTSTATUS Oa2dpMpmStart(OA2DP_DEVICE_CONTEXT *dev);
 VOID Oa2dpMpmStop(OA2DP_DEVICE_CONTEXT *dev);
 NTSTATUS Oa2dpMpmRequestConnection(PVOID context, BOOLEAN enabled);
-VOID Oa2dpMpmConnected(OA2DP_DEVICE_CONTEXT *dev, BOOLEAN connected);
+NTSTATUS Oa2dpMpmConnected(OA2DP_DEVICE_CONTEXT *dev, BOOLEAN connected);
 VOID Oa2dpMpmPlaying(PVOID context, BOOLEAN playing);
 VOID Oa2dpMpmSuspended(PVOID context, BOOLEAN suspended);

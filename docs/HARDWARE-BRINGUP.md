@@ -2,9 +2,10 @@
 
 The controlled developer trial targets WH-1000XM6 on Windows 10 x64, build 19045. It uses a local development signature under explicitly authorized test signing. This is separate from the production installer, which still requires Microsoft-signed catalogs.
 
-Latest source audit: [0.3.23 lifecycle review](LIFECYCLE-REVIEW.md). This batch
-has not been deployed. The earlier 0.3.21 package is staged with a pending PnP
-restart; its install success message did not establish a loaded native stack.
+Latest source audit: [0.3.24 lifecycle review](LIFECYCLE-REVIEW.md). Neither
+0.3.23 nor 0.3.24 has been deployed. The host is restored to Microsoft BthA2dp
+and the custom codec service is stopped. The earlier 0.3.21 staging state is
+historical, not the selected driver for the next ordinary boot.
 Do not treat source, staging, CI or backend commands as completed hardware/UI
 acceptance. The observations below retain their original tested versions.
 
