@@ -105,6 +105,25 @@ documented public cross-version interfaces. See [provenance](CLEAN_ROOM.md).
 Builds do not establish correct settings UI, SCO interaction, callback removal,
 or reconnect. Those remain hardware acceptance requirements for this candidate.
 
+## Bluetooth-audio interface state correction in 0.3.20
+
+Both 0.3.19 drivers loaded without another reboot, and the service's live
+device-info flag confirmed manager registration. The same QQ Music and
+PotPlayer processes remained open and native LDAC resumed. A settings-initiated
+disconnect reached the manager callback and closed the real Classic link, but
+the settings page still displayed Connected with a Disconnect button. This is
+not successful UI acceptance.
+
+The connection property was attached to the devnode rather than the audio
+device interface. The inbox implementation publishes it with
+`IoSetDeviceInterfacePropertyData`. It also exposes a separate Bluetooth-audio
+interface category, absent from the earlier control-only interface. The new
+candidate registers both categories with the existing control reference,
+publishes real AVDTP state on their interfaces, and removes the misplaced
+devnode value. Registration does not add another audio endpoint or new process.
+The Windows 10 category/key remain observed compatibility contracts. Actual
+settings disconnect/reconnect and retained-client playback must be revalidated.
+
 ## Earlier investigation, before 0.3.12
 
 - The KMDF transport and PortCls/WaveRT child load and enumerate through the Windows Bluetooth stack. Windows retains the radio, pairing and AVRCP profiles.

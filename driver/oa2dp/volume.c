@@ -16,6 +16,10 @@ static const GUID VolumeCacheSet =
     {0x401e566b,0xb47e,0x4e34,{0xb0,0xfc,0x94,0x82,0x6e,0x9e,0x2a,0x1a}};
 static const GUID AudioCategory =
     {0x6994ad04,0x93ef,0x11d0,{0xa3,0xcc,0x00,0xa0,0xc9,0x22,0x31,0x96}};
+/* Observed category on the Windows 10 inbox A2DP filter. Settings discovers
+ * Bluetooth-audio interfaces separately from ordinary audio/volume filters. */
+static const GUID BluetoothAudioCategory =
+    {0xe630310c,0x1733,0x42bb,{0x98,0x47,0x7e,0x45,0xd1,0xa2,0x74,0x90}};
 static const GUID BluetoothAudioSet =
     {0x7fa06c40,0xb8f6,0x4c7e,{0x85,0x56,0xe8,0xc3,0x3a,0x12,0xe5,0x4d}};
 static const GUID GeneralPropertyType = { STATIC_KSPROPTYPESETID_General };
@@ -26,8 +30,21 @@ VOID Oa2dpPublishConnected(OA2DP_DEVICE_CONTEXT *dev, BOOLEAN connected)
 {
     if (connected) KeClearEvent(&dev->DisconnectedEvent);
     const DEVPROP_BOOLEAN value = connected ? DEVPROP_TRUE : DEVPROP_FALSE;
+    for (ULONG i = 0; i < ARRAYSIZE(dev->AudioInterfacePaths); ++i) {
+        if (dev->AudioInterfacePaths[i]) {
+            UNICODE_STRING path;
+            WdfStringGetUnicodeString(dev->AudioInterfacePaths[i], &path);
+            NTSTATUS status = IoSetDeviceInterfacePropertyData(&path, &AvdtpConnectedKey,
+                LOCALE_NEUTRAL, 0, DEVPROP_TYPE_BOOLEAN, sizeof(value), (PVOID)&value);
+            if (!NT_SUCCESS(status))
+                KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_WARNING_LEVEL,
+                    "oa2dp: interface connection notification failed 0x%08X\n", status));
+        }
+    }
+    // Older candidates wrote the right key on the wrong object. Remove that
+    // devnode-only value; the native contract belongs to the audio interface.
     (void)IoSetDevicePropertyData(WdfDeviceWdmGetPhysicalDevice(dev->Device),
-        &AvdtpConnectedKey, LOCALE_NEUTRAL, 0, DEVPROP_TYPE_BOOLEAN, sizeof(value), (PVOID)&value);
+        &AvdtpConnectedKey, LOCALE_NEUTRAL, 0, DEVPROP_TYPE_EMPTY, 0, NULL);
     Oa2dpMpmConnected(dev, connected);
     if (!connected) KeSetEvent(&dev->DisconnectedEvent, IO_NO_INCREMENT, FALSE);
 }
@@ -136,7 +153,20 @@ NTSTATUS Oa2dpRegisterBusInterface(OA2DP_DEVICE_CONTEXT *dev, WDFDEVICE child)
 NTSTATUS Oa2dpRegisterVolumeInterface(OA2DP_DEVICE_CONTEXT *dev)
 {
     DECLARE_CONST_UNICODE_STRING(reference, L"AvrcpVolume");
-    return WdfDeviceCreateDeviceInterface(dev->Device, &AudioCategory, &reference);
+    const GUID *categories[] = {&AudioCategory, &BluetoothAudioCategory};
+    WDF_OBJECT_ATTRIBUTES attrs;
+    WDF_OBJECT_ATTRIBUTES_INIT(&attrs);
+    attrs.ParentObject = dev->Device;
+    for (ULONG i = 0; i < ARRAYSIZE(categories); ++i) {
+        NTSTATUS status = WdfDeviceCreateDeviceInterface(dev->Device, categories[i], &reference);
+        if (NT_SUCCESS(status))
+            status = WdfStringCreate(NULL, &attrs, &dev->AudioInterfacePaths[i]);
+        if (NT_SUCCESS(status))
+            status = WdfDeviceRetrieveDeviceInterfaceString(dev->Device, categories[i],
+                &reference, dev->AudioInterfacePaths[i]);
+        if (!NT_SUCCESS(status)) return status;
+    }
+    return STATUS_SUCCESS;
 }
 
 static BOOLEAN PrivilegedControlCaller(WDFREQUEST request)

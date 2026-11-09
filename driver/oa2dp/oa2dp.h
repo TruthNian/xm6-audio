@@ -82,6 +82,7 @@ struct _OA2DP_DEVICE_CONTEXT {
     LONG VolumeDb;
     BOOLEAN VolumeMuted;
     KEVENT DisconnectedEvent;     /* actual AVDTP teardown, not command receipt */
+    WDFSTRING AudioInterfacePaths[2]; /* audio + Windows Bluetooth-audio category */
     PVOID AudioContext;
     OA2DP_VOLUME_NOTIFY AudioVolumeNotify;
     OA2DP_POLICY_REQUEST AudioPolicyRequest;
