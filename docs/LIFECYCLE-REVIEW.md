@@ -6,8 +6,37 @@ installer code 3010, but the installation log also established a real start
 failure: CM_PROB_FAILED_START, status 0xC0000184. It was rolled back without a
 system reboot; the Microsoft binding was started and both custom images were
 absent afterward. Version 0.3.32 corrects a confirmed pre-enumeration property
-assignment defect. A reboot cannot repair that source defect; successful
-startup, actual sound and Settings behavior still require acceptance.
+assignment defect and has now activated without a reboot, with both actual
+loaded kernel images and the running codec image matching the verified package.
+The headset is not connected at the latest check; actual sound and Settings
+behavior remain unaccepted. A reboot cannot repair a source defect.
+
+## Corrected child enumeration boundary
+
+The new PDO's Bluetooth address/service properties were previously assigned
+before it was reported to PnP. Microsoft's [WDF implementation](https://github.com/microsoft/Windows-Driver-Frameworks/blob/b6191d9543441329154da32f7ab9bdd97228dd3c/src/framework/shared/core/km/fxdevicekm.cpp#L671)
+rejects property assignment when no PnP-known physical device is available,
+with STATUS_INVALID_DEVICE_STATE. The old placement could not succeed on the
+new PDO. The 0.3.31 trial's actual failure status matched that contract.
+
+The 0.3.32 child preprocesses [IRP_MN_DEVICE_ENUMERATED](https://learn.microsoft.com/en-us/windows-hardware/drivers/kernel/irp-mn-device-enumerated)
+and writes only the two required properties with IoSetDevicePropertyData on
+its PDO, then returns the IRP to WDF. A WDF property wrapper is deliberately
+not used in that preprocess callback, because WDF itself has not consumed
+the enumeration notification yet. Parent bus identity and endpoint identity
+are retained.
+
+Live ETW reported successful manager/server/child creation, successful child
+identity assignment and successful WaveRT port creation. Independent CM
+readback confirmed the address's string type/value and the Audio Sink GUID's
+GUID type/value. Both parent and child started; actual kernel-image and codec
+process paths/hashes were verified. A redundant second audio-INF installation
+returned ERROR_NO_MORE_ITEMS after reporting Already exists; the private trial
+controller removed that step and waited for normal child auto-enumeration.
+No additional kernel change or system reboot was needed. Full local checks
+and [0.3.32 CI](https://github.com/TruthNian/xm6-audio/actions/runs/42679246224)
+passed. This establishes startup and identity assignment, not audible playback
+or complete reconnect acceptance.
 
 ## Confirmed source defects and corrections
 

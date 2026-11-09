@@ -5,10 +5,33 @@ The controlled developer trial targets WH-1000XM6 on Windows 10 x64, build 19045
 Latest source audit: [0.3.32 lifecycle review](LIFECYCLE-REVIEW.md). Versions
 0.3.23 through 0.3.30 were not deployed. A controlled 0.3.31 warm-binding trial
 failed during initialization and was rolled back without a system reboot.
-The earlier 0.3.21 staging state is historical, not the selected driver for
-the next ordinary boot.
+The corrected 0.3.32 is now actually loaded without rebooting; the earlier
+0.3.21 staging state is historical.
 Do not treat source, staging, CI or backend commands as completed hardware/UI
 acceptance. The observations below retain their original tested versions.
+
+## 0.3.32 activation without a system reboot (2026-11-10)
+
+Both loaded kernel image paths/hashes and the running codec service's image
+path matched a protected, locally test-signed 0.3.32 package. Parent and render
+child were started without a pending-restart node flag. The standard endpoint
+is named `耳机 (WH-1000XM6)`. The Bluetooth identity properties were independently
+read back from the child's devnode with the expected types and values.
+
+This followed correction of an actual 0.3.31 initialization failure, not another
+reboot attempt. The [lifecycle review](LIFECYCLE-REVIEW.md) explains the premature
+WDF property assignment and the enumeration-boundary fix. The same source passed
+[full CI](https://github.com/TruthNian/xm6-audio/actions/runs/42679246224), all six
+local CTest checks, INF validation and catalog generation. The installed binaries
+were locally built; they are not claimed to be the CI artifact or a Microsoft
+production-signed release.
+
+At the latest runtime check the endpoint was unplugged, all XM6 endpoints were
+inactive and the codec service reported repeated signalling connection timeouts.
+The standard one-shot reconnect request was accepted, which is not proof of a
+successful connection. Current headset availability, actual sound, controls,
+Settings disconnect/connect labels and existing-client recovery still require
+acceptance. No player was restarted or individually rerouted in this trial.
 
 ## Current acceptance after the 0.3.18 restart (2026-11-09)
 
