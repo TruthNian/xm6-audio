@@ -1,7 +1,9 @@
 # oa2dpaudio.sys — virtual render endpoint
 
-**Status: builds (WDK 10.0.26100, CI) and its catalog passes Inf2Cat; not
-yet run on hardware.**
+**Status: builds (WDK 10.0.26100, CI) and its catalog passes Inf2Cat.
+Version 0.3.12 has audible LDAC playback and endpoint-volume evidence in
+one controlled, test-signed WH-1000XM6 trial.** See the
+[hardware record](../../docs/HARDWARE-BRINGUP.md) for acceptance limits.
 
 Each headset served by `oa2dp.sys` gets a child device `OA2DP\Render\<address>`.
 This driver loads on it and shows Windows a normal "Headphones" render

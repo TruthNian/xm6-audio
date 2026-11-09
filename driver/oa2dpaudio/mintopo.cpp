@@ -151,7 +151,8 @@ static NTSTATUS PropertyHandler_Jack(_In_ PPCPROPERTY_REQUEST request)
     if (!mini || !mini->Device)
         return STATUS_INVALID_DEVICE_STATE;
     ULONG id = request->PropertyItem->Id;
-    if (id != KSPROPERTY_JACK_DESCRIPTION && id != KSPROPERTY_JACK_DESCRIPTION2)
+    if (id != KSPROPERTY_JACK_DESCRIPTION && id != KSPROPERTY_JACK_DESCRIPTION2 &&
+        id != KSPROPERTY_JACK_CONTAINERID)
         return STATUS_INVALID_DEVICE_REQUEST;
     if (request->Verb & KSPROPERTY_TYPE_BASICSUPPORT) {
         ULONG flags = KSPROPERTY_TYPE_GET | KSPROPERTY_TYPE_BASICSUPPORT;
@@ -161,7 +162,7 @@ static NTSTATUS PropertyHandler_Jack(_In_ PPCPROPERTY_REQUEST request)
             desc->AccessFlags = flags;
             desc->DescriptionSize = sizeof(*desc);
             desc->PropTypeSet.Set = KSPROPTYPESETID_General;
-            desc->PropTypeSet.Id = VT_ILLEGAL;
+            desc->PropTypeSet.Id = id == KSPROPERTY_JACK_CONTAINERID ? VT_CLSID : VT_ILLEGAL;
             request->ValueSize = sizeof(*desc);
             return STATUS_SUCCESS;
         }
@@ -176,6 +177,21 @@ static NTSTATUS PropertyHandler_Jack(_In_ PPCPROPERTY_REQUEST request)
     if (!(request->Verb & KSPROPERTY_TYPE_GET) || request->InstanceSize < sizeof(ULONG) ||
         *(PULONG)request->Instance != OA2DP_TOPO_PIN_OUT)
         return STATUS_INVALID_PARAMETER;
+    if (id == KSPROPERTY_JACK_CONTAINERID) {
+        if (!mini->Device->ContainerIdValid)
+            return STATUS_NOT_FOUND;
+        if (!request->ValueSize) {
+            request->ValueSize = sizeof(GUID);
+            return STATUS_BUFFER_OVERFLOW;
+        }
+        if (request->ValueSize < sizeof(GUID)) {
+            request->ValueSize = 0;
+            return STATUS_BUFFER_TOO_SMALL;
+        }
+        *(GUID *)request->Value = mini->Device->ContainerId;
+        request->ValueSize = sizeof(GUID);
+        return STATUS_SUCCESS;
+    }
     ULONG required = sizeof(KSMULTIPLE_ITEM) +
         (id == KSPROPERTY_JACK_DESCRIPTION ? sizeof(KSJACK_DESCRIPTION) : sizeof(KSJACK_DESCRIPTION2));
     if (!request->ValueSize) {

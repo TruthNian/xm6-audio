@@ -12,7 +12,7 @@ XM6 Audio adds an A2DP profile driver and a WaveRT render endpoint while Windows
 
 > **Development status:** the native drivers, service and codec checks build in CI. Microsoft kernel signing and native headset acceptance are still pending. CI artifacts are unsigned development candidates, not installable releases for a normally protected Windows system.
 
-The [hardware bring-up record](docs/HARDWARE-BRINGUP.md) documents observed negotiation and unresolved shared-mode playback. **Do not load candidate 0.3.5**; its descriptor ABI error caused a developer-machine bugcheck and is corrected in the 0.3.6 source.
+The [hardware bring-up record](docs/HARDWARE-BRINGUP.md) documents audible native LDAC playback, system volume and wearing-detection pause/resume in one controlled 0.3.12 developer trial, plus the remaining acceptance work. **Do not load candidate 0.3.5**; its descriptor ABI error caused a developer-machine bugcheck and is corrected in the 0.3.6 source.
 
 **[Architecture](docs/ARCHITECTURE.md) · [Build from source](BUILDING.md) · [Signing status](docs/SIGNING.md) · [Roadmap](docs/ROADMAP.md)**
 
@@ -25,7 +25,7 @@ The [hardware bring-up record](docs/HARDWARE-BRINGUP.md) documents observed nego
 - Device-interface notifications, buffered Bluetooth connection events, disconnected endpoint state and cleanup of stale PCM during reconnection.
 - A codec service **installed by the driver INF and started by a Windows device-interface trigger**, with binaries loaded from Driver Store.
 
-Native volume and media controls are part of the intended system integration. Their behavior with the new drivers remains a hardware acceptance item.
+Native playback, manual play/pause/previous/next and wearing-detection pause/resume have been observed in the controlled developer trial. Headset volume and Windows master volume are not synchronized yet; per-device disconnect is also incomplete. See the hardware record for acceptance limits.
 
 ## Audio path
 
@@ -67,7 +67,7 @@ The XM6 supports SBC/AAC/LDAC over Classic Audio and LC3 over LE Audio. LC3 is n
 | Native binaries | MSVC/WDK build of both kernel drivers, codec service and command-line tool. |
 | Packaging | INF validation, catalog generation, pinned dependency commits, symbols, licenses and SHA-256 manifest. |
 | Microsoft kernel signing | **Pending.** [Public feasibility inquiry](https://github.com/SignPath/fdn-website/issues/28); no provider approval or production signature obtained. |
-| Native headset acceptance | **Pending.** Audible playback, volume/media controls, startup, reconnect, sleep/resume and video timing must be verified on hardware. |
+| Native headset acceptance | **Partial, one test-signed system.** Audible QQ Music via LDAC HQ, play/pause/previous/next and wearing-detection pause/resume observed in 0.3.12. Absolute-volume synchronization, per-device disconnect, lifecycle, format transitions and video timing remain pending. |
 
 Build success, encoder bitrate and packet counters are not evidence of audible headset playback. The target baseline is Windows 10 2004+ x64; broader runtime compatibility also requires hardware validation.
 

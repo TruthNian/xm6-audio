@@ -2,7 +2,27 @@
 
 The controlled developer trial targets WH-1000XM6 on Windows 10 x64, build 19045. It uses a local development signature under explicitly authorized test signing. This is separate from the production installer, which still requires Microsoft-signed catalogs.
 
-## Observed on hardware
+## Observed with 0.3.12 (2026-11-09)
+
+The local trial uses source commit `8c8a57ea91bdbb0d72a50b955851c92c0ded9a75`, built by [CI run 42612878702](https://github.com/TruthNian/xm6-audio/actions/runs/42612878702). Both CI jobs passed, including linked-driver metadata verification. The existing local development certificate was used; this is not a Microsoft-signed release.
+
+- `IAudioClient::GetMixFormat` and endpoint-volume activation succeed after the local hardware-latency correction. The shared engine supplies 48 kHz stereo float32; this is not evidence of the music file's original format.
+- QQ Music's active audio session was verified on the native XM6 endpoint, with nonzero audio peaks; its previous Hands-Free session is inactive. The per-app output override was reset to follow the Windows default. The user confirmed audible music with clearly restored quality.
+- The service actually streams LDAC HQ, with 24-bit encoder input and approximately 1.01 Mbit/s measured media transport including packet overhead. This transport count is distinct from the nominal 990 kbit/s codec payload. ABR remains disabled.
+- Windows endpoint volume is available and was set to 30%. The user confirmed automatic pause on removal and resume on wearing. The observed QQ media-session states changed from Playing to Paused and back to Playing during that test. No wearing-event emulator or media-key substitute was added.
+- The installed SCM service has the native transport's device-interface arrival start trigger. Its demand-start setting is intentional; querying this configuration does not establish successful cold-boot startup.
+
+The user subsequently confirmed native play/pause, previous/next and headset volume adjustment. **Volume integration is incomplete:** headset gestures change audible volume without changing the Windows endpoint slider; this is not bidirectional absolute-volume acceptance. QQ Music's per-app volume is independently scoped and need not mirror the master slider.
+
+Turning the Bluetooth radio off and on restored native playback with the same endpoint ID and retained 30% Windows volume. However, the user reported that disconnecting only XM6 from Windows Bluetooth settings does not work properly. This radio-reset observation must not be called successful per-device disconnect/reconnect. Startup, sleep/resume, format transitions and video timing also remain outstanding.
+
+## Endpoint identity correction in 0.3.13
+
+The native render PDO already has the physical headset's Bluetooth container ID, but its MMDEVAPI endpoint had a different synthetic container. The topology now provides the documented `KSPROPERTY_JACK_CONTAINERID` from the PDO's `DEVPKEY_Device_ContainerId`. The property returns a GUID, validates the requested jack pin and output size, and fails if a reliable container ID is unavailable. This is a device-association correction; it does not by itself establish an absolute-volume implementation. The Bluetooth one-shot connection/disconnection property contract is still absent and remains required work.
+
+Reference: [Microsoft's audio endpoint container ID contract](https://learn.microsoft.com/en-us/windows-hardware/drivers/audio/audio-endpoint-container-id).
+
+## Earlier investigation, before 0.3.12
 
 - The KMDF transport and PortCls/WaveRT child load and enumerate through the Windows Bluetooth stack. Windows retains the radio, pairing and AVRCP profiles.
 - The headset reports SBC, AAC and LDAC endpoints. Native signalling and media channels have opened, with LDAC configured at 48 kHz stereo. This proves negotiation, not audible playback or sustained bitrate.

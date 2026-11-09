@@ -195,6 +195,18 @@ extern "C" VOID Oa2dpLoadSettings(_Inout_ OA2DP_AUDIO_DEVICE *dev)
     KIRQL irql;
 
     PAGED_CODE();
+    // AudioEndpointBuilder needs the physical headset's identity, not a new
+    // synthetic container for the virtual jack. The PDO already inherits
+    // the Bluetooth device's container from our native transport parent.
+    DEVPROPTYPE containerType = 0;
+    ULONG containerBytes = 0;
+    dev->ContainerIdValid = FALSE;
+    RtlZeroMemory(&dev->ContainerId, sizeof(dev->ContainerId));
+    NTSTATUS containerStatus = IoGetDevicePropertyData(
+        dev->Pdo, &DEVPKEY_Device_ContainerId, LOCALE_NEUTRAL, 0,
+        sizeof(dev->ContainerId), &dev->ContainerId, &containerBytes, &containerType);
+    dev->ContainerIdValid = NT_SUCCESS(containerStatus) &&
+        containerType == DEVPROP_TYPE_GUID && containerBytes == sizeof(GUID);
     if (LoadValue(dev, FORMATS_VALUE, REG_BINARY, &list, sizeof(list), &got) &&
         got == sizeof(list) && ListValid(&list)) {
         KeAcquireSpinLock(&dev->Lock, &irql);

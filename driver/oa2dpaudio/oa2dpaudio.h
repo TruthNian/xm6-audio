@@ -51,6 +51,9 @@ typedef struct _OA2DP_AUDIO_DEVICE {
     BOOLEAN Removed;
     PDEVICE_OBJECT Fdo;
     PDEVICE_OBJECT Pdo;
+    /* Immutable while the KS filters are registered. */
+    GUID ContainerId;
+    BOOLEAN ContainerIdValid;
 
     /* Spin lock for everything below that streams read at DISPATCH_LEVEL. */
     KSPIN_LOCK Lock;

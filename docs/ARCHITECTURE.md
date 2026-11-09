@@ -29,7 +29,7 @@ Ring protocol v2 fixes the allocated frame stride, independent of the active cha
 
 Windows shared mode supplies a mixed stream. The driver cannot infer the original format of each contributing file. Exclusive mode can supply a supported player-selected stream format. Unsupported rate changes do not become a falsely labeled fixed-rate success.
 
-LDAC encode calls consume 128 samples per channel. At 88.2/96 kHz, a codec frame represents 256 samples; RTP uses the codec-frame duration, not the API-call block size. AVDTP headset delay reports are forwarded to the WaveRT latency/presentation interfaces. Hardware synchronization is still unvalidated.
+LDAC encode calls consume 128 samples per channel. At 88.2/96 kHz, a codec frame represents 256 samples; RTP uses the codec-frame duration, not the API-call block size. AVDTP headset delay reports affect the WaveRT presentation position. The virtual endpoint reports zero local hardware FIFO/chipset/codec delay; remote Bluetooth delay must not be compared against the local cyclic buffer's size. Hardware video synchronization is still unvalidated.
 
 ## Connection and service lifecycle
 

@@ -1,6 +1,6 @@
 # Roadmap and acceptance
 
-The repository contains a buildable native prototype. The initial hardware target is WH-1000XM6 on Windows 10 x64. Updated 2026-11-08.
+The repository contains a buildable native prototype. The initial hardware target is WH-1000XM6 on Windows 10 x64. Updated 2026-11-09.
 
 ## Implemented and covered by build / focused checks
 
@@ -18,7 +18,7 @@ The repository contains a buildable native prototype. The initial hardware targe
 ## Required before native deployment is accepted
 
 1. **A legitimate Microsoft-signed package.** The [free-signing inquiry](https://github.com/SignPath/fdn-website/issues/28) is open; no approval exists. Normal boot protection is retained.
-2. **Real audio and controls.** Verify the XM6 endpoint, audible music/video, system volume/mute and headset play/pause/previous/next. Packet counters do not satisfy this requirement.
+2. **Real audio and controls.** In the controlled 0.3.12 trial, the user confirmed audible QQ Music through native LDAC HQ, manual play/pause/previous/next and wearing-detection pause/resume. Endpoint-volume activation succeeds, but headset gestures do not synchronize the Windows master volume. Bidirectional absolute volume, mute and video remain to be accepted. Packet counters alone do not satisfy this requirement.
 3. **Format correctness.** Verify shared/exclusive streams, 32-bit integer/float and 24-in-32, supported sample-rate transitions and actual negotiated codec. The fixed LDAC 48 kHz/24-bit/HQ profile must produce its requested output or report failure.
 4. **Lifecycle.** Verify installation/recovery, device-triggered startup, headset off/on, disconnect/reconnect, service restart and sleep/resume without stale audio or silent-success status.
 5. **Timing and driver behavior.** Check video presentation timing and run appropriate driver diagnostics on a controlled system.
