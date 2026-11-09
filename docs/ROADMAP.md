@@ -18,9 +18,9 @@ The repository contains a buildable native prototype. The initial hardware targe
 ## Required before native deployment is accepted
 
 1. **A legitimate Microsoft-signed package.** The [free-signing inquiry](https://github.com/SignPath/fdn-website/issues/28) is open; no approval exists. Normal boot protection is retained.
-2. **Real audio and controls.** In the controlled 0.3.12 trial, the user confirmed audible QQ Music through native LDAC HQ, manual play/pause/previous/next and wearing-detection pause/resume. Endpoint-volume activation succeeds, but headset gestures do not synchronize the Windows master volume. Bidirectional absolute volume, mute and video remain to be accepted. Packet counters alone do not satisfy this requirement.
+2. **Real audio and controls.** Controlled local trials confirmed audible QQ Music through native LDAC HQ, manual play/pause/previous/next, wearing-detection pause/resume and subsequently bidirectional headset/Windows master volume. PotPlayer video sound was restored once. Post-restart playback, mute and automatic recovery for existing clients remain unaccepted. Packet counters or reopening a player do not satisfy this requirement.
 3. **Format correctness.** Verify shared/exclusive streams, 32-bit integer/float and 24-in-32, supported sample-rate transitions and actual negotiated codec. The fixed LDAC 48 kHz/24-bit/HQ profile must produce its requested output or report failure.
-4. **Lifecycle.** Verify installation/recovery, device-triggered startup, headset off/on, disconnect/reconnect, service restart and sleep/resume without stale audio or silent-success status.
+4. **Lifecycle.** After the authorized restart, both loaded 0.3.18 driver hashes matched the local signed candidate and the codec service started with the native device. This establishes module activation and service startup only. Verify post-startup sound, installation/recovery, headset off/on, Windows per-device disconnect/reconnect, existing-client recovery, service restart and sleep/resume without stale audio or silent-success status.
 5. **Timing and driver behavior.** Check video presentation timing and run appropriate driver diagnostics on a controlled system.
 
 ## Future work, after the initial native path is validated

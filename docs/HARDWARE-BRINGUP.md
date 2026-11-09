@@ -2,6 +2,14 @@
 
 The controlled developer trial targets WH-1000XM6 on Windows 10 x64, build 19045. It uses a local development signature under explicitly authorized test signing. This is separate from the production installer, which still requires Microsoft-signed catalogs.
 
+## Current acceptance after the 0.3.18 restart (2026-11-09)
+
+The installed audio package is source commit `2cb9079edb146e6b41b25144a2c0cd4f9c104050`, built by [CI run 42635173749](https://github.com/TruthNian/xm6-audio/actions/runs/42635173749). After the authorized restart, actual kernel-module paths and on-disk image hashes matched both locally signed candidate drivers. The audio topology returned the new 88-byte support description: two channels with MULTICHANNEL and UNIFORM flags. This distinguishes the loaded update from a staged package or a service ImagePath setting.
+
+The native codec service started during boot without a manual launch. At this check, the paired headset was disconnected and outgoing signalling attempts returned paging timeouts. The service being alive does not establish headset availability or audible startup. Post-restart playback and Windows settings disconnect/reconnect therefore remain unaccepted, pending the headset availability check.
+
+Before that restart, the user explicitly confirmed bidirectional headset/Windows master volume. That supersedes the earlier volume failure recorded below. The application volume remains independently scoped. PotPlayer had also become audible after a one-time reopen; this does not establish automatic recovery for existing players. Reconnect acceptance requires retaining the endpoint identity and application processes without individual repair.
+
 ## Observed with 0.3.12 (2026-11-09)
 
 The local trial uses source commit `8c8a57ea91bdbb0d72a50b955851c92c0ded9a75`, built by [CI run 42612878702](https://github.com/TruthNian/xm6-audio/actions/runs/42612878702). Both CI jobs passed, including linked-driver metadata verification. The existing local development certificate was used; this is not a Microsoft-signed release.

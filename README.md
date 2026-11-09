@@ -12,7 +12,7 @@ XM6 Audio adds an A2DP profile driver and a WaveRT render endpoint while Windows
 
 > **Development status:** the native drivers, service and codec checks build in CI. Microsoft kernel signing and native headset acceptance are still pending. CI artifacts are unsigned development candidates, not installable releases for a normally protected Windows system.
 
-The [hardware bring-up record](docs/HARDWARE-BRINGUP.md) documents audible native LDAC playback, system volume and wearing-detection pause/resume in one controlled 0.3.12 developer trial, plus the remaining acceptance work. **Do not load candidate 0.3.5**; its descriptor ABI error caused a developer-machine bugcheck and is corrected in the 0.3.6 source.
+The [hardware bring-up record](docs/HARDWARE-BRINGUP.md) documents audible native LDAC playback, media controls, wearing detection and subsequently confirmed bidirectional Windows/headset volume on one controlled test system. Both 0.3.18 drivers have now loaded after a restart, but post-restart playback and reconnect acceptance remain pending. **Do not load candidate 0.3.5**; its descriptor ABI error caused a developer-machine bugcheck and is corrected in the 0.3.6 source.
 
 **[Architecture](docs/ARCHITECTURE.md) · [Build from source](BUILDING.md) · [Signing status](docs/SIGNING.md) · [Roadmap](docs/ROADMAP.md)**
 
@@ -25,7 +25,7 @@ The [hardware bring-up record](docs/HARDWARE-BRINGUP.md) documents audible nativ
 - Device-interface notifications, buffered Bluetooth connection events, disconnected endpoint state and cleanup of stale PCM during reconnection.
 - A codec service **installed by the driver INF and started by a Windows device-interface trigger**, with binaries loaded from Driver Store.
 
-Native playback, manual play/pause/previous/next and wearing-detection pause/resume have been observed in the controlled developer trial. Headset volume and Windows master volume are not synchronized yet; per-device disconnect is also incomplete. See the hardware record for acceptance limits.
+Native playback, manual play/pause/previous/next, wearing-detection pause/resume and bidirectional headset/Windows master volume have been confirmed in the controlled developer trial. Per-device disconnect and existing-client recovery remain unaccepted. See the hardware record for acceptance limits.
 
 ## Audio path
 
@@ -67,7 +67,7 @@ The XM6 supports SBC/AAC/LDAC over Classic Audio and LC3 over LE Audio. LC3 is n
 | Native binaries | MSVC/WDK build of both kernel drivers, codec service and command-line tool. |
 | Packaging | INF validation, catalog generation, pinned dependency commits, symbols, licenses and SHA-256 manifest. |
 | Microsoft kernel signing | **Pending.** [Public feasibility inquiry](https://github.com/SignPath/fdn-website/issues/28); no provider approval or production signature obtained. |
-| Native headset acceptance | **Partial, one test-signed system.** Audible QQ Music via LDAC HQ, play/pause/previous/next and wearing-detection pause/resume observed in 0.3.12. Absolute-volume synchronization, per-device disconnect, lifecycle, format transitions and video timing remain pending. |
+| Native headset acceptance | **Partial, one test-signed system.** Audible QQ Music via LDAC HQ, media controls, wearing detection and bidirectional master volume confirmed before the restart. PotPlayer video sound was recovered once; that does not establish existing-client reconnect. Both 0.3.18 driver images and device-triggered service startup verified after restart. Post-restart playback, per-device disconnect/reconnect, format transitions, sleep/resume and video timing remain pending. |
 
 Build success, encoder bitrate and packet counters are not evidence of audible headset playback. The target baseline is Windows 10 2004+ x64; broader runtime compatibility also requires hardware validation.
 
