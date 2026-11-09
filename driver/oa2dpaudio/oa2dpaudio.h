@@ -64,6 +64,7 @@ typedef struct _OA2DP_AUDIO_DEVICE {
     OA2DP_FORMAT Current;       /* format of the open (or last) stream */
     BOOLEAN Running;
     BOOLEAN ConnectionEnabled;
+    BOOLEAN SuspendRequested;
     ULONG ConnectionSerial;
     volatile LONG Connected;  /* standard KS jack presence, initially false */
     KEVENT DisconnectedEvent; /* completion after the jack/property notification */
@@ -136,7 +137,8 @@ VOID Oa2dpUnlock(_Inout_ PKEVENT lock);
 /* Tell the audio engine that the supported formats changed. */
 VOID Oa2dpWaveFormatsChanged(_Inout_ OA2DP_AUDIO_DEVICE *dev);
 NTSTATUS Oa2dpSetConnected(_Inout_ OA2DP_AUDIO_DEVICE *dev, _In_ BOOLEAN connected);
-NTSTATUS Oa2dpRequestConnection(_Inout_ OA2DP_AUDIO_DEVICE *dev, _In_ BOOLEAN enabled);
+NTSTATUS Oa2dpApplyPolicy(_Inout_ OA2DP_AUDIO_DEVICE *dev, _In_ BOOLEAN enabled,
+                         _In_ BOOLEAN suspended);
 
 #ifdef __cplusplus
 }

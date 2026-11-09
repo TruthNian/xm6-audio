@@ -9,7 +9,7 @@
 #ifndef OA2DP_IOCTL_H
 #define OA2DP_IOCTL_H
 
-#define OA2DP_IOCTL_VERSION 4
+#define OA2DP_IOCTL_VERSION 5
 
 #include "../../core/include/oa2dp/pcm_format.h"
 
@@ -35,6 +35,7 @@ DEFINE_GUID(GUID_OA2DP_BUS_INTERFACE, 0x955e5e3d, 0xc70c, 0x4024, 0x99, 0xdb, 0x
 #define IOCTL_OA2DP_RECV          OA2DP_CTL(4, METHOD_OUT_DIRECT)
 #define IOCTL_OA2DP_WAIT_EVENT    OA2DP_CTL(5, METHOD_BUFFERED)
 #define IOCTL_OA2DP_GET_TX_STATE  OA2DP_CTL(6, METHOD_BUFFERED)
+#define OA2DP_DEVICE_MPM_REGISTERED 0x00000001UL
 
 typedef enum _OA2DP_CHANNEL_KIND {
     Oa2dpChannelSignaling = 0,
@@ -103,6 +104,7 @@ typedef struct _OA2DP_TX_STATE {
 #define IOCTL_OA2DP_AUDIO_SET_NAME     OA2DP_CTL(37, METHOD_BUFFERED)
 #define IOCTL_OA2DP_AUDIO_SET_CONNECTED OA2DP_CTL(38, METHOD_BUFFERED)
 #define IOCTL_OA2DP_AUDIO_GET_STATE     OA2DP_CTL(39, METHOD_BUFFERED)
+#define IOCTL_OA2DP_AUDIO_SET_SUSPENDED OA2DP_CTL(40, METHOD_BUFFERED)
 
 typedef struct _OA2DP_RING_MAPPING {
     ULONGLONG Address;        /* user-mode address of oa2dp_pcm_ring */
@@ -129,6 +131,7 @@ typedef struct _OA2DP_FORMAT_CHANGE {
     ULONG Running;            /* 1 = stream started, 0 = stopped */
     ULONG ConnectionEnabled;  /* Windows one-shot disconnect suppresses retries */
     ULONG ConnectionSerial;   /* distinguishes an explicit reconnect request */
+    ULONG SuspendRequested;   /* native multi-profile manager pauses A2DP for SCO */
 } OA2DP_FORMAT_CHANGE;
 
 typedef struct _OA2DP_ENDPOINT_NAME {

@@ -84,7 +84,15 @@ struct _OA2DP_DEVICE_CONTEXT {
     KEVENT DisconnectedEvent;     /* actual AVDTP teardown, not command receipt */
     PVOID AudioContext;
     OA2DP_VOLUME_NOTIFY AudioVolumeNotify;
-    OA2DP_CONNECTION_REQUEST AudioConnectionRequest;
+    OA2DP_POLICY_REQUEST AudioPolicyRequest;
+    PVOID volatile MpmHandle;
+    EX_RUNDOWN_REF MpmCalls;
+    EX_RUNDOWN_REF MpmCallbacks;
+    BOOLEAN MpmStopping;
+    BOOLEAN PolicyConnected;
+    BOOLEAN PolicySuspended;
+    BOOLEAN MpmConnected;
+    BOOLEAN MpmIsSuspended;
 };
 
 WDF_DECLARE_CONTEXT_TYPE_WITH_NAME(OA2DP_DEVICE_CONTEXT, Oa2dpGetDevice)
@@ -143,3 +151,10 @@ NTSTATUS Oa2dpRegisterVolumeInterface(_In_ OA2DP_DEVICE_CONTEXT *dev);
 NTSTATUS Oa2dpRegisterBusInterface(_In_ OA2DP_DEVICE_CONTEXT *dev, _In_ WDFDEVICE child);
 VOID Oa2dpVolumeFileCleanup(_In_ OA2DP_DEVICE_CONTEXT *dev, _In_ WDFFILEOBJECT file);
 VOID Oa2dpPublishConnected(_In_ OA2DP_DEVICE_CONTEXT *dev, _In_ BOOLEAN connected);
+/* mpm.c: observed Windows 10 profile-manager compatibility contract. */
+NTSTATUS Oa2dpMpmStart(OA2DP_DEVICE_CONTEXT *dev);
+VOID Oa2dpMpmStop(OA2DP_DEVICE_CONTEXT *dev);
+NTSTATUS Oa2dpMpmRequestConnection(PVOID context, BOOLEAN enabled);
+VOID Oa2dpMpmConnected(OA2DP_DEVICE_CONTEXT *dev, BOOLEAN connected);
+VOID Oa2dpMpmPlaying(PVOID context, BOOLEAN playing);
+VOID Oa2dpMpmSuspended(PVOID context, BOOLEAN suspended);

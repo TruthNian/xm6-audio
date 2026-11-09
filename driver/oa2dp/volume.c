@@ -28,6 +28,7 @@ VOID Oa2dpPublishConnected(OA2DP_DEVICE_CONTEXT *dev, BOOLEAN connected)
     const DEVPROP_BOOLEAN value = connected ? DEVPROP_TRUE : DEVPROP_FALSE;
     (void)IoSetDevicePropertyData(WdfDeviceWdmGetPhysicalDevice(dev->Device),
         &AvdtpConnectedKey, LOCALE_NEUTRAL, 0, DEVPROP_TYPE_BOOLEAN, sizeof(value), (PVOID)&value);
+    Oa2dpMpmConnected(dev, connected);
     if (!connected) KeSetEvent(&dev->DisconnectedEvent, IO_NO_INCREMENT, FALSE);
 }
 
@@ -76,7 +77,7 @@ static VOID BusSetVolume(PVOID context, LONG db, BOOLEAN muted, BOOLEAN hostWrit
 }
 
 static NTSTATUS BusRegisterAudio(PVOID context, PVOID audioContext,
-                                OA2DP_VOLUME_NOTIFY notify, OA2DP_CONNECTION_REQUEST request)
+                                OA2DP_VOLUME_NOTIFY notify, OA2DP_POLICY_REQUEST request)
 {
     OA2DP_DEVICE_CONTEXT *dev = context;
     NTSTATUS status = STATUS_SUCCESS;
@@ -86,7 +87,13 @@ static NTSTATUS BusRegisterAudio(PVOID context, PVOID audioContext,
     } else {
         dev->AudioContext = audioContext;
         dev->AudioVolumeNotify = notify;
-        dev->AudioConnectionRequest = request;
+        dev->AudioPolicyRequest = request;
+        status = request(audioContext, dev->PolicyConnected, dev->PolicySuspended);
+        if (!NT_SUCCESS(status)) {
+            dev->AudioContext = NULL;
+            dev->AudioVolumeNotify = NULL;
+            dev->AudioPolicyRequest = NULL;
+        }
     }
     WdfSpinLockRelease(dev->Lock);
     return status;
@@ -99,7 +106,7 @@ static VOID BusUnregisterAudio(PVOID context, PVOID audioContext)
     if (dev->AudioContext == audioContext) {
         dev->AudioContext = NULL;
         dev->AudioVolumeNotify = NULL;
-        dev->AudioConnectionRequest = NULL;
+        dev->AudioPolicyRequest = NULL;
     }
     WdfSpinLockRelease(dev->Lock);
 }
@@ -117,6 +124,9 @@ NTSTATUS Oa2dpRegisterBusInterface(OA2DP_DEVICE_CONTEXT *dev, WDFDEVICE child)
     bus.GetVolume = BusGetVolume;
     bus.SetVolume = BusSetVolume;
     bus.SetConnected = BusSetConnected;
+    bus.RequestConnection = Oa2dpMpmRequestConnection;
+    bus.SetPlaying = Oa2dpMpmPlaying;
+    bus.SetSuspended = Oa2dpMpmSuspended;
     bus.RegisterAudio = BusRegisterAudio;
     bus.UnregisterAudio = BusUnregisterAudio;
     WDF_QUERY_INTERFACE_CONFIG_INIT(&config, (PINTERFACE)&bus, &GUID_OA2DP_BUS_INTERFACE, NULL);
@@ -291,11 +301,8 @@ NTSTATUS Oa2dpVolumePreprocess(WDFDEVICE device, PIRP irp)
             ULONG flags = KSPROPERTY_TYPE_GET | KSPROPERTY_TYPE_BASICSUPPORT;
             status = WriteSupport(irp, outputBytes, flags, 0xffff, &returned);
         } else if (property.Flags == KSPROPERTY_TYPE_GET) {
-            WdfSpinLockAcquire(dev->Lock);
-            status = dev->AudioConnectionRequest
-                ? dev->AudioConnectionRequest(dev->AudioContext, property.Id == KSPROPERTY_ONESHOT_RECONNECT)
-                : STATUS_DEVICE_NOT_READY;
-            WdfSpinLockRelease(dev->Lock);
+            status = Oa2dpMpmRequestConnection(dev,
+                property.Id == KSPROPERTY_ONESHOT_RECONNECT);
             if (NT_SUCCESS(status) && property.Id == KSPROPERTY_ONESHOT_DISCONNECT) {
                 // Windows' one-shot disconnect waits for the real channel close.
                 // The callback above only queues the command and cannot wait

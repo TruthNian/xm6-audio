@@ -80,6 +80,31 @@ The earlier resource file retained a manual 0.3.16 version while the 0.3.17 proj
 
 The CLI and installer also propagate Windows' restart-required result (3010). A pending driver selection no longer prints that the headset already uses the replacement. The installer reports activation pending when either transport selection or audio-driver installation requests a restart; it does not reboot the machine itself. This reporting correction does not establish that a driver is active or passes hardware acceptance.
 
+## Native multi-profile coordination candidate in 0.3.19
+
+The user confirmed normal audible output after the 0.3.18 restart. A subsequent
+connection rebuild retained both QQ Music and PotPlayer processes and the same
+native endpoint, with active audio after recovery. Windows settings still
+reported `Couldn't disconnect`. Direct inspection reproduced that failure,
+including stale connected state after the Classic link was already down.
+The public address-scoped `IOCTL_BTH_DISCONNECT_DEVICE` successfully closed the
+link but did not correct the settings UI; it is not a completed UI fix and is
+not added as a substitute disconnect path.
+
+The candidate registers A2DP with Windows' existing multi-profile manager.
+One-shot connection properties request native coordination, actual channel
+state is reported back, and suspend requests travel through the existing audio
+waiter. The service stops and drains encoded media before acknowledging suspend;
+Windows retains HFP/AVRCP ownership. The driver/service ABI is version 5 and the
+kernel bus interface is version 2. Opaque registration users and callbacks have
+separate rundown protection during unregister. The device-info flag and service
+log distinguish live registration from a binary merely importing the APIs.
+
+These entry points are observed Windows 10 system compatibility contracts, not
+documented public cross-version interfaces. See [provenance](CLEAN_ROOM.md).
+Builds do not establish correct settings UI, SCO interaction, callback removal,
+or reconnect. Those remain hardware acceptance requirements for this candidate.
+
 ## Earlier investigation, before 0.3.12
 
 - The KMDF transport and PortCls/WaveRT child load and enumerate through the Windows Bluetooth stack. Windows retains the radio, pairing and AVRCP profiles.

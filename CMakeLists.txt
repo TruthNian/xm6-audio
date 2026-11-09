@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(XM6Audio VERSION 0.3.18 LANGUAGES C CXX)
+project(XM6Audio VERSION 0.3.19 LANGUAGES C CXX)
 
 # The loaded binary's version must agree with the configured project and INF.
 # Generate resources in the build tree rather than keeping a stale copy.
@@ -165,8 +165,23 @@ endif()
 if(OA2DP_BUILD_DRIVERS)
     list(APPEND CMAKE_MODULE_PATH ${OA2DP_THIRD_PARTY}/FindWDK/cmake)
     find_package(WDK REQUIRED)
+    # Windows remains the implementation of this observed profile-manager ABI.
+    set(XM6_MPM_MACHINE X64)
+    if(CMAKE_GENERATOR_PLATFORM STREQUAL "ARM64")
+        set(XM6_MPM_MACHINE ARM64)
+    endif()
+    set(XM6_MPM_IMPORT "${CMAKE_CURRENT_BINARY_DIR}/btampm.lib")
+    add_custom_command(OUTPUT "${XM6_MPM_IMPORT}"
+        COMMAND "${CMAKE_AR}" /NOLOGO /MACHINE:${XM6_MPM_MACHINE}
+            "/DEF:${CMAKE_CURRENT_SOURCE_DIR}/driver/oa2dp/btampm.def"
+            "/OUT:${XM6_MPM_IMPORT}"
+        DEPENDS driver/oa2dp/btampm.def VERBATIM)
+    add_custom_target(xm6_mpm_import DEPENDS "${XM6_MPM_IMPORT}")
     wdk_add_driver(oa2dp KMDF 1.15 WINVER 0x0A00 NTDDI_VERSION 0x0A000008
-        driver/oa2dp/driver.c driver/oa2dp/l2cap.c driver/oa2dp/volume.c ${XM6_VERSION_RESOURCE})
+        driver/oa2dp/driver.c driver/oa2dp/l2cap.c driver/oa2dp/volume.c
+        driver/oa2dp/mpm.c ${XM6_VERSION_RESOURCE})
+    add_dependencies(oa2dp xm6_mpm_import)
+    target_link_libraries(oa2dp "${XM6_MPM_IMPORT}")
 
     # Virtual render endpoint: PortCls/WaveRT, derived from SYSVAD (MS-PL).
     # NTDDI 10.0.19041 for ExAllocatePool2; matches the INF decoration.

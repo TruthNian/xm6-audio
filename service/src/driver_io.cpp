@@ -323,6 +323,13 @@ bool AudioEndpoint::set_connected(bool connected)
                       nullptr, 5000) == ERROR_SUCCESS;
 }
 
+bool AudioEndpoint::set_suspended(bool suspended)
+{
+    ULONG value = suspended ? 1 : 0;
+    return dev_.ioctl(IOCTL_OA2DP_AUDIO_SET_SUSPENDED, &value, sizeof(value), nullptr, 0,
+                      nullptr, 5000) == ERROR_SUCCESS;
+}
+
 bool AudioEndpoint::get_state(OA2DP_FORMAT_CHANGE &out)
 {
     DWORD bytes = 0;

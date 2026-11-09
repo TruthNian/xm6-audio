@@ -1,5 +1,22 @@
 # Clean-room provenance
 
+## Current fork provenance
+
+The strict clean-room description below records the upstream project's
+policy and original specification. It does **not** describe the entire
+Windows compatibility layer in this fork. The AVRCP volume-cache and
+multi-profile-manager interfaces were investigated using the local Microsoft
+Windows binaries and Microsoft's public debugging symbols. They are observed
+Windows 10 compatibility contracts, rather than documented cross-version APIs.
+This fork must not be presented as strictly clean-room for those components.
+
+No commercial third-party A2DP implementation, installer, signing certificate
+or key was used as an implementation source. The Bluetooth protocol and codec
+sources retain their documented/open-source provenance and licenses. Microsoft
+system binaries, symbol files and private machine traces are not redistributed.
+
+## Upstream policy and original specification (historical)
+
 OpenA2DP is an independent, clean-room implementation of a replacement
 Bluetooth A2DP audio driver for Windows 10/11. It is **not** derived from,
 affiliated with, or endorsed by any commercial product.

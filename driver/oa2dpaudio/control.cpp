@@ -285,6 +285,7 @@ static VOID SnapshotStateLocked(_In_ const OA2DP_AUDIO_DEVICE *dev,
     ev->Running = dev->Running ? 1 : 0;
     ev->ConnectionEnabled = dev->ConnectionEnabled ? 1 : 0;
     ev->ConnectionSerial = dev->ConnectionSerial;
+    ev->SuspendRequested = dev->SuspendRequested ? 1 : 0;
 }
 
 static VOID CompleteWait(_Inout_ PIRP irp, _In_ const OA2DP_FORMAT_CHANGE *ev)
@@ -326,26 +327,31 @@ extern "C" VOID Oa2dpReportStream(_Inout_ OA2DP_AUDIO_DEVICE *dev, _In_ const OA
     KeReleaseSpinLock(&dev->Lock, irql);
     if (irp)
         CompleteWait(irp, &ev);
+    if (dev->Bus.SetPlaying)
+        dev->Bus.SetPlaying(dev->Bus.Header.Context, running);
 }
 
 /* ---- lifetime ---------------------------------------------------------------- */
 
-extern "C" NTSTATUS Oa2dpRequestConnection(_Inout_ OA2DP_AUDIO_DEVICE *dev,
-                                           _In_ BOOLEAN enabled)
+extern "C" NTSTATUS Oa2dpApplyPolicy(_Inout_ OA2DP_AUDIO_DEVICE *dev,
+                                    _In_ BOOLEAN enabled, _In_ BOOLEAN suspended)
 {
     KIRQL irql;
     PIRP irp;
     OA2DP_FORMAT_CHANGE ev;
     KeAcquireSpinLock(&dev->Lock, &irql);
-    NTSTATUS status = Oa2dpControlStatusLocked(dev, FALSE);
+    // Registration can precede ControlStart. Retain the manager's policy so
+    // the first service GET_STATE cannot override an explicit disconnect.
+    NTSTATUS status = dev->Removed ? STATUS_DELETE_PENDING : STATUS_SUCCESS;
     if (!NT_SUCCESS(status)) {
         KeReleaseSpinLock(&dev->Lock, irql);
         return status;
     }
     dev->ConnectionEnabled = enabled;
+    dev->SuspendRequested = suspended;
     ++dev->ConnectionSerial;
     SnapshotStateLocked(dev, &ev);
-    irp = IoCsqRemoveNextIrp(&dev->WaitCsq, NULL);
+    irp = dev->Started ? IoCsqRemoveNextIrp(&dev->WaitCsq, NULL) : NULL;
     if (!irp) {
         dev->Event = ev;
         dev->EventPending = TRUE;
@@ -700,6 +706,14 @@ static NTSTATUS ControlIoctl(_Inout_ OA2DP_AUDIO_DEVICE *dev, _Inout_ PIRP irp, 
             break;
         }
         status = Oa2dpSetConnected(dev, *(PULONG)buf != 0);
+        break;
+    case IOCTL_OA2DP_AUDIO_SET_SUSPENDED:
+        if (inLen != sizeof(ULONG) || !buf || *(PULONG)buf > 1) {
+            status = STATUS_INVALID_PARAMETER;
+            break;
+        }
+        dev->Bus.SetSuspended(dev->Bus.Header.Context, *(PULONG)buf != 0);
+        status = STATUS_SUCCESS;
         break;
     case IOCTL_OA2DP_AUDIO_SET_NAME:
         if (inLen < sizeof(OA2DP_ENDPOINT_NAME) || !buf) {

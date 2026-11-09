@@ -43,7 +43,7 @@ public:
     OA2DP_BUS_INTERFACE VolumeBus{};
     BOOLEAN Attached = FALSE;
     static VOID VolumeChanged(PVOID context);
-    static NTSTATUS ConnectionRequested(PVOID context, BOOLEAN enabled);
+    static NTSTATUS PolicyRequested(PVOID context, BOOLEAN enabled, BOOLEAN suspended);
 
     IMP_IMiniportTopology;
 };
@@ -60,9 +60,9 @@ VOID CMiniportTopology::VolumeChanged(PVOID context)
     }
 }
 
-NTSTATUS CMiniportTopology::ConnectionRequested(PVOID context, BOOLEAN enabled)
+NTSTATUS CMiniportTopology::PolicyRequested(PVOID context, BOOLEAN enabled, BOOLEAN suspended)
 {
-    return Oa2dpRequestConnection(static_cast<CMiniportTopology *>(context)->Device, enabled);
+    return Oa2dpApplyPolicy(static_cast<CMiniportTopology *>(context)->Device, enabled, suspended);
 }
 
 #pragma code_seg("PAGE")
@@ -135,7 +135,7 @@ CMiniportTopology::Init
     VolumeBus = Device->Bus;
     VolumeBus.Header.InterfaceReference(VolumeBus.Header.Context);
     status = VolumeBus.RegisterAudio(VolumeBus.Header.Context, this,
-                                    VolumeChanged, ConnectionRequested);
+                                    VolumeChanged, PolicyRequested);
     Attached = NT_SUCCESS(status);
     return status;
 }
@@ -296,7 +296,8 @@ NTSTATUS Oa2dpBluetoothProperty(_Inout_ OA2DP_AUDIO_DEVICE *dev,
     if (!(request->Verb & KSPROPERTY_TYPE_GET) || request->InstanceSize != 0)
         return STATUS_INVALID_PARAMETER;
     request->ValueSize = 0;
-    NTSTATUS status = Oa2dpRequestConnection(dev, id == KSPROPERTY_ONESHOT_RECONNECT);
+    NTSTATUS status = dev->Bus.RequestConnection(dev->Bus.Header.Context,
+        id == KSPROPERTY_ONESHOT_RECONNECT);
     if (NT_SUCCESS(status) && id == KSPROPERTY_ONESHOT_DISCONNECT) {
         // A successfully queued command is not a completed disconnect. Keep
         // the KS request alive until the service closes AVDTP and publishes

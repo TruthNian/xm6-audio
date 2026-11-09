@@ -287,8 +287,11 @@ void Session::on_avdtp_event(const oa2dp_avdtp_event &ev)
 bool Session::connect_signaling()
 {
     OA2DP_CHANNEL_INFO ci{};
-    if (!tr_.open_channel(Oa2dpChannelSignaling, ci))
+    if (!tr_.open_channel(Oa2dpChannelSignaling, ci)) {
+        if (audio_ready_)
+            audio_.set_connected(false);  // complete a failed native connect attempt
         return false;
+    }
     sig_mtu_ = ci.OutMtu;
     av_.out_mtu = sig_mtu_ < 48 ? 48 : sig_mtu_;
     sig_open_ = true;
@@ -406,6 +409,7 @@ bool Session::ensure_audio_endpoint()
             return false;
         }
         connection_enabled_ = state.ConnectionEnabled != 0;
+        suspend_requested_ = state.SuspendRequested != 0;
         connection_serial_ = state.ConnectionSerial;
         audio_format_ = state.Format;
         audio_running_ = state.Running != 0;
@@ -463,7 +467,13 @@ bool Session::setup_audio_endpoint()
 bool Session::start_stream()
 {
     oa2dp_avdtp_sep *sep = oa2dp_avdtp_sep_get(&av_, local_seid_);
-    if (!connection_enabled_ || !sep || sep->state != OA2DP_SEP_OPEN || !media_open_)
+    if (!connection_enabled_ || suspend_requested_ || !sep || !media_open_)
+        return false;
+    if (sep->state == OA2DP_SEP_STREAMING) {
+        begin_streaming();
+        return streaming_;
+    }
+    if (sep->state != OA2DP_SEP_OPEN)
         return false;
     oa2dp_avdtp_event r{};
     if (!request(oa2dp_avdtp_start(&av_, local_seid_), r)) {
@@ -587,6 +597,7 @@ void Session::handle(const Command &c)
         break;
     case Cmd::AudioFormat:
         connection_enabled_ = c.format.ConnectionEnabled != 0;
+        suspend_requested_ = c.format.SuspendRequested != 0;
         if (connection_serial_ != c.format.ConnectionSerial) {
             connection_serial_ = c.format.ConnectionSerial;
             LOGI("Windows requested Bluetooth audio %s",
@@ -605,6 +616,13 @@ void Session::handle(const Command &c)
             suspend_stream();
         audio_format_ = c.format.Format;
         audio_running_ = c.format.Running != 0;
+        if (suspend_requested_) {
+            suspend_stream();
+            // Report stopped transport after the encoder has joined/drained.
+            if (!streaming_ && audio_ready_)
+                audio_.set_suspended(true);
+            break;
+        }
         if (audio_running_) {
             idle_since_ = 0;
             if (settings_.follow_source_rate)
@@ -669,6 +687,12 @@ void Session::main_loop()
         return;
     }
     settings_ = load_settings(info_.RemoteAddress);
+    if (!(info_.Flags & OA2DP_DEVICE_MPM_REGISTERED)) {
+        LOGE("native profile-manager registration is unavailable");
+        tr_.close();
+        return;
+    }
+    LOGI("native Windows multi-profile manager registered");
 
     BLUETOOTH_DEVICE_INFO bdi{};
     bdi.dwSize = sizeof(bdi);
@@ -772,7 +796,7 @@ void Session::main_loop()
 
 void Session::begin_streaming()
 {
-    if (!connection_enabled_ || streaming_ || !media_open_ || !audio_ready_)
+    if (!connection_enabled_ || suspend_requested_ || streaming_ || !media_open_ || !audio_ready_)
         return;
     if (audio_format_.SampleRate &&
         audio_format_.SampleRate != oa2dp_codec_sample_rate(&config_)) {
@@ -785,6 +809,7 @@ void Session::begin_streaming()
         stream_.join();
     streaming_ = true;
     stream_ = std::thread([this] { stream_loop(); });
+    audio_.set_suspended(false);
     publish("streaming");
 }
 
@@ -793,6 +818,8 @@ void Session::end_streaming()
     streaming_ = false;
     if (stream_.joinable())
         stream_.join();
+    if (audio_ready_)
+        audio_.set_suspended(true);
     {
         std::lock_guard<std::mutex> lock(status_mu_);
         status_.bitrate = 0;

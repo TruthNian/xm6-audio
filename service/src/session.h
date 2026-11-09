@@ -101,6 +101,7 @@ private:
     bool have_remote_caps_ = false;
     bool audio_running_ = false;
     bool connection_enabled_ = true;
+    bool suspend_requested_ = false;
     ULONG connection_serial_ = 0;
     OA2DP_FORMAT audio_format_{};  // actual Windows stream, not file metadata
     DWORD idle_since_ = 0;

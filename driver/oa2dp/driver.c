@@ -121,7 +121,17 @@ NTSTATUS Oa2dpEvtPrepareHardware(_In_ WDFDEVICE Device, _In_ WDFCMRESLIST Raw,
      * driver already owns PSM 0x19 we still work as connection initiator. */
     (void)Oa2dpRegisterServer(dev);
 
-    return Oa2dpCreateAudioChild(dev);
+    status = Oa2dpMpmStart(dev);
+    if (!NT_SUCCESS(status)) {
+        Oa2dpUnregisterServer(dev);
+        return status;
+    }
+    status = Oa2dpCreateAudioChild(dev);
+    if (!NT_SUCCESS(status)) {
+        Oa2dpMpmStop(dev);
+        Oa2dpUnregisterServer(dev);
+    }
+    return status;
 }
 
 NTSTATUS Oa2dpEvtReleaseHardware(_In_ WDFDEVICE Device, _In_ WDFCMRESLIST Translated)
@@ -131,6 +141,7 @@ NTSTATUS Oa2dpEvtReleaseHardware(_In_ WDFDEVICE Device, _In_ WDFCMRESLIST Transl
     PAGED_CODE();
     Oa2dpCloseAllChannels(dev);
     Oa2dpPublishConnected(dev, FALSE);
+    Oa2dpMpmStop(dev);
     Oa2dpUnregisterServer(dev);
     Oa2dpPostEvent(dev, Oa2dpEventDeviceGone, NULL);
     return STATUS_SUCCESS;
@@ -321,6 +332,7 @@ VOID Oa2dpEvtIoDeviceControl(_In_ WDFQUEUE Queue, _In_ WDFREQUEST Request,
         if (NT_SUCCESS(status)) {
             RtlZeroMemory(out, sizeof(*out));
             out->Version = OA2DP_IOCTL_VERSION;
+            if (dev->MpmHandle) out->Flags |= OA2DP_DEVICE_MPM_REGISTERED;
             out->RemoteAddress = dev->RemoteAddress;
             out->LocalAddress = dev->LocalAddress;
             info = sizeof(*out);

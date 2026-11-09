@@ -87,6 +87,7 @@ public:
     bool set_latency(uint32_t transport_us, uint32_t device_us);
     bool set_name(const std::wstring &name);
     bool set_connected(bool connected);
+    bool set_suspended(bool suspended);
     bool get_state(OA2DP_FORMAT_CHANGE &out);
     bool map_ring();
     void unmap_ring();

@@ -457,6 +457,7 @@ static NTSTATUS QueryVolumeBus(_Inout_ OA2DP_AUDIO_DEVICE *dev)
     if (dev->Bus.Header.Version != OA2DP_BUS_VERSION || dev->Bus.Header.Size != sizeof(dev->Bus) ||
         !dev->Bus.Header.InterfaceReference || !dev->Bus.Header.InterfaceDereference ||
         !dev->Bus.GetVolume || !dev->Bus.SetVolume || !dev->Bus.SetConnected ||
+        !dev->Bus.RequestConnection || !dev->Bus.SetPlaying || !dev->Bus.SetSuspended ||
         !dev->Bus.RegisterAudio || !dev->Bus.UnregisterAudio) {
         if (dev->Bus.Header.InterfaceDereference)
             dev->Bus.Header.InterfaceDereference(dev->Bus.Header.Context);
