@@ -4,6 +4,7 @@
  * cross-version ABI. Windows retains HFP/AVRCP, radio and pairing ownership.
  * Callbacks only publish policy through the existing audio waiter. */
 #include "oa2dp.h"
+#include "trace.h"
 
 typedef NTSTATUS (NTAPI *MPM_CALLBACK)(PVOID, ULONG);
 __declspec(dllimport) NTSTATUS NTAPI BtaMpmRegister(
@@ -32,6 +33,7 @@ static NTSTATUS NTAPI ConnectionRequest(PVOID context, ULONG connect)
     OA2DP_DEVICE_CONTEXT *dev = context;
     NTSTATUS status = STATUS_SUCCESS;
     BOOLEAN acknowledge = FALSE;
+    ULONG serial = 0;
     const BOOLEAN enabled = connect != 0;
     if (!ExAcquireRundownProtection(&dev->MpmCallbacks)) return STATUS_DELETE_PENDING;
     WdfSpinLockAcquire(dev->Lock);
@@ -39,7 +41,7 @@ static NTSTATUS NTAPI ConnectionRequest(PVOID context, ULONG connect)
         status = STATUS_DELETE_PENDING;
     } else {
         dev->PolicyConnected = enabled;
-        (void)Oa2dpMpmBeginRequest(&dev->MpmRequest, enabled);
+        serial = Oa2dpMpmBeginRequest(&dev->MpmRequest, enabled);
         if (!enabled) KeClearEvent(&dev->DisconnectedEvent);
         if (dev->AudioPolicyRequest)
             status = dev->AudioPolicyRequest(dev->AudioContext, enabled, dev->PolicySuspended,
@@ -49,6 +51,11 @@ static NTSTATUS NTAPI ConnectionRequest(PVOID context, ULONG connect)
                          dev->Channels[Oa2dpChannelMedia].Life.State == ChannelClosed));
     }
     WdfSpinLockRelease(dev->Lock);
+    TraceLoggingWrite(g_Oa2dpTransportTrace, "ConnectionPolicy",
+        TraceLoggingUInt32(serial, "RequestSerial"),
+        TraceLoggingBool(enabled, "Connect"),
+        TraceLoggingBool(acknowledge, "AlreadyAtTarget"),
+        TraceLoggingNTStatus(status, "Status"));
     // Policy callbacks may run above PASSIVE_LEVEL or reenter publication.
     // Re-acknowledge through the same serialized, state-validating publisher.
     if (acknowledge) WdfWorkItemEnqueue(dev->PublicationWork);
@@ -155,6 +162,9 @@ NTSTATUS Oa2dpMpmRequestConnection(PVOID context, BOOLEAN enabled)
     }
     status = BtaMpmConnectionRequest(dev->MpmHandle, enabled, 0);
     ExReleaseRundownProtection(&dev->MpmCalls);
+    TraceLoggingWrite(g_Oa2dpTransportTrace, "ConnectionRequestResult",
+        TraceLoggingBool(enabled, "Connect"),
+        TraceLoggingNTStatus(status, "Status"));
     // A one-shot property queues policy; it is not a pending KS method IRP.
     return NT_SUCCESS(status) ? STATUS_SUCCESS : status;
 }
@@ -172,6 +182,10 @@ NTSTATUS Oa2dpMpmConnected(OA2DP_DEVICE_CONTEXT *dev, BOOLEAN connected)
     // confirmations pass 1. The last argument is not a generic "notify" flag.
     status = BtaMpmUpdateConnectionStatus(dev->MpmHandle, connected, serial != 0);
     ExReleaseRundownProtection(&dev->MpmCalls);
+    TraceLoggingWrite(g_Oa2dpTransportTrace, "ConnectionStatusResult",
+        TraceLoggingUInt32(serial, "RequestSerial"),
+        TraceLoggingBool(connected, "Connected"),
+        TraceLoggingNTStatus(status, "Status"));
     if (!NT_SUCCESS(status)) return status;
     WdfSpinLockAcquire(dev->Lock);
     dev->MpmConnected = connected;

@@ -18,6 +18,7 @@ Abstract:
  * volume/mute backed by the parent A2DP volume cache and Windows' AVRCP.
  */
 #include "driver.h"
+#include "trace.h"
 static NTSTATUS PropertyHandler_Jack(_In_ PPCPROPERTY_REQUEST Request);
 static NTSTATUS EventHandler_Jack(_In_ PPCEVENT_REQUEST Request);
 static NTSTATUS PropertyHandler_Bluetooth(_In_ PPCPROPERTY_REQUEST Request);
@@ -307,11 +308,17 @@ NTSTATUS Oa2dpBluetoothProperty(_Inout_ OA2DP_AUDIO_DEVICE *dev,
         // interfaces wait on that one referenced event, not a jack-state copy.
         LARGE_INTEGER timeout;
         timeout.QuadPart = -10LL * 1000 * 1000 * 10;
-        if (!dev->Bus.DisconnectedEvent) return STATUS_DEVICE_NOT_READY;
-        status = KeWaitForSingleObject(dev->Bus.DisconnectedEvent, Executive,
-            KernelMode, FALSE, &timeout);
-        if (status == STATUS_TIMEOUT) status = STATUS_IO_TIMEOUT;
+        if (!dev->Bus.DisconnectedEvent) {
+            status = STATUS_DEVICE_NOT_READY;
+        } else {
+            status = KeWaitForSingleObject(dev->Bus.DisconnectedEvent, Executive,
+                KernelMode, FALSE, &timeout);
+            if (status == STATUS_TIMEOUT) status = STATUS_IO_TIMEOUT;
+        }
     }
+    TraceLoggingWrite(g_Oa2dpAudioTrace, "BluetoothOneShotResult",
+        TraceLoggingUInt32(id, "Property"),
+        TraceLoggingNTStatus(status, "Status"));
     return status;
 }
 

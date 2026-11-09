@@ -1,6 +1,6 @@
 # Roadmap and acceptance
 
-The repository contains a buildable native prototype. The initial hardware target is WH-1000XM6 on Windows 10 x64. Updated 2026-11-09.
+The repository contains a buildable native prototype. The initial hardware target is WH-1000XM6 on Windows 10 x64. Updated 2026-11-10.
 
 ## Implemented and covered by build / focused checks
 
@@ -18,9 +18,9 @@ The repository contains a buildable native prototype. The initial hardware targe
 ## Required before native deployment is accepted
 
 1. **A legitimate Microsoft-signed package.** The [free-signing inquiry](https://github.com/SignPath/fdn-website/issues/28) is open; no approval exists. Normal boot protection is retained.
-2. **Real audio and controls.** Controlled local trials confirmed audible QQ Music through native LDAC HQ, manual play/pause/previous/next, wearing-detection pause/resume and subsequently bidirectional headset/Windows master volume. PotPlayer video sound was restored once. Post-restart playback, mute and automatic recovery for existing clients remain unaccepted. Packet counters or reopening a player do not satisfy this requirement.
+2. **Real audio and controls.** Controlled local trials confirmed audible QQ Music through native LDAC HQ, PotPlayer video sound, manual play/pause/previous/next, wearing-detection pause/resume and bidirectional headset/Windows master volume. Sound was also confirmed after the 0.3.18 restart. Mute and automatic recovery for existing clients remain unaccepted. Packet counters or reopening a player do not satisfy this requirement.
 3. **Format correctness.** Verify shared/exclusive streams, 32-bit integer/float and 24-in-32, supported sample-rate transitions and actual negotiated codec. The fixed LDAC 48 kHz/24-bit/HQ profile must produce its requested output or report failure.
-4. **Lifecycle.** After the authorized restart, both loaded 0.3.18 driver hashes matched the local signed candidate and the codec service started with the native device. This establishes module activation and service startup only. Verify post-startup sound, installation/recovery, headset off/on, Windows per-device disconnect/reconnect, existing-client recovery, service restart and sleep/resume without stale audio or silent-success status.
+4. **Lifecycle.** Both 0.3.18 driver hashes, device-triggered service startup and post-restart sound were verified, but Windows Settings per-device disconnect/connect still reported incorrect state. The [0.3.31 source review](LIFECYCLE-REVIEW.md) fixes confirmed lifecycle defects and passes CI; it has not been deployed and does not establish the GUI root cause. Installation/recovery, headset off/on, per-device disconnect/reconnect, existing-client recovery, service restart and sleep/resume still require acceptance without stale audio or silent-success status.
 5. **Timing and driver behavior.** Check video presentation timing and run appropriate driver diagnostics on a controlled system.
 
 ## Future work, after the initial native path is validated

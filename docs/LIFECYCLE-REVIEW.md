@@ -1,8 +1,8 @@
-# Native lifecycle review, 0.3.30
+# Native lifecycle review, 0.3.31
 
 This source batch is not a declaration of hardware acceptance. Source review
 and focused offline checks precede another hardware trial. Versions 0.3.23
-through 0.3.30 have not been installed on the host. The host was restored to Microsoft
+through 0.3.31 have not been installed on the host. The host was restored to Microsoft
 BthA2dp; the custom codec service is stopped. Current host audio is not evidence
 of native LDAC. No further installation or reboot is part of this source review.
 
@@ -187,6 +187,42 @@ Shared-mode PCM describes the Windows mix, not an individual file's original
 sample rate or precision. Concurrent music/video cannot each impose a different
 physical stream rate. No RF link can guarantee 990 kbps under arbitrary distance
 or interference; actual negotiated rate, quality and failures remain observable.
+
+## Connection diagnosis before another deployment
+
+The read-only inbox comparison found the AVDTP-connected property on the
+Microsoft AUDIO-category SRC interface, not on its Bluetooth-audio/render
+category registrations or retained wave/topology registrations. The render
+child's container identity also matched the inbox endpoint. Nonpresent custom
+registrations were distinguished from present Microsoft interfaces. This does
+not justify changing container identity, duplicating the property onto every
+child interface, or clearing AlwaysShowDeviceAsConnected. The Settings root
+cause remains unproven.
+
+Version 0.3.31 adds the opt-in kernel TraceLogging provider
+`XM6Audio.Transport` (`{bd2386c3-72bc-4f90-8292-247626362cb2}`), alongside the
+existing `XM6Audio.WaveRT` provider
+(`{ad2dba1f-78a1-4d25-a66e-d3195b9b1f72}`). It records connection-policy request
+serials, manager request/status results, interface-property results, validated
+channel states and one-shot property completion. `KsControlResult` also records
+the control code, buffer lengths and final status when a control-interface
+request is rejected before decoding its property. The WaveRT provider records
+the child's one-shot result too, so routing through the child and parent can
+be distinguished. Channel states use `OA2DP_CHANNEL_STATE` from
+`driver/common/channel_lifecycle.h`; interface indices are 0=AUDIO and
+1=Bluetooth-audio. These events describe separate calls, not one atomic
+snapshot of the Windows broker's state.
+
+No packet-rate event, device address, pointer, interface path, audio content
+or pairing material is logged. The providers are inactive unless enabled by
+an ETW session. Transport registration failure is nonfatal; successful
+registration is undone on driver unload or failed DriverEntry. The provider
+follows Microsoft's [kernel TraceLogging lifecycle](https://learn.microsoft.com/en-us/windows-hardware/drivers/devtest/tracelogging-for-kernel-mode-drivers-and-components).
+This instrumentation changes no connection policy and does not itself fix
+Settings. Capture both providers with the Windows broker trace during the next
+authorized hardware cycle, rather than interpreting a successful backend
+command as GUI acceptance. No trace or new driver was activated on the host
+as part of this source-only change.
 
 References: Microsoft [device status and problem codes](https://learn.microsoft.com/en-us/windows-hardware/drivers/install/retrieving-the-status-and-problem-code-for-a-device-instance),
 [framework work items](https://learn.microsoft.com/en-us/windows-hardware/drivers/wdf/using-framework-work-items),

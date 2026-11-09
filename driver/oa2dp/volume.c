@@ -11,6 +11,7 @@
 #include <ks.h>
 #include <ksmedia.h>
 #include <devpropdef.h>
+#include "trace.h"
 
 static const GUID VolumeCacheSet =
     {0x401e566b,0xb47e,0x4e34,{0xb0,0xfc,0x94,0x82,0x6e,0x9e,0x2a,0x1a}};
@@ -52,6 +53,10 @@ static NTSTATUS PublishState(OA2DP_DEVICE_CONTEXT *dev, BOOLEAN connected)
             WdfStringGetUnicodeString(dev->AudioInterfacePaths[i], &path);
             NTSTATUS status = IoSetDeviceInterfacePropertyData(&path, &AvdtpConnectedKey,
                 LOCALE_NEUTRAL, 0, DEVPROP_TYPE_BOOLEAN, sizeof(value), (PVOID)&value);
+            TraceLoggingWrite(g_Oa2dpTransportTrace, "InterfaceConnectionResult",
+                TraceLoggingUInt32(i, "InterfaceIndex"),
+                TraceLoggingBool(connected, "Connected"),
+                TraceLoggingNTStatus(status, "Status"));
             if (!NT_SUCCESS(status)) {
                 if (NT_SUCCESS(result)) result = status;
                 KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_WARNING_LEVEL,
@@ -77,14 +82,25 @@ NTSTATUS Oa2dpPublishConnected(OA2DP_DEVICE_CONTEXT *dev, BOOLEAN connected, ULO
 {
     NTSTATUS status;
     BOOLEAN valid;
+    BOOLEAN closed;
+    ULONG signalState, mediaState;
     NT_ASSERT(KeGetCurrentIrql() == PASSIVE_LEVEL);
     WdfWaitLockAcquire(dev->PublicationLock, NULL);
     WdfSpinLockAcquire(dev->Lock);
     valid = connected ? ConnectionReady(dev, connection) : ConnectionClosed(dev);
+    signalState = dev->Channels[Oa2dpChannelSignaling].Life.State;
+    mediaState = dev->Channels[Oa2dpChannelMedia].Life.State;
     WdfSpinLockRelease(dev->Lock);
     if (!valid) {
+        status = connected ? STATUS_DEVICE_NOT_READY : STATUS_DEVICE_BUSY;
         WdfWaitLockRelease(dev->PublicationLock);
-        return connected ? STATUS_DEVICE_NOT_READY : STATUS_DEVICE_BUSY;
+        TraceLoggingWrite(g_Oa2dpTransportTrace, "ConnectionPublicationRejected",
+            TraceLoggingUInt32(connection, "ConnectionGeneration"),
+            TraceLoggingBool(connected, "Connected"),
+            TraceLoggingUInt32(signalState, "SignalingState"),
+            TraceLoggingUInt32(mediaState, "MediaState"),
+            TraceLoggingNTStatus(status, "Status"));
+        return status;
     }
 
     status = PublishState(dev, connected);
@@ -105,11 +121,22 @@ NTSTATUS Oa2dpPublishConnected(OA2DP_DEVICE_CONTEXT *dev, BOOLEAN connected, ULO
     }
     // Validation and event update share OPEN's lock. A new OPEN can never
     // clear the event immediately before an obsolete FALSE sets it again.
-    if (ConnectionClosed(dev))
+    closed = ConnectionClosed(dev);
+    signalState = dev->Channels[Oa2dpChannelSignaling].Life.State;
+    mediaState = dev->Channels[Oa2dpChannelMedia].Life.State;
+    if (closed)
         KeSetEvent(&dev->DisconnectedEvent, IO_NO_INCREMENT, FALSE);
     else
         KeClearEvent(&dev->DisconnectedEvent);
     WdfSpinLockRelease(dev->Lock);
+    // Preserve publication ordering in ETW, without logging under the spin lock.
+    TraceLoggingWrite(g_Oa2dpTransportTrace, "ConnectionPublicationResult",
+        TraceLoggingUInt32(connection, "ConnectionGeneration"),
+        TraceLoggingBool(connected, "Connected"),
+        TraceLoggingUInt32(signalState, "SignalingState"),
+        TraceLoggingUInt32(mediaState, "MediaState"),
+        TraceLoggingBool(closed, "DisconnectSignalled"),
+        TraceLoggingNTStatus(status, "Status"));
     WdfWaitLockRelease(dev->PublicationLock);
     return status;
 }
@@ -439,6 +466,10 @@ NTSTATUS Oa2dpVolumePreprocess(WDFDEVICE device, PIRP irp)
         } else {
             status = STATUS_INVALID_PARAMETER;
         }
+        TraceLoggingWrite(g_Oa2dpTransportTrace, "BluetoothOneShotResult",
+            TraceLoggingUInt32(property.Id, "Property"),
+            TraceLoggingUInt32(property.Flags, "Verb"),
+            TraceLoggingNTStatus(status, "Status"));
         goto done;
     }
     if (!IsEqualGUID(&property.Set, &VolumeCacheSet) || property.Id != 1) {
@@ -495,6 +526,11 @@ NTSTATUS Oa2dpVolumePreprocess(WDFDEVICE device, PIRP irp)
         status = STATUS_INVALID_DEVICE_REQUEST;
     }
 done:
+    TraceLoggingWrite(g_Oa2dpTransportTrace, "KsControlResult",
+        TraceLoggingUInt32(code, "ControlCode"),
+        TraceLoggingUInt32(inputBytes, "InputBytes"),
+        TraceLoggingUInt32(outputBytes, "OutputBytes"),
+        TraceLoggingNTStatus(status, "Status"));
     irp->IoStatus.Status = status;
     irp->IoStatus.Information = returned;
     IoCompleteRequest(irp, IO_NO_INCREMENT);

@@ -1,6 +1,18 @@
 /* SPDX-License-Identifier: MIT */
 #include "oa2dp.h"
 #include <devpropdef.h>
+#include "trace.h"
+
+TRACELOGGING_DEFINE_PROVIDER(g_Oa2dpTransportTrace, "XM6Audio.Transport",
+    (0xbd2386c3, 0x72bc, 0x4f90, 0x82, 0x92, 0x24, 0x76, 0x26, 0x36, 0x2c, 0xb2));
+
+static EVT_WDF_DRIVER_UNLOAD Oa2dpEvtDriverUnload;
+
+static VOID Oa2dpEvtDriverUnload(WDFDRIVER driver)
+{
+    UNREFERENCED_PARAMETER(driver);
+    TraceLoggingUnregister(g_Oa2dpTransportTrace);
+}
 
 /* Windows resolves an audio endpoint's profile through its own devnode,
  * not just the shared headset container. Keep the render PDO's identity
@@ -24,10 +36,17 @@ static const GUID BluetoothBusType =
 NTSTATUS DriverEntry(_In_ PDRIVER_OBJECT DriverObject, _In_ PUNICODE_STRING RegistryPath)
 {
     WDF_DRIVER_CONFIG config;
+    NTSTATUS status;
     WDF_DRIVER_CONFIG_INIT(&config, Oa2dpEvtDeviceAdd);
     config.DriverPoolTag = OA2DP_POOL_TAG;
-    return WdfDriverCreate(DriverObject, RegistryPath, WDF_NO_OBJECT_ATTRIBUTES, &config,
-                           WDF_NO_HANDLE);
+    config.EvtDriverUnload = Oa2dpEvtDriverUnload;
+    // A failed provider registration must not prevent audio from loading.
+    (void)TraceLoggingRegister(g_Oa2dpTransportTrace);
+    status = WdfDriverCreate(DriverObject, RegistryPath, WDF_NO_OBJECT_ATTRIBUTES, &config,
+                            WDF_NO_HANDLE);
+    // DriverEntry failure does not invoke the framework unload callback.
+    if (!NT_SUCCESS(status)) TraceLoggingUnregister(g_Oa2dpTransportTrace);
+    return status;
 }
 
 NTSTATUS Oa2dpEvtDeviceAdd(_In_ WDFDRIVER Driver, _Inout_ PWDFDEVICE_INIT DeviceInit)
