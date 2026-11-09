@@ -16,6 +16,8 @@ static const GUID VolumeCacheSet =
     {0x401e566b,0xb47e,0x4e34,{0xb0,0xfc,0x94,0x82,0x6e,0x9e,0x2a,0x1a}};
 static const GUID AudioCategory =
     {0x6994ad04,0x93ef,0x11d0,{0xa3,0xcc,0x00,0xa0,0xc9,0x22,0x31,0x96}};
+static const GUID BluetoothAudioSet =
+    {0x7fa06c40,0xb8f6,0x4c7e,{0x85,0x56,0xe8,0xc3,0x3a,0x12,0xe5,0x4d}};
 static const DEVPROPKEY AvdtpConnectedKey =
     {{0x29ce83d4,0x7a82,0x4744,{0xbd,0x1d,0xab,0xec,0x85,0x32,0x1d,0xd6}},2};
 
@@ -49,6 +51,10 @@ static VOID BusSetVolume(PVOID context, LONG db, BOOLEAN muted, BOOLEAN hostWrit
     if (db < OA2DP_VOLUME_MIN_DB) db = OA2DP_VOLUME_MIN_DB;
     if (db > OA2DP_VOLUME_MAX_DB) db = OA2DP_VOLUME_MAX_DB;
     WdfSpinLockAcquire(dev->Lock);
+    // A remote mute acknowledgement must not erase the level needed by a
+    // later Windows unmute. Effective AVRCP cache reads still return silence.
+    if (!hostWrite && muted && db == OA2DP_VOLUME_MIN_DB)
+        db = dev->VolumeDb;
     if (dev->VolumeDb != db || dev->VolumeMuted != muted) {
         dev->VolumeDb = db;
         dev->VolumeMuted = muted;
@@ -255,7 +261,7 @@ NTSTATUS Oa2dpVolumePreprocess(WDFDEVICE device, PIRP irp)
         goto done;
     status = ReadCaller(irp, &property, input, sizeof(property));
     if (!NT_SUCCESS(status)) goto done;
-    if (code == IOCTL_KS_PROPERTY && IsEqualGUID(&property.Set, &KSPROPSETID_BtAudio) &&
+    if (code == IOCTL_KS_PROPERTY && IsEqualGUID(&property.Set, &BluetoothAudioSet) &&
         property.Id <= KSPROPERTY_ONESHOT_DISCONNECT) {
         if (property.Flags == KSPROPERTY_TYPE_BASICSUPPORT) {
             ULONG flags = KSPROPERTY_TYPE_GET | KSPROPERTY_TYPE_BASICSUPPORT;
