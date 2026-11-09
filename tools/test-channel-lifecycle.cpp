@@ -2,8 +2,10 @@
 #include "../driver/common/channel_lifecycle.h"
 #include "../driver/common/mpm_lifecycle.h"
 #include "../driver/common/server_lifecycle.h"
+#include "../driver/common/radio_events.h"
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <vector>
 #define REQUIRE(x) do { if (!(x)) { std::fprintf(stderr, "line %d: %s\n", __LINE__, #x); std::exit(1); } } while (0)
 
@@ -136,6 +138,21 @@ static void server_ownership_failures()
 
 int main()
 {
+    const uint64_t peer = 0x112233445566ULL; // synthetic, never a machine address
+    uint8_t radio_event[12]{};
+    std::memcpy(radio_event + 1, &peer, sizeof(peer)); // deliberately unaligned
+    radio_event[9] = OA2DP_HCI_ACL;
+    radio_event[10] = 1;
+    REQUIRE(!Oa2dpAclConnectHint(nullptr, 10, peer));
+    REQUIRE(!Oa2dpAclConnectHint(radio_event + 1, 9, peer)); // truncated connected field
+    REQUIRE(Oa2dpAclConnectHint(radio_event + 1, 10, peer));
+    REQUIRE(Oa2dpAclConnectHint(radio_event + 1, 11, peer)); // trailing device name allowed
+    REQUIRE(!Oa2dpAclConnectHint(radio_event + 1, 10, peer + 1));
+    radio_event[9] = 0; // SCO must not launch an A2DP reconnect
+    REQUIRE(!Oa2dpAclConnectHint(radio_event + 1, 10, peer));
+    radio_event[9] = OA2DP_HCI_ACL;
+    radio_event[10] = 0;
+    REQUIRE(!Oa2dpAclConnectHint(radio_event + 1, 10, peer)); // old disconnect never tears down a new epoch
     server_ownership_failures();
     OA2DP_MPM_REQUEST request{};
     REQUIRE(!Oa2dpMpmCompletion(&request, 1)); // unsolicited peer connection

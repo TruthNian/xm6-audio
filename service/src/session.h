@@ -43,6 +43,7 @@ private:
         StreamFailed,
         IdleCheck,
         TransportPower,
+        TransportAvailable,
     };
     struct Command {
         Cmd cmd;

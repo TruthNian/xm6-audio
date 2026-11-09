@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(XM6Audio VERSION 0.3.29 LANGUAGES C CXX)
+project(XM6Audio VERSION 0.3.30 LANGUAGES C CXX)
 
 # The loaded binary's version must agree with the configured project and INF.
 # Generate resources in the build tree rather than keeping a stale copy.
@@ -181,7 +181,7 @@ if(OA2DP_BUILD_DRIVERS)
     add_custom_target(xm6_mpm_import DEPENDS "${XM6_MPM_IMPORT}")
     wdk_add_driver(oa2dp KMDF 1.15 WINVER 0x0A00 NTDDI_VERSION 0x0A000008
         driver/oa2dp/driver.c driver/oa2dp/l2cap.c driver/oa2dp/volume.c
-        driver/oa2dp/mpm.c ${XM6_VERSION_RESOURCE})
+        driver/oa2dp/mpm.c driver/oa2dp/link.c ${XM6_VERSION_RESOURCE})
     add_dependencies(oa2dp xm6_mpm_import)
     target_link_libraries(oa2dp "${XM6_MPM_IMPORT}")
 

@@ -1,8 +1,8 @@
-# Native lifecycle review, 0.3.29
+# Native lifecycle review, 0.3.30
 
 This source batch is not a declaration of hardware acceptance. Source review
 and focused offline checks precede another hardware trial. Versions 0.3.23
-through 0.3.29 have not been installed on the host. The host was restored to Microsoft
+through 0.3.30 have not been installed on the host. The host was restored to Microsoft
 BthA2dp; the custom codec service is stopped. Current host audio is not evidence
 of native LDAC. No further installation or reboot is part of this source review.
 
@@ -29,6 +29,7 @@ of native LDAC. No further installation or reboot is part of this source review.
 | Music idles or HFP suspend/resume requests overlap | Encoder stop was equated with profile suspension; cache changed before MPM accepted it, and replies had no request identity | Separate profile availability from idle PCM, echo suspend request serial and link epoch in ABI 10/bus ABI 5, serialize MPM calls, retain failed updates and reject stale replies |
 | Server/PSM allocation or registration/unregistration fails | Setup ignored registration failure; cleanup erased ownership even when no unregister BRB could be allocated | Transactional registration state shared with off-host failure injection; retain each resource until confirmed release, gate admission through prepare and finish old ownership before a new registration |
 | Repeated PrepareHardware on the same device object | Each query acquired another Bluetooth interface reference and overwrote the previous import; no matching dereference existed | Import the BRB allocation interface once per WDFDEVICE and release it during final device destruction |
+| Headset establishes ACL after an unsuccessful page | The service waited for its periodic connection retry even though Windows had a fresh link notification | Subscribe to public target-device HCI notifications; accelerate the existing session's retry with peer-initiator grace, preserving explicit disconnect and actual channel ownership |
 
 Channel close work is preallocated rather than allocated in a disconnect
 indication. Allocation failure can no longer fabricate a completed remote
@@ -127,6 +128,29 @@ audio/video timing. They cannot prove those properties without hardware use.
 
 ## Outstanding acceptance
 
+ACL arrival notifications use the public BRB_GET_DEVICE_INTERFACE_STRING and
+IoRegisterPlugPlayNotification contracts, not another private MPM registration
+or a new runtime process. The bounded radio path is queried in two stages,
+validated, and terminated before IoGetDeviceObjectPointer. Notification parsing
+accepts only a sufficiently sized HCI ACL-connect event for this peer. The
+production byte parser is tested with truncated, unaligned, foreign-peer, SCO,
+disconnect and trailing-name payloads. Kernel C assertions check the documented
+field offsets against the WDK type.
+
+An ACL hint only shortens a future retry deadline, allowing the existing 1.5s
+peer-initiator window and never postponing an already-due explicit connect.
+It cannot mark a channel connected, tear down a healthy replacement or override
+user disconnect. Duplicate hints coalesce and cannot overflow the authoritative
+channel event backlog. Actual L2CAP completions still own the connection state.
+
+Registration is performed after initial D0 entry and retried once if missing
+on resume. Its actual capability is reported by DEVICE_INFO flags. Failure
+leaves the existing protocol retry available and is logged. Unregister uses
+IoUnregisterPlugPlayNotificationEx outside the driver spin lock, before final
+device teardown, so callbacks finish before context release. Permanent removal,
+radio notification delivery and physical reconnect still need hardware use;
+parser/build tests cannot establish those properties or the Settings labels.
+
 The Bluetooth allocation-interface reference now belongs to the device object,
 not a prepare/stop cycle. Rebalance does not overwrite the imported function
 table while a delayed BRB completion may still free its BRB. The device destroy
@@ -179,3 +203,7 @@ and [PSM registration](https://learn.microsoft.com/en-us/windows-hardware/driver
 Interface lifetime: [BTH profile interface](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/bthddi/ns-bthddi-_bth_profile_driver_interface),
 [INTERFACE reference contract](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/wdm/ns-wdm-_interface),
 and [WDF destroy callback](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/wdfobject/nc-wdfobject-evt_wdf_object_context_destroy).
+Radio events: [device interface string BRB](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/bthddi/ns-bthddi-_brb_get_device_interface_string),
+[Bluetooth event payloads](https://learn.microsoft.com/en-us/windows/win32/bluetooth/bluetooth-and-wm-devicechange-messages),
+[HCI event fields](https://learn.microsoft.com/en-us/windows/win32/api/bthdef/ns-bthdef-bth_hci_event_info),
+and [synchronous notification removal](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/wdm/nf-wdm-iounregisterplugplaynotificationex).

@@ -47,6 +47,7 @@ NTSTATUS Oa2dpEvtDeviceAdd(_In_ WDFDRIVER Driver, _Inout_ PWDFDEVICE_INIT Device
     pnp.EvtDeviceReleaseHardware = Oa2dpEvtReleaseHardware;
     pnp.EvtDeviceSelfManagedIoSuspend = Oa2dpEvtIoSuspend;
     pnp.EvtDeviceSelfManagedIoInit = Oa2dpEvtIoInit;
+    pnp.EvtDeviceSelfManagedIoCleanup = Oa2dpEvtIoCleanup;
     pnp.EvtDeviceSelfManagedIoRestart = Oa2dpEvtIoRestart;
     pnp.EvtDeviceSurpriseRemoval = Oa2dpEvtSurpriseRemoval;
     WdfDeviceInitSetPnpPowerEventCallbacks(DeviceInit, &pnp);
@@ -206,8 +207,21 @@ NTSTATUS Oa2dpEvtPrepareHardware(_In_ WDFDEVICE Device, _In_ WDFCMRESLIST Raw,
  * Keep policy and the render PDO: sleep is neither user disconnect nor remove. */
 NTSTATUS Oa2dpEvtIoInit(WDFDEVICE Device)
 {
-    UNREFERENCED_PARAMETER(Device);
-    return STATUS_SUCCESS; // PrepareHardware established the initial lifetime.
+    NTSTATUS status = Oa2dpRegisterLinkNotifications(Oa2dpGetDevice(Device));
+    if (!NT_SUCCESS(status))
+        KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_WARNING_LEVEL,
+            "oa2dp: ACL arrival notifications unavailable 0x%08X\n", status));
+    // Notification acceleration is optional; the existing session's bounded
+    // connection retry still works when a radio lacks the notification path.
+    return STATUS_SUCCESS;
+}
+
+VOID Oa2dpEvtIoCleanup(WDFDEVICE Device)
+{
+    NTSTATUS status = Oa2dpUnregisterLinkNotifications(Oa2dpGetDevice(Device));
+    if (!NT_SUCCESS(status))
+        KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL,
+            "oa2dp: final ACL notification cleanup failed 0x%08X\n", status));
 }
 
 NTSTATUS Oa2dpEvtIoSuspend(WDFDEVICE Device)
@@ -261,6 +275,7 @@ NTSTATUS Oa2dpEvtIoRestart(WDFDEVICE Device)
     Oa2dpQueueEventLocked(dev, Oa2dpEventPowerChanged, NULL, 0);
     WdfSpinLockRelease(dev->Lock);
     Oa2dpDeliverEvents(dev);
+    (void)Oa2dpEvtIoInit(Device); // retry a missing notification registration once on resume
     return STATUS_SUCCESS;
 }
 
@@ -283,7 +298,9 @@ NTSTATUS Oa2dpEvtReleaseHardware(_In_ WDFDEVICE Device, _In_ WDFCMRESLIST Transl
     WdfSpinLockAcquire(dev->Lock);
     dev->TransportStopping = TRUE;
     WdfSpinLockRelease(dev->Lock);
-    NTSTATUS status = Oa2dpUnregisterServer(dev);
+    NTSTATUS status = Oa2dpUnregisterLinkNotifications(dev);
+    NTSTATUS serverStatus = Oa2dpUnregisterServer(dev);
+    if (NT_SUCCESS(status) && !NT_SUCCESS(serverStatus)) status = serverStatus;
     Oa2dpCloseAllChannels(dev);
     for (ULONG i = 0; i < Oa2dpChannelCount; ++i)
         WdfWorkItemFlush(dev->Channels[i].CloseWork);
@@ -381,6 +398,14 @@ VOID Oa2dpQueueEventLocked(OA2DP_DEVICE_CONTEXT *dev, ULONG type,
     if (type == Oa2dpEventDeviceGone) {
         dev->EventHead = dev->EventCount = 0;
         dev->EventOverflow = FALSE;
+    }
+    if (type == Oa2dpEventLinkAvailable) {
+        // Reconnect hints must not overflow the authoritative channel backlog.
+        // Coalesce them; an omitted hint still has the existing timed retry.
+        if (dev->EventOverflow || dev->EventCount == OA2DP_EVENT_CAPACITY) return;
+        for (ULONG i = 0; i < dev->EventCount; ++i)
+            if (dev->Events[(dev->EventHead + i) % OA2DP_EVENT_CAPACITY].Type == type)
+                return;
     }
     if (!dev->EventOverflow) {
         if (dev->EventCount == OA2DP_EVENT_CAPACITY) {
@@ -534,6 +559,8 @@ VOID Oa2dpEvtIoDeviceControl(_In_ WDFQUEUE Queue, _In_ WDFREQUEST Request,
             WdfSpinLockAcquire(dev->Lock);
             if (dev->MpmHandle && !dev->MpmStopping) out->Flags |= OA2DP_DEVICE_MPM_REGISTERED;
             if (dev->PowerSuspended) out->Flags |= OA2DP_DEVICE_SUSPENDED;
+            if (dev->LinkNotifications && !dev->LinkNotificationsStopping)
+                out->Flags |= OA2DP_DEVICE_LINK_NOTIFICATIONS;
             out->PowerSerial = dev->PowerSerial;
             WdfSpinLockRelease(dev->Lock);
             out->RemoteAddress = dev->RemoteAddress;

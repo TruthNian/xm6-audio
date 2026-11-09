@@ -16,7 +16,7 @@
 namespace oa2dp {
 namespace {
 
-constexpr DWORD kPeerConfigGraceMs = 1500;  // let the headset configure us first
+constexpr DWORD kPeerInitiatorGraceMs = 1500; // let the headset initiate signalling/configuration first
 constexpr DWORD kIdleSuspendMs = 3000;      // SUSPEND after this much silence
 constexpr DWORD kReconnectPollMs = 5000;
 constexpr uint32_t kAbrHighWater = 6;       // queued media packets
@@ -136,6 +136,9 @@ void Session::event_loop()
             break;
         case Oa2dpEventPowerChanged:
             c.cmd = Cmd::TransportPower;
+            break;
+        case Oa2dpEventLinkAvailable:
+            c.cmd = Cmd::TransportAvailable;
             break;
         default:
             continue;
@@ -622,7 +625,7 @@ void Session::handle(const Command &c)
         av_.out_mtu = sig_mtu_ < 48 ? 48 : sig_mtu_;
         sig_open_ = true;
         rx_failed_ = false;
-        init_deadline_ = GetTickCount() + kPeerConfigGraceMs;
+        init_deadline_ = GetTickCount() + kPeerInitiatorGraceMs;
         LOGI("headset opened signalling");
         break;
     case Cmd::MediaOpenedByPeer:
@@ -723,6 +726,17 @@ void Session::handle(const Command &c)
     case Cmd::TransportPower:
         refresh_transport_power();
         break;
+    case Cmd::TransportAvailable: {
+        // A delayed radio event is a retry hint, not authority to mutate a
+        // healthy replacement connection or override explicit disconnect.
+        if (!transport_suspended_ && connection_enabled_ && !sig_open_) {
+            // Let an incoming AVDTP channel win before creating a competing
+            // outgoing channel. Never postpone an already-due explicit connect.
+            const DWORD earlier = GetTickCount() + kPeerInitiatorGraceMs;
+            if (is_after(next_reconnect_, earlier)) next_reconnect_ = earlier;
+        }
+        break;
+    }
     }
 }
 
@@ -827,7 +841,7 @@ void Session::main_loop()
             is_after(GetTickCount(), next_reconnect_)) {
             next_reconnect_ = GetTickCount() + kReconnectPollMs;
             if (connect_signaling())
-                init_deadline_ = GetTickCount() + kPeerConfigGraceMs;
+                init_deadline_ = GetTickCount() + kPeerInitiatorGraceMs;
         }
         if (!transport_suspended_ && !teardown_pending_ && sig_open_ && init_deadline_ && !local_seid_ && is_after(GetTickCount(), init_deadline_)) {
             init_deadline_ = 0;

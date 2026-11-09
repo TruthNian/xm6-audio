@@ -37,6 +37,7 @@ DEFINE_GUID(GUID_OA2DP_BUS_INTERFACE, 0x955e5e3d, 0xc70c, 0x4024, 0x99, 0xdb, 0x
 #define IOCTL_OA2DP_GET_TX_STATE  OA2DP_CTL(6, METHOD_BUFFERED)
 #define OA2DP_DEVICE_MPM_REGISTERED 0x00000001UL
 #define OA2DP_DEVICE_SUSPENDED      0x00000002UL
+#define OA2DP_DEVICE_LINK_NOTIFICATIONS 0x00000004UL
 
 typedef enum _OA2DP_CHANNEL_KIND {
     Oa2dpChannelSignaling = 0,
@@ -91,6 +92,7 @@ typedef enum _OA2DP_EVENT_TYPE {
     Oa2dpEventDeviceGone = 3,
     Oa2dpEventStateLost = 4,     /* event backlog overflow: reconnect, never guess state */
     Oa2dpEventPowerChanged = 5,  /* query GET_INFO; queued old events must not restore old power state */
+    Oa2dpEventLinkAvailable = 6, /* ACL arrival hint; not authority to close or mark a channel open */
 } OA2DP_EVENT_TYPE;
 
 typedef struct _OA2DP_EVENT {

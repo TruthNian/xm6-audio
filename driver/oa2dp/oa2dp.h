@@ -53,6 +53,8 @@ struct _OA2DP_DEVICE_CONTEXT {
     WDFIOTARGET IoTarget;
     BTH_PROFILE_DRIVER_INTERFACE Profile;
     BOOLEAN ProfileAcquired; /* one imported reference for this WDFDEVICE lifetime */
+    PVOID LinkNotifications;
+    BOOLEAN LinkNotificationsStopping;
     BTH_ADDR LocalAddress;
     BTH_ADDR RemoteAddress;
 
@@ -143,6 +145,7 @@ EVT_WDF_DEVICE_RELEASE_HARDWARE Oa2dpEvtReleaseHardware;
 EVT_WDF_DEVICE_CONTEXT_DESTROY Oa2dpEvtDeviceDestroy;
 EVT_WDF_DEVICE_SELF_MANAGED_IO_SUSPEND Oa2dpEvtIoSuspend;
 EVT_WDF_DEVICE_SELF_MANAGED_IO_INIT Oa2dpEvtIoInit;
+EVT_WDF_DEVICE_SELF_MANAGED_IO_CLEANUP Oa2dpEvtIoCleanup;
 EVT_WDF_DEVICE_SELF_MANAGED_IO_RESTART Oa2dpEvtIoRestart;
 EVT_WDF_DEVICE_SURPRISE_REMOVAL Oa2dpEvtSurpriseRemoval;
 EVT_WDF_FILE_CLEANUP Oa2dpEvtFileCleanup;
@@ -167,6 +170,8 @@ VOID Oa2dpTransfer(_In_ OA2DP_DEVICE_CONTEXT *dev, _In_ WDFREQUEST request,
                    _In_ const OA2DP_SEND_IN *in, _In_ BOOLEAN send);
 
 /* driver.c */
+NTSTATUS Oa2dpRegisterLinkNotifications(OA2DP_DEVICE_CONTEXT *dev);
+NTSTATUS Oa2dpUnregisterLinkNotifications(OA2DP_DEVICE_CONTEXT *dev);
 VOID Oa2dpPostEvent(_In_ OA2DP_DEVICE_CONTEXT *dev, _In_ ULONG type,
                    _In_opt_ OA2DP_CHANNEL *ch, ULONG generation);
 VOID Oa2dpQueueEventLocked(OA2DP_DEVICE_CONTEXT *dev, ULONG type,
