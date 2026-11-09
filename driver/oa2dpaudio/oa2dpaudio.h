@@ -137,7 +137,7 @@ VOID Oa2dpUnlock(_Inout_ PKEVENT lock);
 /* Tell the audio engine that the supported formats changed. */
 VOID Oa2dpWaveFormatsChanged(_Inout_ OA2DP_AUDIO_DEVICE *dev);
 NTSTATUS Oa2dpSetConnected(_Inout_ OA2DP_AUDIO_DEVICE *dev, _In_ BOOLEAN connected,
-                          ULONG connection = 0);
+                          ULONG connection);
 NTSTATUS Oa2dpApplyPolicy(_Inout_ OA2DP_AUDIO_DEVICE *dev, _In_ BOOLEAN enabled,
                          _In_ BOOLEAN suspended);
 

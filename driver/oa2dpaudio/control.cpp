@@ -417,7 +417,7 @@ extern "C" VOID Oa2dpControlStop(_Inout_ OA2DP_AUDIO_DEVICE *dev)
     dev->EventPending = FALSE;
     KeReleaseSpinLock(&dev->Lock, irql);
     Oa2dpRingSetRunning(&dev->Ring, FALSE);
-    Oa2dpSetConnected(dev, FALSE);
+    Oa2dpSetConnected(dev, FALSE, 0);
     if (dev->ControlLink.Buffer)
         (void)IoSetDeviceInterfaceState(&dev->ControlLink, FALSE);
     FailWaits(dev, NULL, STATUS_DELETE_PENDING);
@@ -535,7 +535,7 @@ static VOID ControlCleanup(_Inout_ OA2DP_AUDIO_DEVICE *dev, _In_ PFILE_OBJECT fo
     }
     Oa2dpUnlock(&dev->ControlLock);
     if (closed)
-        Oa2dpSetConnected(dev, FALSE);
+        Oa2dpSetConnected(dev, FALSE, 0);
 }
 
 static NTSTATUS SetFormats(_Inout_ OA2DP_AUDIO_DEVICE *dev, _In_ const OA2DP_FORMAT_LIST *in)
