@@ -66,6 +66,10 @@ The service previously published disconnected before closing the media and signa
 
 The existing PortCls filters, audio handle and PCM ring remain in place during Bluetooth-only reconnects. This does not install application hooks, restart players, capture their output, or add a recovery watchdog. Acceptance requires Windows settings to complete disconnect/reconnect correctly and existing application processes to produce audio through the same endpoint afterward. Build results and direct diagnostic reconnects alone do not meet that acceptance condition.
 
+## Build identification in 0.3.18
+
+The earlier resource file retained a manual 0.3.16 version while the 0.3.17 project and INF had advanced. Binary resources now derive from the configured CMake project version. Packaging rejects a project/INF/binary-version mismatch. During local acceptance, compare the actual loaded module's DriverStore path and hash with the signed candidate; neither the configured service path nor the version label alone establishes which image is running. No playback behavior is changed by this build-identification correction.
+
 ## Earlier investigation, before 0.3.12
 
 - The KMDF transport and PortCls/WaveRT child load and enumerate through the Windows Bluetooth stack. Windows retains the radio, pairing and AVRCP profiles.

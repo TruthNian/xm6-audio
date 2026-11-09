@@ -9,6 +9,11 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $repo = Split-Path $PSScriptRoot -Parent
 $build = (Resolve-Path -LiteralPath $BuildDirectory).Path
+$versionMatch = [regex]::Match([IO.File]::ReadAllText((Join-Path $build 'CMakeCache.txt')),
+    '(?m)^CMAKE_PROJECT_VERSION:STATIC=([0-9]+\.[0-9]+\.[0-9]+)\s*$')
+if (-not $versionMatch.Success) { throw 'Configured project version is missing.' }
+$version = $versionMatch.Groups[1].Value
+$fileVersion = $version + '.0'
 $output = [IO.Path]::GetFullPath($OutputDirectory)
 if (Test-Path -LiteralPath $output) { throw 'Use a new, empty output directory.' }
 New-Item -ItemType Directory -Path $output | Out-Null
@@ -25,6 +30,12 @@ foreach ($driver in @('oa2dp','oa2dpaudio')) {
     Copy-Item -LiteralPath "$repo\driver\$driver\$driver.inf" -Destination $dst
     foreach ($ext in @('sys','pdb')) {
         Copy-Item -LiteralPath "$build\Release\$driver.$ext" -Destination $dst
+    }
+    $infText = [IO.File]::ReadAllText("$dst\$driver.inf")
+    $infVersion = [regex]::Match($infText, '(?mi)^DriverVer\s*=\s*[^,\r\n]+,\s*([0-9.]+)\s*$')
+    if ($infVersion.Groups[1].Value -ne $fileVersion -or
+        (Get-Item -LiteralPath "$dst\$driver.sys").VersionInfo.FileVersion -ne $fileVersion) {
+        throw "Project, INF and binary versions must agree for $driver ($fileVersion)."
     }
     if ($driver -eq 'oa2dp') {
         foreach ($file in @('oa2dpsvc.exe','oa2dpctl.exe','ldac.dll','sbc.dll')) {
@@ -53,7 +64,7 @@ Get-ChildItem -LiteralPath $output -Recurse -File | ForEach-Object {
     $files[$relative] = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
 }
 $manifest = [ordered]@{
-    project = 'XM6 Audio'; version = '0.3.17'; architecture = 'x64'
+    project = 'XM6 Audio'; version = $version; architecture = 'x64'
     commit = (& git -C $repo rev-parse HEAD)
     upstream = 'RafiMota/open-a2dp@167ebc0e2c89fec570eec535fefdade72bd9e416'
     libldac = (& git -C "$repo\third_party\libldac" rev-parse HEAD)

@@ -1,5 +1,10 @@
 cmake_minimum_required(VERSION 3.21)
-project(XM6Audio VERSION 0.3.17 LANGUAGES C CXX)
+project(XM6Audio VERSION 0.3.18 LANGUAGES C CXX)
+
+# The loaded binary's version must agree with the configured project and INF.
+# Generate resources in the build tree rather than keeping a stale copy.
+configure_file(native-version.rc.in native-version.rc @ONLY)
+set(XM6_VERSION_RESOURCE "${CMAKE_CURRENT_BINARY_DIR}/native-version.rc")
 
 set(CMAKE_C_STANDARD 99)
 set(CMAKE_CXX_STANDARD 17)
@@ -113,7 +118,7 @@ endif()
 
 # --- service ----------------------------------------------------------------
 add_executable(oa2dpsvc
-    native-version.rc
+    ${XM6_VERSION_RESOURCE}
     service/src/main.cpp service/src/session.cpp service/src/driver_io.cpp
     service/src/settings_store.cpp service/src/log.cpp)
 target_include_directories(oa2dpsvc PRIVATE driver/common)
@@ -126,7 +131,7 @@ target_include_directories(oa2dp_manage PUBLIC tools/common)
 target_compile_definitions(oa2dp_manage PUBLIC UNICODE _UNICODE)
 target_link_libraries(oa2dp_manage PUBLIC oa2dp_core setupapi bthprops advapi32)
 
-add_executable(oa2dpctl tools/oa2dpctl/oa2dpctl.cpp native-version.rc)
+add_executable(oa2dpctl tools/oa2dpctl/oa2dpctl.cpp ${XM6_VERSION_RESOURCE})
 target_link_libraries(oa2dpctl PRIVATE oa2dp_manage)
 
 if(XM6_BUILD_GUI)
@@ -161,12 +166,12 @@ if(OA2DP_BUILD_DRIVERS)
     list(APPEND CMAKE_MODULE_PATH ${OA2DP_THIRD_PARTY}/FindWDK/cmake)
     find_package(WDK REQUIRED)
     wdk_add_driver(oa2dp KMDF 1.15 WINVER 0x0A00 NTDDI_VERSION 0x0A000008
-        driver/oa2dp/driver.c driver/oa2dp/l2cap.c driver/oa2dp/volume.c native-version.rc)
+        driver/oa2dp/driver.c driver/oa2dp/l2cap.c driver/oa2dp/volume.c ${XM6_VERSION_RESOURCE})
 
     # Virtual render endpoint: PortCls/WaveRT, derived from SYSVAD (MS-PL).
     # NTDDI 10.0.19041 for ExAllocatePool2; matches the INF decoration.
     wdk_add_driver(oa2dpaudio WINVER 0x0A00 NTDDI_VERSION 0x0A000008
-        native-version.rc
+        ${XM6_VERSION_RESOURCE}
         driver/oa2dpaudio/adapter.cpp
         driver/oa2dpaudio/control.cpp
         driver/oa2dpaudio/minwavert.cpp
