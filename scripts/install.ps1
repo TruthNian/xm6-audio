@@ -10,9 +10,12 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $address = ($DeviceAddress -replace '[:-]','').ToUpperInvariant()
+$script:RestartRequired = $false
 function Invoke-Checked([string]$File,[string[]]$Arguments) {
     & $File @Arguments
-    if ($LASTEXITCODE -notin @(0,3010)) { throw "$File failed ($LASTEXITCODE)." }
+    $result = $LASTEXITCODE
+    if ($result -notin @(0,3010)) { throw "$File failed ($result)." }
+    if ($result -eq 3010) { $script:RestartRequired = $true }
 }
 function Assert-Administrator {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -136,4 +139,8 @@ try {
     }
     throw $failure
 }
-Write-Host 'Native driver package installed. Windows manages device-triggered codec service startup. Hardware acceptance is still required.'
+if ($script:RestartRequired) {
+    Write-Host 'Native package installed; a Windows restart is required to activate the update. Do not treat the staged drivers as running. Hardware acceptance remains pending.'
+    exit 3010
+}
+Write-Host 'Native driver package installed without a requested restart. Windows manages device-triggered codec service startup. Hardware acceptance is still required.'

@@ -70,6 +70,8 @@ The existing PortCls filters, audio handle and PCM ring remain in place during B
 
 The earlier resource file retained a manual 0.3.16 version while the 0.3.17 project and INF had advanced. Binary resources now derive from the configured CMake project version. Packaging rejects a project/INF/binary-version mismatch. During local acceptance, compare the actual loaded module's DriverStore path and hash with the signed candidate; neither the configured service path nor the version label alone establishes which image is running. No playback behavior is changed by this build-identification correction.
 
+The CLI and installer also propagate Windows' restart-required result (3010). A pending driver selection no longer prints that the headset already uses the replacement. The installer reports activation pending when either transport selection or audio-driver installation requests a restart; it does not reboot the machine itself. This reporting correction does not establish that a driver is active or passes hardware acceptance.
+
 ## Earlier investigation, before 0.3.12
 
 - The KMDF transport and PortCls/WaveRT child load and enumerate through the Windows Bluetooth stack. Windows retains the radio, pairing and AVRCP profiles.

@@ -22,17 +22,19 @@ using namespace oa2dp::manage;
 
 namespace {
 
-bool switch_driver(HDEVINFO set, SP_DEVINFO_DATA &dev, bool ours)
+int switch_driver(HDEVINFO set, SP_DEVINFO_DATA &dev, bool ours)
 {
     std::wstring err;
     bool reboot = false;
     if (!install_driver(set, dev, ours, &err, &reboot)) {
         fwprintf(stderr, L"%ls\n", err.c_str());
-        return false;
+        return 1;
     }
-    if (reboot)
+    if (reboot) {
         wprintf(L"A restart is required to finish.\n");
-    return true;
+        return ERROR_SUCCESS_REBOOT_REQUIRED;
+    }
+    return ERROR_SUCCESS;
 }
 
 bool report(LSTATUS st)
@@ -129,9 +131,15 @@ int wmain(int argc, wchar_t **argv)
     }
     if (cmd == L"restore" && argc >= 3 && std::wstring(argv[2]) == L"all") {
         int rc = 0;
-        for (auto &h : devs.items)
-            if (h.ours() && !switch_driver(devs.set(), h.dev, false))
+        for (auto &h : devs.items) {
+            if (!h.ours())
+                continue;
+            const int result = switch_driver(devs.set(), h.dev, false);
+            if (result == 1)
                 rc = 1;
+            else if (result == ERROR_SUCCESS_REBOOT_REQUIRED && rc == 0)
+                rc = result;
+        }
         return rc;
     }
     if (argc < 3) {
@@ -146,8 +154,14 @@ int wmain(int argc, wchar_t **argv)
 
     if (cmd == L"use" || cmd == L"restore") {
         bool ours = cmd == L"use";
-        if (!switch_driver(devs.set(), h->dev, ours))
+        const int result = switch_driver(devs.set(), h->dev, ours);
+        if (result == 1)
             return 1;
+        if (result == ERROR_SUCCESS_REBOOT_REQUIRED) {
+            wprintf(L"%ls: %ls driver selected; activation is pending a Windows restart.\n",
+                    h->name.c_str(), ours ? L"XM6 Audio" : L"Windows");
+            return result;
+        }
         wprintf(L"%ls now uses the %ls driver.\n", h->name.c_str(), ours ? L"XM6 Audio" : L"Windows");
         return 0;
     }
