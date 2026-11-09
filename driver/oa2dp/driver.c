@@ -45,6 +45,10 @@ NTSTATUS Oa2dpEvtDeviceAdd(_In_ WDFDRIVER Driver, _Inout_ PWDFDEVICE_INIT Device
     WDF_PNPPOWER_EVENT_CALLBACKS_INIT(&pnp);
     pnp.EvtDevicePrepareHardware = Oa2dpEvtPrepareHardware;
     pnp.EvtDeviceReleaseHardware = Oa2dpEvtReleaseHardware;
+    pnp.EvtDeviceSelfManagedIoSuspend = Oa2dpEvtIoSuspend;
+    pnp.EvtDeviceSelfManagedIoInit = Oa2dpEvtIoInit;
+    pnp.EvtDeviceSelfManagedIoRestart = Oa2dpEvtIoRestart;
+    pnp.EvtDeviceSurpriseRemoval = Oa2dpEvtSurpriseRemoval;
     WdfDeviceInitSetPnpPowerEventCallbacks(DeviceInit, &pnp);
     WDF_FILEOBJECT_CONFIG_INIT(&files, Oa2dpEvtFileCreate, WDF_NO_EVENT_CALLBACK,
                                Oa2dpEvtFileCleanup);
@@ -84,6 +88,7 @@ NTSTATUS Oa2dpEvtDeviceAdd(_In_ WDFDRIVER Driver, _Inout_ PWDFDEVICE_INIT Device
     }
     InitializeListHead(&dev->VolumeFiles);
     KeInitializeEvent(&dev->DisconnectedEvent, NotificationEvent, TRUE);
+    KeInitializeEvent(&dev->ResponsesIdle, NotificationEvent, TRUE);
     dev->VolumeDb = -30L * 65536L;
     for (ULONG i = 0; i < Oa2dpChannelCount; i++) {
         dev->Channels[i].Dev = dev;
@@ -102,8 +107,11 @@ NTSTATUS Oa2dpEvtDeviceAdd(_In_ WDFDRIVER Driver, _Inout_ PWDFDEVICE_INIT Device
     if (!NT_SUCCESS(status))
         return status;
 
-    /* PASSIVE_LEVEL dispatch: CLOSE_CHANNEL submits BRBs synchronously. */
+    /* Control/event queues stay available while self-managed transport I/O is
+     * suspended. A long idle RECV/WAIT_EVENT must not pin a power-managed queue
+     * in D0. The self-managed callbacks close/gate the actual Bluetooth I/O. */
     WDF_IO_QUEUE_CONFIG_INIT_DEFAULT_QUEUE(&qcfg, WdfIoQueueDispatchParallel);
+    qcfg.PowerManaged = WdfFalse;
     qcfg.EvtIoDeviceControl = Oa2dpEvtIoDeviceControl;
     WDF_OBJECT_ATTRIBUTES_INIT(&attrs);
     attrs.ExecutionLevel = WdfExecutionLevelPassive;
@@ -112,6 +120,7 @@ NTSTATUS Oa2dpEvtDeviceAdd(_In_ WDFDRIVER Driver, _Inout_ PWDFDEVICE_INIT Device
         return status;
 
     WDF_IO_QUEUE_CONFIG_INIT(&qcfg, WdfIoQueueDispatchManual);
+    qcfg.PowerManaged = WdfFalse;
     status = WdfIoQueueCreate(device, &qcfg, WDF_NO_OBJECT_ATTRIBUTES, &dev->EventQueue);
     if (!NT_SUCCESS(status))
         return status;
@@ -150,7 +159,12 @@ NTSTATUS Oa2dpEvtPrepareHardware(_In_ WDFDEVICE Device, _In_ WDFCMRESLIST Raw,
     WdfSpinLockRelease(dev->Lock);
     Oa2dpPublishConnected(dev, FALSE, 0);
 
+    WdfSpinLockAcquire(dev->Lock);
     dev->TransportStopping = FALSE;
+    dev->PowerSuspended = FALSE;
+    dev->PowerQuiesced = FALSE;
+    dev->SurpriseRemoved = FALSE;
+    WdfSpinLockRelease(dev->Lock);
     status = Oa2dpMpmStart(dev);
     if (!NT_SUCCESS(status))
         return status;
@@ -162,6 +176,80 @@ NTSTATUS Oa2dpEvtPrepareHardware(_In_ WDFDEVICE Device, _In_ WDFCMRESLIST Raw,
         Oa2dpUnregisterServer(dev);
     }
     return status;
+}
+
+/* Self-managed suspend runs before WDF stops power-managed queues/D0 exit.
+ * On ordinary sleep the lower stack is still usable for bounded teardown.
+ * Keep policy and the render PDO: sleep is neither user disconnect nor remove. */
+NTSTATUS Oa2dpEvtIoInit(WDFDEVICE Device)
+{
+    UNREFERENCED_PARAMETER(Device);
+    return STATUS_SUCCESS; // PrepareHardware established the initial lifetime.
+}
+
+NTSTATUS Oa2dpEvtIoSuspend(WDFDEVICE Device)
+{
+    OA2DP_DEVICE_CONTEXT *dev = Oa2dpGetDevice(Device);
+    BOOLEAN removed;
+    WdfSpinLockAcquire(dev->Lock);
+    dev->TransportStopping = TRUE;
+    dev->PowerSuspended = TRUE;
+    if (++dev->PowerSerial == 0) ++dev->PowerSerial;
+    removed = dev->SurpriseRemoved;
+    Oa2dpQueueEventLocked(dev, removed ? Oa2dpEventDeviceGone : Oa2dpEventPowerChanged, NULL, 0);
+    WdfSpinLockRelease(dev->Lock);
+    Oa2dpDeliverEvents(dev);
+    if (!removed) {
+        Oa2dpCloseAllChannels(dev);
+        for (ULONG i = 0; i < Oa2dpChannelCount; ++i)
+            WdfWorkItemFlush(dev->Channels[i].CloseWork);
+        NTSTATUS status = Oa2dpPublishConnected(dev, FALSE, 0);
+        if (!NT_SUCCESS(status))
+            KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_WARNING_LEVEL,
+                "oa2dp: suspend teardown remains incomplete 0x%08X\n", status));
+    }
+    // A racing control close/worker must also leave its BRB submission before
+    // D0 exit. Gate later cleanup IOCTLs while the lower stack is unavailable.
+    (void)KeWaitForSingleObject(&dev->ResponsesIdle, Executive, KernelMode, FALSE, NULL);
+    WdfWaitLockAcquire(dev->Channels[Oa2dpChannelMedia].CloseLock, NULL);
+    WdfWaitLockAcquire(dev->Channels[Oa2dpChannelSignaling].CloseLock, NULL);
+    WdfSpinLockAcquire(dev->Lock);
+    dev->PowerQuiesced = TRUE;
+    WdfSpinLockRelease(dev->Lock);
+    WdfWaitLockRelease(dev->Channels[Oa2dpChannelSignaling].CloseLock);
+    WdfWaitLockRelease(dev->Channels[Oa2dpChannelMedia].CloseLock);
+    // Failed CLOSE retains its owner for retry after resume. Admission is
+    // already gated; do not remove the whole device for a transient close error.
+    return STATUS_SUCCESS;
+}
+
+NTSTATUS Oa2dpEvtIoRestart(WDFDEVICE Device)
+{
+    OA2DP_DEVICE_CONTEXT *dev = Oa2dpGetDevice(Device);
+    WdfSpinLockAcquire(dev->Lock);
+    if (dev->SurpriseRemoved) {
+        WdfSpinLockRelease(dev->Lock);
+        return STATUS_DELETE_PENDING;
+    }
+    dev->PowerSuspended = FALSE;
+    dev->PowerQuiesced = FALSE;
+    dev->TransportStopping = FALSE;
+    if (++dev->PowerSerial == 0) ++dev->PowerSerial;
+    Oa2dpQueueEventLocked(dev, Oa2dpEventPowerChanged, NULL, 0);
+    WdfSpinLockRelease(dev->Lock);
+    Oa2dpDeliverEvents(dev);
+    return STATUS_SUCCESS;
+}
+
+VOID Oa2dpEvtSurpriseRemoval(WDFDEVICE Device)
+{
+    OA2DP_DEVICE_CONTEXT *dev = Oa2dpGetDevice(Device);
+    WdfSpinLockAcquire(dev->Lock);
+    dev->SurpriseRemoved = TRUE;
+    dev->TransportStopping = TRUE;
+    Oa2dpQueueEventLocked(dev, Oa2dpEventDeviceGone, NULL, 0);
+    WdfSpinLockRelease(dev->Lock);
+    Oa2dpDeliverEvents(dev);
 }
 
 NTSTATUS Oa2dpEvtReleaseHardware(_In_ WDFDEVICE Device, _In_ WDFCMRESLIST Translated)
@@ -405,7 +493,11 @@ VOID Oa2dpEvtIoDeviceControl(_In_ WDFQUEUE Queue, _In_ WDFREQUEST Request,
         if (NT_SUCCESS(status)) {
             RtlZeroMemory(out, sizeof(*out));
             out->Version = OA2DP_IOCTL_VERSION;
+            WdfSpinLockAcquire(dev->Lock);
             if (dev->MpmHandle) out->Flags |= OA2DP_DEVICE_MPM_REGISTERED;
+            if (dev->PowerSuspended) out->Flags |= OA2DP_DEVICE_SUSPENDED;
+            out->PowerSerial = dev->PowerSerial;
+            WdfSpinLockRelease(dev->Lock);
             out->RemoteAddress = dev->RemoteAddress;
             out->LocalAddress = dev->LocalAddress;
             info = sizeof(*out);

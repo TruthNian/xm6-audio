@@ -1,8 +1,8 @@
-# Native lifecycle review, 0.3.25
+# Native lifecycle review, 0.3.26
 
 This source batch is not a declaration of hardware acceptance. Source review
-and focused offline checks precede another hardware trial. Versions 0.3.23,
-0.3.24 and 0.3.25 have not been installed on the host. The host was restored to Microsoft
+and focused offline checks precede another hardware trial. Versions 0.3.23
+through 0.3.26 have not been installed on the host. The host was restored to Microsoft
 BthA2dp; the custom codec service is stopped. Current host audio is not evidence
 of native LDAC. No further installation or reboot is part of this source review.
 
@@ -25,6 +25,7 @@ of native LDAC. No further installation or reboot is part of this source review.
 | Slow connection publication overlaps reconnect | An old FALSE could finish after a newer TRUE; event could be set after new OPEN cleared it | One passive publication lock, epoch-bound TRUE, post-call revalidation/repair, event update under OPEN's spin lock; bus ABI 4; serialize child jack updates too |
 | Signalling read fails | Synthetic close command had zero epoch and was rejected by the consumer | Tag the close with the failed read's owning connection |
 | Unsolicited state change or overlapping Windows requests | Every MPM connection update claimed to complete a requested operation | Distinguish unsolicited status from a matching pending request; serial-bound local retirement and failed outgoing OPEN completion |
+| Device enters low power with idle receive/event wait | Power-managed queues had indefinite requests without EvtIoStop; no suspend/restart transport lifecycle | Explicit self-managed suspend/restart, non-power-managed control/event queues, gated/bounded Bluetooth teardown and current power state/serial in ABI 9 |
 
 Channel close work is preallocated rather than allocated in a disconnect
 indication. Allocation failure can no longer fabricate a completed remote
@@ -65,6 +66,26 @@ checks do not make the opaque MPM call transactional with policy callbacks or
 prove Settings behavior. Microsoft images/symbols remain private; no vendor
 A2DP driver was inspected and no disassembly is distributed.
 
+Power handling keeps the render PDO and the service session. Suspend blocks
+new opens/transfers before closing channels, waits for admitted peer-response
+submissions and serializes with racing CLOSE workers before marking the target
+quiesced. Later control closes retain ownership without submitting into a
+powered-down target. Synchronous BRB control requests use a five-second
+timeout. Surprise removal gates I/O without issuing a peer response from the
+incoming callback. Resume removes the gate and notifies the existing session.
+
+Power events are hints to query GET_INFO, rather than queued copies of old
+power state. PowerSerial detects even a full suspend/resume cycle that passed
+before the service consumed either event. The service retires the old AVDTP
+epoch, preserves explicit user disconnect policy, keeps its audio mapping and
+endpoint identity, and retries incomplete closes after resume before opening
+another channel. No player restart or per-application routing repair is added.
+
+This is source/build coverage, not power-transition acceptance. In particular,
+WDF callback/target cancellation timing, surprise-removal lifetime, failed-close
+recovery and actual uninterrupted application recovery still need hardware
+validation; the helper tests do not exercise the kernel power state machine.
+
 ## Offline checks
 
 - Shared driver lifecycle transitions: opening/disconnect/late success,
@@ -104,3 +125,7 @@ References: Microsoft [device status and problem codes](https://learn.microsoft.
 and [WdfWorkItemFlush](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/wdfworkitem/nf-wdfworkitem-wdfworkitemflush).
 Submission/publication constraints: [WdfRequestSend](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/wdfrequest/nf-wdfrequest-wdfrequestsend)
 and [WdfWaitLockAcquire](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/wdfsync/nf-wdfsync-wdfwaitlockacquire).
+Power contracts: [Using power-managed I/O queues](https://learn.microsoft.com/en-us/windows-hardware/drivers/wdf/using-power-managed-i-o-queues),
+[Using self-managed I/O](https://learn.microsoft.com/en-us/windows-hardware/drivers/wdf/using-self-managed-i-o),
+[Self-managed suspend](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/wdfdevice/nc-wdfdevice-evt_wdf_device_self_managed_io_suspend),
+and [self-managed restart](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/wdfdevice/nc-wdfdevice-evt_wdf_device_self_managed_io_restart).

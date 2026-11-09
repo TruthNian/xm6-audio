@@ -9,7 +9,7 @@
 #ifndef OA2DP_IOCTL_H
 #define OA2DP_IOCTL_H
 
-#define OA2DP_IOCTL_VERSION 8
+#define OA2DP_IOCTL_VERSION 9
 
 #include "../../core/include/oa2dp/pcm_format.h"
 
@@ -36,6 +36,7 @@ DEFINE_GUID(GUID_OA2DP_BUS_INTERFACE, 0x955e5e3d, 0xc70c, 0x4024, 0x99, 0xdb, 0x
 #define IOCTL_OA2DP_WAIT_EVENT    OA2DP_CTL(5, METHOD_BUFFERED)
 #define IOCTL_OA2DP_GET_TX_STATE  OA2DP_CTL(6, METHOD_BUFFERED)
 #define OA2DP_DEVICE_MPM_REGISTERED 0x00000001UL
+#define OA2DP_DEVICE_SUSPENDED      0x00000002UL
 
 typedef enum _OA2DP_CHANNEL_KIND {
     Oa2dpChannelSignaling = 0,
@@ -46,6 +47,7 @@ typedef enum _OA2DP_CHANNEL_KIND {
 typedef struct _OA2DP_DEVICE_INFO {
     ULONG Version;            /* OA2DP_IOCTL_VERSION */
     ULONG Flags;
+    ULONG PowerSerial;        /* detects an entire sleep/resume between service wakeups */
     ULONGLONG RemoteAddress;  /* BTH_ADDR of the headset */
     ULONGLONG LocalAddress;   /* BTH_ADDR of the radio */
 } OA2DP_DEVICE_INFO;
@@ -88,6 +90,7 @@ typedef enum _OA2DP_EVENT_TYPE {
     Oa2dpEventChannelClosed = 2,
     Oa2dpEventDeviceGone = 3,
     Oa2dpEventStateLost = 4,     /* event backlog overflow: reconnect, never guess state */
+    Oa2dpEventPowerChanged = 5,  /* query GET_INFO; queued old events must not restore old power state */
 } OA2DP_EVENT_TYPE;
 
 typedef struct _OA2DP_EVENT {

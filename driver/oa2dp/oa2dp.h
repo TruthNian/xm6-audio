@@ -56,6 +56,8 @@ struct _OA2DP_DEVICE_CONTEXT {
 
     WDFSPINLOCK Lock;              /* protects Channels[] state */
     OA2DP_CHANNEL Channels[Oa2dpChannelCount];
+    KEVENT ResponsesIdle;
+    ULONG ResponseSubmissions;    /* peer responses admitted before suspend */
 
     WDFQUEUE DefaultQueue;
     WDFQUEUE EventQueue;           /* pended WAIT_EVENT requests */
@@ -91,6 +93,10 @@ struct _OA2DP_DEVICE_CONTEXT {
     EX_RUNDOWN_REF MpmCallbacks;
     BOOLEAN MpmStopping;
     BOOLEAN TransportStopping;
+    BOOLEAN PowerSuspended;
+    BOOLEAN PowerQuiesced;
+    ULONG PowerSerial;
+    BOOLEAN SurpriseRemoved;
     BOOLEAN PolicyConnected;
     BOOLEAN PolicySuspended;
     BOOLEAN MpmConnected;
@@ -132,6 +138,10 @@ DRIVER_INITIALIZE DriverEntry;
 EVT_WDF_DRIVER_DEVICE_ADD Oa2dpEvtDeviceAdd;
 EVT_WDF_DEVICE_PREPARE_HARDWARE Oa2dpEvtPrepareHardware;
 EVT_WDF_DEVICE_RELEASE_HARDWARE Oa2dpEvtReleaseHardware;
+EVT_WDF_DEVICE_SELF_MANAGED_IO_SUSPEND Oa2dpEvtIoSuspend;
+EVT_WDF_DEVICE_SELF_MANAGED_IO_INIT Oa2dpEvtIoInit;
+EVT_WDF_DEVICE_SELF_MANAGED_IO_RESTART Oa2dpEvtIoRestart;
+EVT_WDF_DEVICE_SURPRISE_REMOVAL Oa2dpEvtSurpriseRemoval;
 EVT_WDF_FILE_CLEANUP Oa2dpEvtFileCleanup;
 EVT_WDF_DEVICE_FILE_CREATE Oa2dpEvtFileCreate;
 EVT_WDFDEVICE_WDM_IRP_PREPROCESS Oa2dpVolumePreprocess;

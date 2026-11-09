@@ -42,6 +42,7 @@ private:
         AudioUnavailable,
         StreamFailed,
         IdleCheck,
+        TransportPower,
     };
     struct Command {
         Cmd cmd;
@@ -70,6 +71,7 @@ private:
     // signalling helpers (main thread only)
     void post(const Command &c);
     bool pump(DWORD timeout_ms);  // feed one received SDU, false on timeout
+    void refresh_transport_power();
     bool request(int label, oa2dp_avdtp_event &out, DWORD timeout_ms = 4000);
     void handle(const Command &c);
     bool connect_signaling();
@@ -108,6 +110,8 @@ private:
     ULONG stream_generation_ = 0;
     ULONG closed_connection_generation_ = 0;
     bool teardown_pending_ = false;
+    bool transport_suspended_ = false;
+    ULONG power_serial_ = 0;
     bool rx_failed_ = false;   // owned by the signalling thread
 
     // negotiated stream

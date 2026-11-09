@@ -134,6 +134,9 @@ void Session::event_loop()
             LOGE("Bluetooth event backlog overflow; reconnecting to recover state");
             c.cmd = Cmd::StreamFailed;
             break;
+        case Oa2dpEventPowerChanged:
+            c.cmd = Cmd::TransportPower;
+            break;
         default:
             continue;
         }
@@ -200,7 +203,7 @@ uint8_t Session::cb_check(void *user, uint8_t seid, const oa2dp_avdtp_caps *cfg,
 
 bool Session::pump(DWORD timeout_ms)
 {
-    if (!sig_open_ || rx_failed_ || stopping_)
+    if (!sig_open_ || rx_failed_ || stopping_ || transport_suspended_)
         return false;
     uint8_t pdu[OA2DP_AVDTP_MSG_MAX + 3];
     const OA2DP_RECV_IN binding{Oa2dpChannelSignaling, sig_generation_, sig_generation_};
@@ -474,7 +477,7 @@ bool Session::setup_audio_endpoint()
 bool Session::start_stream()
 {
     oa2dp_avdtp_sep *sep = oa2dp_avdtp_sep_get(&av_, local_seid_);
-    if (!connection_enabled_ || suspend_requested_ || teardown_pending_ || !sep || !media_open_)
+    if (!connection_enabled_ || transport_suspended_ || suspend_requested_ || teardown_pending_ || !sep || !media_open_)
         return false;
     if (sep->state == OA2DP_SEP_STREAMING) {
         begin_streaming();
@@ -576,6 +579,24 @@ void Session::teardown(const char *why)
     publish("disconnected");
 }
 
+void Session::refresh_transport_power()
+{
+    OA2DP_DEVICE_INFO current{};
+    if (!tr_.get_info(current) || current.Version != OA2DP_IOCTL_VERSION) {
+        LOGW("cannot read transport power state");
+        return;
+    }
+    const bool suspended = (current.Flags & OA2DP_DEVICE_SUSPENDED) != 0;
+    if (current.PowerSerial == power_serial_ && suspended == transport_suspended_) return;
+    power_serial_ = current.PowerSerial;
+    transport_suspended_ = suspended;
+    // A complete sleep/resume may have occurred before this queued event was
+    // consumed. Query the current state and retire the old AVDTP epoch either way.
+    teardown(suspended ? "transport power suspended" : "transport power resumed");
+    next_reconnect_ = GetTickCount();
+    publish(suspended ? "power-suspended" : "power-resuming");
+}
+
 void Session::handle(const Command &c)
 {
     switch (c.cmd) {
@@ -620,6 +641,7 @@ void Session::handle(const Command &c)
         next_reconnect_ = GetTickCount() + kReconnectPollMs;
         break;
     case Cmd::StreamFailed:
+        if (!c.channel.Generation) refresh_transport_power(); // includes lost power events
         if (c.channel.Generation &&
             !Oa2dpChannelEventCurrent(stream_generation_, c.channel.Generation)) break;
         if (!c.channel.Generation) sig_generation_ = 0; // driver backlog lost: close unknown epochs
@@ -652,7 +674,7 @@ void Session::handle(const Command &c)
             suspend_stream();
         audio_format_ = c.format.Format;
         audio_running_ = c.format.Running != 0;
-        if (teardown_pending_) break;
+        if (teardown_pending_ || transport_suspended_) break;
         if (suspend_requested_) {
             suspend_stream();
             // Report stopped transport after the encoder has joined/drained.
@@ -684,6 +706,9 @@ void Session::handle(const Command &c)
         next_reconnect_ = GetTickCount() + kReconnectPollMs;
         break;
     case Cmd::IdleCheck:
+        break;
+    case Cmd::TransportPower:
+        refresh_transport_power();
         break;
     }
 }
@@ -735,6 +760,8 @@ void Session::main_loop()
         return;
     }
     settings_ = load_settings(info_.RemoteAddress);
+    transport_suspended_ = (info_.Flags & OA2DP_DEVICE_SUSPENDED) != 0;
+    power_serial_ = info_.PowerSerial;
     if (!(info_.Flags & OA2DP_DEVICE_MPM_REGISTERED)) {
         LOGE("native profile-manager registration is unavailable");
         tr_.close();
@@ -774,29 +801,29 @@ void Session::main_loop()
     next_reconnect_ = GetTickCount();
 
     while (!stopping_) {
-        if (teardown_pending_ && is_after(GetTickCount(), next_reconnect_))
+        if (!transport_suspended_ && teardown_pending_ && is_after(GetTickCount(), next_reconnect_))
             teardown("retry incomplete channel close");
         // Opening L2CAP establishes the ACL link when needed. Waiting for
         // BluetoothGetDeviceInfo.fConnected first deadlocks reconnect when
         // this profile is the only component that could create that link.
-        if (!audio_ready_ && is_after(GetTickCount(), next_reconnect_)) {
+        if (!transport_suspended_ && !audio_ready_ && is_after(GetTickCount(), next_reconnect_)) {
             if (!ensure_audio_endpoint())
                 next_reconnect_ = GetTickCount() + kReconnectPollMs;
         }
-        if (audio_ready_ && connection_enabled_ && !teardown_pending_ && !sig_open_ &&
+        if (!transport_suspended_ && audio_ready_ && connection_enabled_ && !teardown_pending_ && !sig_open_ &&
             is_after(GetTickCount(), next_reconnect_)) {
             next_reconnect_ = GetTickCount() + kReconnectPollMs;
             if (connect_signaling())
                 init_deadline_ = GetTickCount() + kPeerConfigGraceMs;
         }
-        if (!teardown_pending_ && sig_open_ && init_deadline_ && !local_seid_ && is_after(GetTickCount(), init_deadline_)) {
+        if (!transport_suspended_ && !teardown_pending_ && sig_open_ && init_deadline_ && !local_seid_ && is_after(GetTickCount(), init_deadline_)) {
             init_deadline_ = 0;
             if (!configure_as_initiator())
                 teardown("configuration failed");
             else if (audio_running_)
                 start_stream();
         }
-        if (need_remote_caps_ && local_seid_) {
+        if (!transport_suspended_ && need_remote_caps_ && local_seid_) {
             need_remote_caps_ = false;
             oa2dp_avdtp_sep *sep = oa2dp_avdtp_sep_get(&av_, local_seid_);
             oa2dp_avdtp_event caps{};
@@ -845,7 +872,7 @@ void Session::main_loop()
 
 void Session::begin_streaming()
 {
-    if (!connection_enabled_ || suspend_requested_ || teardown_pending_ || streaming_ || !media_open_ || !audio_ready_)
+    if (!connection_enabled_ || transport_suspended_ || suspend_requested_ || teardown_pending_ || streaming_ || !media_open_ || !audio_ready_)
         return;
     if (audio_format_.SampleRate &&
         audio_format_.SampleRate != oa2dp_codec_sample_rate(&config_)) {

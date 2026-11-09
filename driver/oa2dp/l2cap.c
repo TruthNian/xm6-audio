@@ -13,9 +13,12 @@ static NTSTATUS CloseChannelGeneration(OA2DP_DEVICE_CONTEXT *dev,
 NTSTATUS Oa2dpSubmitBrbSync(_In_ OA2DP_DEVICE_CONTEXT *dev, _In_ struct _BRB *brb, _In_ ULONG size)
 {
     WDF_MEMORY_DESCRIPTOR desc;
+    WDF_REQUEST_SEND_OPTIONS options;
+    WDF_REQUEST_SEND_OPTIONS_INIT(&options, WDF_REQUEST_SEND_OPTION_TIMEOUT);
+    WDF_REQUEST_SEND_OPTIONS_SET_TIMEOUT(&options, WDF_REL_TIMEOUT_IN_MS(5000));
     WDF_MEMORY_DESCRIPTOR_INIT_BUFFER(&desc, brb, size);
     return WdfIoTargetSendInternalIoctlOthersSynchronously(
-        dev->IoTarget, NULL, IOCTL_INTERNAL_BTH_SUBMIT_BRB, &desc, NULL, NULL, NULL, NULL);
+        dev->IoTarget, NULL, IOCTL_INTERNAL_BTH_SUBMIT_BRB, &desc, NULL, NULL, &options, NULL);
 }
 
 static NTSTATUS SubmitBrbAsync(_In_ OA2DP_DEVICE_CONTEXT *dev, _In_ WDFREQUEST request,
@@ -127,6 +130,15 @@ static void FillChannelConfig(struct _BRB_L2CA_OPEN_CHANNEL *brb, OA2DP_CHANNEL 
 static void IndicationCallback(_In_ PVOID Context, _In_ INDICATION_CODE Indication,
                                _In_ PINDICATION_PARAMETERS Params);
 
+static void FinishResponseSubmission(OA2DP_DEVICE_CONTEXT *dev)
+{
+    WdfSpinLockAcquire(dev->Lock);
+    NT_ASSERT(dev->ResponseSubmissions != 0);
+    if (--dev->ResponseSubmissions == 0)
+        KeSetEvent(&dev->ResponsesIdle, IO_NO_INCREMENT, FALSE);
+    WdfSpinLockRelease(dev->Lock);
+}
+
 static void AcceptIncoming(OA2DP_DEVICE_CONTEXT *dev, PINDICATION_PARAMETERS p)
 {
     OA2DP_CHANNEL *ch = NULL;
@@ -136,6 +148,11 @@ static void AcceptIncoming(OA2DP_DEVICE_CONTEXT *dev, PINDICATION_PARAMETERS p)
     ULONG generation = 0;
 
     WdfSpinLockAcquire(dev->Lock);
+    if (dev->TransportStopping || dev->PowerQuiesced || dev->SurpriseRemoved) {
+        WdfSpinLockRelease(dev->Lock);
+        return; // lower stack no longer accepts a response BRB in this lifetime
+    }
+    if (++dev->ResponseSubmissions == 1) KeClearEvent(&dev->ResponsesIdle);
     /* First channel from the headset is signalling, the second is media. */
     if (dev->PolicyConnected && !dev->TransportStopping) {
         ch = &dev->Channels[Oa2dpChannelSignaling];
@@ -180,6 +197,7 @@ static void AcceptIncoming(OA2DP_DEVICE_CONTEXT *dev, PINDICATION_PARAMETERS p)
         WdfObjectDelete(req);
         goto fail_brb;
     }
+    FinishResponseSubmission(dev);
     return;
 
 fail_brb:
@@ -191,6 +209,7 @@ fail_state:
         KeSetEvent(&ch->OpenFinished, IO_NO_INCREMENT, FALSE);
         WdfSpinLockRelease(dev->Lock);
     }
+    FinishResponseSubmission(dev);
 }
 
 static void OpenResponseDone(_In_ WDFREQUEST Request, _In_ WDFIOTARGET Target,
@@ -529,6 +548,11 @@ static NTSTATUS CloseChannelGeneration(OA2DP_DEVICE_CONTEXT *dev,
         WdfSpinLockRelease(dev->Lock);
         status = STATUS_SUCCESS;
         goto done;
+    }
+    if (dev->PowerQuiesced || dev->SurpriseRemoved) {
+        WdfSpinLockRelease(dev->Lock);
+        status = STATUS_DEVICE_NOT_READY;
+        goto done; // retain ownership for resume; no I/O to an unavailable target
     }
     Oa2dpChannelRequestClose(&ch->Life);
     handle = ch->Handle;
