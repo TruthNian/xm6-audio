@@ -66,7 +66,6 @@ private:
     PPORTWAVERTSTREAM           m_pPortStream;
     OA2DP_FORMAT                m_Format;
     ULONG                       m_ulBlockAlign;
-    BOOLEAN                     m_bCounted;
 
     LIST_ENTRY                  m_NotificationList;
     PEX_TIMER                   m_pNotificationTimer;

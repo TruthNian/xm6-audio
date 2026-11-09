@@ -580,12 +580,8 @@ static NTSTATUS SetName(_Inout_ OA2DP_AUDIO_DEVICE *dev, _In_ const OA2DP_ENDPOI
     if (!NT_SUCCESS(status))
         KdPrintEx((DPFLTR_IHVAUDIO_ID, DPFLTR_WARNING_LEVEL,
                    "oa2dpaudio: setting the friendly name failed 0x%08X\n", status));
-    /* The endpoint builder reads names when the KS interfaces arrive, so
-     * re-register the filters as soon as no stream is open. */
-    Oa2dpLock(&dev->FilterLock);
-    dev->NameChanged = TRUE;
-    Oa2dpUnlock(&dev->FilterLock);
-    Oa2dpScheduleRebuild(dev);
+    // Naming is metadata. Never unregister a working endpoint to refresh it;
+    // existing DirectSound/WASAPI clients must keep their device identity.
     return STATUS_SUCCESS;
 }
 

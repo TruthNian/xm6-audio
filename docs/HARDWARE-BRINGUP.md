@@ -44,6 +44,18 @@ The control-only reference admits LOCAL SERVICE under the device ACL. Transport 
 
 The same native interface accepts one-shot connection commands. The driver publishes its actual AVDTP readiness on the Bluetooth service node; complete Windows multi-profile state/UI acceptance is still required.
 
+The local 0.3.15 trial loaded both new driver images. The native AVRCP cache received non-default, changing headset volume values through Microsoft's controller. Direct topology requests reported two control nodes and readable volume. Bounded KS checks rejected a short output, an invalid user output address and an unknown property with Win32 errors 122, 998 and 50, respectively. However, `IAudioEndpointVolume::QueryHardwareSupport` still returned zero: Windows continued to use software master volume. This is not successful volume synchronization.
+
+## Endpoint lifetime and channel-contract correction in 0.3.16
+
+PotPlayer was playing video without an active Windows render session after the endpoint updates. Resetting its per-app output to the system default and reopening the same video at the preserved playback position restored an active native session with nonzero audio; the user confirmed video sound. Reopening an application is recovery evidence, not acceptance of normal reconnect behavior.
+
+The driver no longer unregisters and recreates its KS filters to refresh a friendly name. The naming work item, stream counter used only for that rebuild, and teardown wait were deleted. Friendly-name changes update metadata and cannot invalidate clients' render handles. Actual PnP removal still unregisters filters normally.
+
+The volume/mute basic-support descriptions now expose two channels, both required MULTICHANNEL and UNIFORM flags, and complete per-channel volume/Boolean ranges. Version 0.3.15 incorrectly returned a single range without these flags, including no range for mute. Windows Vista and later require the multichannel flag on channel properties. Both nodes also expose their non-host gain implementation through CPU_RESOURCES. The parent KS one-shot handler now returns full support descriptors when requested and accepts GET commands with unused output capacity.
+
+These changes require hardware-volume, Bluetooth UI and existing-client reconnect acceptance. They are not a claim that all lifecycle cases are complete. Reference: [Microsoft's multichannel-node contract](https://learn.microsoft.com/en-us/windows-hardware/drivers/audio/exposing-multichannel-nodes).
+
 ## Earlier investigation, before 0.3.12
 
 - The KMDF transport and PortCls/WaveRT child load and enumerate through the Windows Bluetooth stack. Windows retains the radio, pairing and AVRCP profiles.

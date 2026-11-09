@@ -68,16 +68,6 @@ CMiniportWaveRTStream::~CMiniportWaveRTStream
         ExFreePoolWithTag(CONTAINING_RECORD(le, NotificationListEntry, ListEntry), OA2DP_AUDIO_TAG);
     }
 
-    if (m_bCounted && m_Device)
-    {
-        // A friendly-name change waits for the last stream to close.
-        if (InterlockedDecrement(&m_Device->Streams) == 0 && m_Device->NameChanged)
-        {
-            Oa2dpScheduleRebuild(m_Device);
-        }
-        m_bCounted = FALSE;
-    }
-
     if (NULL != m_pMiniport)
     {
         m_pMiniport->Release();
@@ -106,7 +96,6 @@ CMiniportWaveRTStream::Init
     m_pPortStream = PortStream_;
     m_Format = *Format_;
     m_ulBlockAlign = (ULONG)Format_->Channels * (Format_->BitsPerSample / 8);
-    m_bCounted = FALSE;
     m_KsState = KSSTATE_STOP;
     m_pDmaBuffer = NULL;
     m_ulDmaBufferSize = 0;
@@ -136,8 +125,6 @@ CMiniportWaveRTStream::Init
         return STATUS_INSUFFICIENT_RESOURCES;
     }
 
-    InterlockedIncrement(&m_Device->Streams);
-    m_bCounted = TRUE;
 
     // F4.3: Windows opened the endpoint with a (possibly) new format. The ring
     // allocation never moves, so only its header changes; the service learns

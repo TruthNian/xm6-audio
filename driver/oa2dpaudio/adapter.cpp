@@ -50,7 +50,6 @@ _Dispatch_type_(IRP_MJ_CLEANUP)
 _Dispatch_type_(IRP_MJ_CLOSE)
 _Dispatch_type_(IRP_MJ_DEVICE_CONTROL)
 DRIVER_DISPATCH Oa2dpDispatch;
-static IO_WORKITEM_ROUTINE RebuildWork;
 
 NTSTATUS StartDevice(_In_ PDEVICE_OBJECT, _In_ PIRP, _In_ PRESOURCELIST);
 
@@ -423,70 +422,6 @@ InstallFilters
 
 //=============================================================================
 #pragma code_seg()
-static VOID
-RebuildWork
-(
-    _In_     PDEVICE_OBJECT DeviceObject,
-    _In_opt_ PVOID          Context
-)
-{
-    OA2DP_AUDIO_DEVICE *dev = (OA2DP_AUDIO_DEVICE *)Context;
-    KIRQL               irql;
-
-    UNREFERENCED_PARAMETER(DeviceObject);
-
-    if (dev == NULL)
-    {
-        return;
-    }
-
-    KeAcquireSpinLock(&dev->Lock, &irql);
-    dev->RebuildQueued = 0;     // a later change queues us again
-    KeReleaseSpinLock(&dev->Lock, irql);
-
-    Oa2dpLock(&dev->FilterLock);
-    if (NT_SUCCESS(Oa2dpControlStatus(dev, FALSE)) && dev->NameChanged && dev->Streams == 0 && dev->WavePort)
-    {
-        // The endpoint builder reads the device's friendly name when the KS
-        // interfaces arrive; re-registering makes a new name show at once.
-        RemoveFilters(dev);
-        dev->NameChanged = FALSE;
-        NTSTATUS ntStatus = InstallFilters(dev);
-        if (!NT_SUCCESS(ntStatus))
-        {
-            KdPrintEx((DPFLTR_IHVAUDIO_ID, DPFLTR_ERROR_LEVEL,
-                       "oa2dpaudio: re-registering the filters failed 0x%08X\n", ntStatus));
-        }
-    }
-    Oa2dpUnlock(&dev->FilterLock);
-
-    InterlockedDecrement(&dev->WorkQueued);
-}
-
-#pragma code_seg()
-extern "C" VOID Oa2dpScheduleRebuild(_Inout_ OA2DP_AUDIO_DEVICE *dev)
-{
-    KIRQL   irql;
-    BOOLEAN queue = FALSE;
-
-
-    KeAcquireSpinLock(&dev->Lock, &irql);
-    if (dev->Initialized && !dev->Removed && dev->WorkItem && !dev->RebuildQueued)
-    {
-        dev->RebuildQueued = 1;
-        InterlockedIncrement(&dev->WorkQueued);
-        queue = TRUE;
-    }
-    KeReleaseSpinLock(&dev->Lock, irql);
-
-    if (queue)
-    {
-        IoQueueWorkItem(dev->WorkItem, RebuildWork, DelayedWorkQueue, dev);
-    }
-}
-
-//=============================================================================
-#pragma code_seg()
 static NTSTATUS BusQueryComplete(PDEVICE_OBJECT, PIRP, PVOID context)
 {
     KeSetEvent((PKEVENT)context, IO_NO_INCREMENT, FALSE);
@@ -564,13 +499,6 @@ InitDevice
     if (!NT_SUCCESS(ntStatus))
         return ntStatus;
 
-    dev->WorkItem = IoAllocateWorkItem(DeviceObject);
-    if (dev->WorkItem == NULL)
-    {
-        ReleaseVolumeBus(dev);
-        return STATUS_INSUFFICIENT_RESOURCES;
-    }
-
     // Last formats and name the service gave us, if any.
     Oa2dpLoadSettings(dev);
     Oa2dpGetFormats(dev, &list);
@@ -581,8 +509,6 @@ InitDevice
                                oa2dp_pcm_format_ring_type(f));
     if (!NT_SUCCESS(ntStatus))
     {
-        IoFreeWorkItem(dev->WorkItem);
-        dev->WorkItem = NULL;
         ReleaseVolumeBus(dev);
         return ntStatus;
     }
@@ -673,28 +599,16 @@ RemoveDevice
 {
 
     KIRQL irql;
-    LARGE_INTEGER wait;
 
-    // No new work items; wait for a queued one to finish.
+    // Reject new control operations before device removal.
     KeAcquireSpinLock(&dev->Lock, &irql);
     dev->Removed = TRUE;
     KeReleaseSpinLock(&dev->Lock, irql);
-    wait.QuadPart = -10 * OA2DP_HNS_PER_MS;
-    while (InterlockedCompareExchange(&dev->WorkQueued, 0, 0) != 0)
-    {
-        KeDelayExecutionThread(KernelMode, FALSE, &wait);
-    }
-
     // Unmaps the service's view of the ring (even from another process) and
     // frees it.
     Oa2dpControlRemove(dev);
     ReleaseVolumeBus(dev);
 
-    if (dev->WorkItem)
-    {
-        IoFreeWorkItem(dev->WorkItem);
-        dev->WorkItem = NULL;
-    }
 }
 
 //=============================================================================

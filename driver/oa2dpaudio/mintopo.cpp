@@ -306,11 +306,13 @@ static NTSTATUS PropertyHandler_Volume(_In_ PPCPROPERTY_REQUEST request)
     if (!mini || !mini->Attached) return STATUS_DEVICE_NOT_READY;
     const BOOLEAN volume = request->Node == 0 && request->PropertyItem->Id == KSPROPERTY_AUDIO_VOLUMELEVEL;
     const BOOLEAN mute = request->Node == 1 && request->PropertyItem->Id == KSPROPERTY_AUDIO_MUTE;
-    if (!volume && !mute) return STATUS_INVALID_DEVICE_REQUEST;
+    const BOOLEAN cpu = request->Node < 2 && request->PropertyItem->Id == KSPROPERTY_AUDIO_CPU_RESOURCES;
+    if (!volume && !mute && !cpu) return STATUS_INVALID_DEVICE_REQUEST;
     if (request->Verb & KSPROPERTY_TYPE_BASICSUPPORT) {
-        const ULONG flags = KSPROPERTY_TYPE_GET | KSPROPERTY_TYPE_SET | KSPROPERTY_TYPE_BASICSUPPORT;
+        const ULONG flags = KSPROPERTY_TYPE_GET | KSPROPERTY_TYPE_BASICSUPPORT |
+                            (cpu ? 0 : KSPROPERTY_TYPE_SET);
         const ULONG full = sizeof(KSPROPERTY_DESCRIPTION) +
-            (volume ? sizeof(KSPROPERTY_MEMBERSHEADER) + sizeof(KSPROPERTY_STEPPING_LONG) : 0);
+            (cpu ? 0 : sizeof(KSPROPERTY_MEMBERSHEADER) + 2 * sizeof(KSPROPERTY_STEPPING_LONG));
         if (request->ValueSize < sizeof(ULONG)) {
             request->ValueSize = 0;
             return STATUS_BUFFER_TOO_SMALL;
@@ -325,23 +327,37 @@ static NTSTATUS PropertyHandler_Volume(_In_ PPCPROPERTY_REQUEST request)
         desc->AccessFlags = flags;
         desc->DescriptionSize = full;
         desc->PropTypeSet.Set = KSPROPTYPESETID_General;
-        desc->PropTypeSet.Id = volume ? VT_I4 : VT_BOOL;
-        desc->MembersListCount = volume ? 1 : 0;
-        if (volume && request->ValueSize >= full) {
+        desc->PropTypeSet.Id = mute ? VT_BOOL : VT_I4;
+        desc->MembersListCount = cpu ? 0 : 1;
+        if (!cpu && request->ValueSize >= full) {
             auto members = reinterpret_cast<PKSPROPERTY_MEMBERSHEADER>(desc + 1);
             RtlZeroMemory(members, sizeof(*members));
             members->MembersFlags = KSPROPERTY_MEMBER_STEPPEDRANGES;
             members->MembersSize = sizeof(KSPROPERTY_STEPPING_LONG);
-            members->MembersCount = 1;
+            members->MembersCount = 2;
+            members->Flags = KSPROPERTY_MEMBER_FLAG_BASICSUPPORT_MULTICHANNEL |
+                             KSPROPERTY_MEMBER_FLAG_BASICSUPPORT_UNIFORM;
             auto range = reinterpret_cast<PKSPROPERTY_STEPPING_LONG>(members + 1);
-            RtlZeroMemory(range, sizeof(*range));
-            range->SteppingDelta = OA2DP_VOLUME_STEP_DB;
-            range->Bounds.SignedMinimum = OA2DP_VOLUME_MIN_DB;
-            range->Bounds.SignedMaximum = OA2DP_VOLUME_MAX_DB;
+            RtlZeroMemory(range, 2 * sizeof(*range));
+            for (ULONG channel = 0; channel < 2; ++channel) {
+                range[channel].SteppingDelta = volume ? OA2DP_VOLUME_STEP_DB : 1;
+                range[channel].Bounds.SignedMinimum = volume ? OA2DP_VOLUME_MIN_DB : 0;
+                range[channel].Bounds.SignedMaximum = volume ? OA2DP_VOLUME_MAX_DB : 1;
+            }
             request->ValueSize = full;
         } else {
             request->ValueSize = sizeof(*desc);
         }
+        return STATUS_SUCCESS;
+    }
+    if (cpu) {
+        if (!(request->Verb & KSPROPERTY_TYPE_GET)) return STATUS_INVALID_DEVICE_REQUEST;
+        if (request->ValueSize < sizeof(ULONG)) {
+            request->ValueSize = sizeof(ULONG);
+            return STATUS_BUFFER_TOO_SMALL;
+        }
+        *(PULONG)request->Value = KSAUDIO_CPU_RESOURCES_NOT_HOST_CPU;
+        request->ValueSize = sizeof(ULONG);
         return STATUS_SUCCESS;
     }
     if (request->InstanceSize < sizeof(ULONG)) return STATUS_INVALID_PARAMETER;

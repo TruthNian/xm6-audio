@@ -86,11 +86,6 @@ typedef struct _OA2DP_AUDIO_DEVICE {
     PVOID WavePort;             /* PUNKNOWN of the ports, referenced; */
     PVOID TopoPort;             /* opaque outside adapter.cpp       */
     PVOID WaveMiniport;         /* CMiniportWaveRT *, referenced */
-    volatile LONG Streams;      /* open WaveRT streams */
-    BOOLEAN NameChanged;        /* re-register the filters when idle */
-    PIO_WORKITEM WorkItem;
-    LONG RebuildQueued;         /* under Lock: work item queued, not started */
-    volatile LONG WorkQueued;   /* work items not yet finished */
 } OA2DP_AUDIO_DEVICE;
 
 /* ---- ring.c ---------------------------------------------------------------- */
@@ -137,8 +132,6 @@ VOID Oa2dpUnlock(_Inout_ PKEVENT lock);
 
 /* ---- adapter.cpp / minwavert.cpp ------------------------------------------- */
 
-/* Re-register the KS filters once no stream is open (new friendly name). */
-VOID Oa2dpScheduleRebuild(_Inout_ OA2DP_AUDIO_DEVICE *dev);
 /* Tell the audio engine that the supported formats changed. */
 VOID Oa2dpWaveFormatsChanged(_Inout_ OA2DP_AUDIO_DEVICE *dev);
 NTSTATUS Oa2dpSetConnected(_Inout_ OA2DP_AUDIO_DEVICE *dev, _In_ BOOLEAN connected);

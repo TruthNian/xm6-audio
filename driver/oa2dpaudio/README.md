@@ -17,7 +17,7 @@ contract is [`oa2dp_ioctl.h`](../common/oa2dp_ioctl.h).
 
 | File | Origin | What it does |
 |------|--------|--------------|
-| `adapter.cpp` | SYSVAD `adapter.cpp` + install code of `common.cpp` | DriverEntry, AddDevice, StartDevice, PnP; installs/removes the wave + topology subdevices; routes control IRPs; re-registers the filters after a name change |
+| `adapter.cpp` | SYSVAD `adapter.cpp` + install code of `common.cpp` | DriverEntry, AddDevice, StartDevice, PnP; installs/removes wave + topology subdevices on actual device lifecycle; routes control IRPs |
 | `minwavert.cpp/.h` | SYSVAD `minwavert.*` | WaveRT miniport: formats from the service, data intersection, `KSPROPERTY_PIN_PROPOSEDATAFORMAT(2)`, `KSEVENT_PINCAPS_FORMATCHANGE` |
 | `minwavertstream.cpp/.h` | SYSVAD `minwavertstream.*` | Stream: buffer allocation, 1 ms position timer that pumps the ring, positions, packet notifications, presentation position, latency |
 | `mintopo.cpp` | SYSVAD `mintopo.cpp`/`basetopo.cpp` | Two-pin topology filter (bridge → headphones) |
@@ -38,7 +38,9 @@ generator, file saving, KMDF.
 
 1. **Simple render endpoint.** Wave filter: host pin (one instance) → DAC
    node → bridge pin; topology filter: bridge in → `KSNODETYPE_HEADPHONES`.
-   Volume and mute are the audio engine's software endpoint volume.
+   The volume/mute nodes share the native parent's AVRCP volume cache through
+   a referenced kernel interface. Hardware-volume acceptance is recorded
+   separately in the hardware bring-up log.
 2. **Formats** come from `IOCTL_OA2DP_AUDIO_SET_FORMATS`. The KS data
    ranges are only an envelope (8–192 kHz, 1–2 channels, float32 or 16/24-bit
    PCM); `IsFormatSupported`, `DataRangeIntersection`,

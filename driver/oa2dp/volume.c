@@ -18,6 +18,7 @@ static const GUID AudioCategory =
     {0x6994ad04,0x93ef,0x11d0,{0xa3,0xcc,0x00,0xa0,0xc9,0x22,0x31,0x96}};
 static const GUID BluetoothAudioSet =
     {0x7fa06c40,0xb8f6,0x4c7e,{0x85,0x56,0xe8,0xc3,0x3a,0x12,0xe5,0x4d}};
+static const GUID GeneralPropertyType = { STATIC_KSPROPTYPESETID_General };
 static const DEVPROPKEY AvdtpConnectedKey =
     {{0x29ce83d4,0x7a82,0x4744,{0xbd,0x1d,0xab,0xec,0x85,0x32,0x1d,0xd6}},2};
 
@@ -226,6 +227,27 @@ static NTSTATUS WriteCaller(PIRP irp, PVOID destination, const VOID *source, SIZ
     return STATUS_SUCCESS;
 }
 
+static NTSTATUS WriteSupport(PIRP irp, ULONG capacity, ULONG flags, ULONG type,
+                             ULONG_PTR *returned)
+{
+    NTSTATUS status;
+    if (capacity < sizeof(ULONG)) return STATUS_BUFFER_TOO_SMALL;
+    if (capacity < sizeof(KSPROPERTY_DESCRIPTION)) {
+        status = WriteCaller(irp, irp->UserBuffer, &flags, sizeof(flags));
+        if (NT_SUCCESS(status)) *returned = sizeof(flags);
+    } else {
+        KSPROPERTY_DESCRIPTION description;
+        RtlZeroMemory(&description, sizeof(description));
+        description.AccessFlags = flags;
+        description.DescriptionSize = sizeof(description);
+        description.PropTypeSet.Set = GeneralPropertyType;
+        description.PropTypeSet.Id = type;
+        status = WriteCaller(irp, irp->UserBuffer, &description, sizeof(description));
+        if (NT_SUCCESS(status)) *returned = sizeof(description);
+    }
+    return status;
+}
+
 NTSTATUS Oa2dpVolumePreprocess(WDFDEVICE device, PIRP irp)
 {
     PIO_STACK_LOCATION stack = IoGetCurrentIrpStackLocation(irp);
@@ -265,10 +287,8 @@ NTSTATUS Oa2dpVolumePreprocess(WDFDEVICE device, PIRP irp)
         property.Id <= KSPROPERTY_ONESHOT_DISCONNECT) {
         if (property.Flags == KSPROPERTY_TYPE_BASICSUPPORT) {
             ULONG flags = KSPROPERTY_TYPE_GET | KSPROPERTY_TYPE_BASICSUPPORT;
-            if (outputBytes < sizeof(flags)) { status = STATUS_BUFFER_TOO_SMALL; goto done; }
-            status = WriteCaller(irp, irp->UserBuffer, &flags, sizeof(flags));
-            if (NT_SUCCESS(status)) returned = sizeof(flags);
-        } else if (property.Flags == KSPROPERTY_TYPE_GET && outputBytes == 0) {
+            status = WriteSupport(irp, outputBytes, flags, 0xffff, &returned);
+        } else if (property.Flags == KSPROPERTY_TYPE_GET) {
             WdfSpinLockAcquire(dev->Lock);
             status = dev->AudioConnectionRequest
                 ? dev->AudioConnectionRequest(dev->AudioContext, property.Id == KSPROPERTY_ONESHOT_RECONNECT)
@@ -315,9 +335,7 @@ NTSTATUS Oa2dpVolumePreprocess(WDFDEVICE device, PIRP irp)
     }
     if (property.Flags == KSPROPERTY_TYPE_BASICSUPPORT) {
         ULONG flags = KSPROPERTY_TYPE_GET | KSPROPERTY_TYPE_SET | KSPROPERTY_TYPE_BASICSUPPORT;
-        if (outputBytes < sizeof(flags)) { status = STATUS_BUFFER_TOO_SMALL; goto done; }
-        status = WriteCaller(irp, irp->UserBuffer, &flags, sizeof(flags));
-        if (NT_SUCCESS(status)) returned = sizeof(flags);
+        status = WriteSupport(irp, outputBytes, flags, 3 /* VT_I4 */, &returned);
     } else if (property.Flags == KSPROPERTY_TYPE_GET) {
         LONG db;
         BOOLEAN muted;
