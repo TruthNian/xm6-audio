@@ -30,7 +30,9 @@ NTSTATUS Oa2dpPublishConnected(OA2DP_DEVICE_CONTEXT *dev, BOOLEAN connected)
 {
     WdfSpinLockAcquire(dev->Lock);
     const BOOLEAN open = dev->Channels[Oa2dpChannelSignaling].Life.State == ChannelOpen &&
-                         dev->Channels[Oa2dpChannelMedia].Life.State == ChannelOpen;
+                         dev->Channels[Oa2dpChannelMedia].Life.State == ChannelOpen &&
+                         dev->Channels[Oa2dpChannelSignaling].Life.ConnectionGeneration ==
+                         dev->Channels[Oa2dpChannelMedia].Life.ConnectionGeneration;
     const BOOLEAN closed = dev->Channels[Oa2dpChannelSignaling].Life.State == ChannelClosed &&
                            dev->Channels[Oa2dpChannelMedia].Life.State == ChannelClosed;
     NTSTATUS actual = connected

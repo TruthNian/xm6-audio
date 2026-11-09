@@ -292,7 +292,7 @@ bool Session::connect_signaling()
         teardown("signalling open failed");
         return false;
     }
-    sig_generation_ = ci.Generation;
+    sig_generation_ = ci.ConnectionGeneration;
     sig_mtu_ = ci.OutMtu;
     av_.out_mtu = sig_mtu_ < 48 ? 48 : sig_mtu_;
     sig_open_ = true;
@@ -540,8 +540,13 @@ void Session::teardown(const char *why)
     end_streaming();
     // Also close an OPEN whose caller timed out before receiving its handle.
     // A failed close must retain ownership and suppress a replacement open.
-    const bool media_closed = tr_.close_channel(Oa2dpChannelMedia);
-    const bool sig_closed = tr_.close_channel(Oa2dpChannelSignaling);
+    ULONG media_connection = 0, sig_connection = 0;
+    const bool media_closed = tr_.close_channel(Oa2dpChannelMedia, sig_generation_, &media_connection);
+    const bool sig_closed = tr_.close_channel(Oa2dpChannelSignaling, sig_generation_, &sig_connection);
+    if (media_closed && Oa2dpChannelGenerationAfter(media_connection, closed_connection_generation_))
+        closed_connection_generation_ = media_connection;
+    if (sig_closed && Oa2dpChannelGenerationAfter(sig_connection, closed_connection_generation_))
+        closed_connection_generation_ = sig_connection;
     if (media_closed) media_open_ = false;
     if (sig_closed) sig_open_ = false;
     teardown_pending_ = !media_closed || !sig_closed;
@@ -570,6 +575,8 @@ void Session::handle(const Command &c)
 {
     switch (c.cmd) {
     case Cmd::SignalingOpenedByPeer:
+        if (!Oa2dpChannelGenerationAfter(c.channel.ConnectionGeneration,
+                                         closed_connection_generation_)) break;
         if (!Oa2dpChannelGenerationAfter(c.channel.Generation, sig_generation_)) break;
         sig_generation_ = c.channel.Generation;
         if (!connection_enabled_) {
@@ -584,6 +591,9 @@ void Session::handle(const Command &c)
         LOGI("headset opened signalling");
         break;
     case Cmd::MediaOpenedByPeer:
+        if (c.channel.ConnectionGeneration != sig_generation_ ||
+            !Oa2dpChannelGenerationAfter(c.channel.ConnectionGeneration,
+                                         closed_connection_generation_)) break;
         if (!Oa2dpChannelGenerationAfter(c.channel.Generation, media_generation_)) break;
         media_generation_ = c.channel.Generation;
         if (!connection_enabled_) {
@@ -595,17 +605,19 @@ void Session::handle(const Command &c)
         setup_audio_endpoint();
         break;
     case Cmd::SignalingClosed:
-        if (!Oa2dpChannelEventCurrent(sig_generation_, c.channel.Generation)) break;
+        if (!Oa2dpChannelEventCurrent(sig_generation_, c.channel.ConnectionGeneration)) break;
         teardown("signalling closed");
         break;
     case Cmd::MediaClosed:
-        if (!Oa2dpChannelEventCurrent(media_generation_, c.channel.Generation)) break;
+        if (c.channel.ConnectionGeneration != sig_generation_ ||
+            !Oa2dpChannelEventCurrent(media_generation_, c.channel.Generation)) break;
         teardown("media closed");
         next_reconnect_ = GetTickCount() + kReconnectPollMs;
         break;
     case Cmd::StreamFailed:
         if (c.channel.Generation &&
             !Oa2dpChannelEventCurrent(stream_generation_, c.channel.Generation)) break;
+        if (!c.channel.Generation) sig_generation_ = 0; // driver backlog lost: close unknown epochs
         teardown("encoder or transport failure");
         publish("stream-error");
         next_reconnect_ = GetTickCount() + kReconnectPollMs;

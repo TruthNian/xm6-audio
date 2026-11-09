@@ -94,6 +94,7 @@ private:
     bool sig_open_ = false, media_open_ = false;
     ULONG sig_generation_ = 0, media_generation_ = 0;
     ULONG stream_generation_ = 0;
+    ULONG closed_connection_generation_ = 0;
     bool teardown_pending_ = false;
     bool rx_failed_ = false;   // owned by the signalling thread
 

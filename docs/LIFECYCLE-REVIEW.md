@@ -1,7 +1,7 @@
-# Native lifecycle review, 0.3.22
+# Native lifecycle review, 0.3.23
 
 This source batch is not a declaration of hardware acceptance. Source review
-and focused offline checks precede another hardware trial. No 0.3.22 driver has
+and focused offline checks precede another hardware trial. No 0.3.23 driver has
 been installed on the host.
 
 ## Confirmed source defects and corrections
@@ -11,7 +11,7 @@ been installed on the host.
 | Disconnect while OPEN BRB is pending | CLOSE returned success for Opening; late OPEN could resurrect a channel | Latch close intent, wait for bounded OPEN completion, close a late successful handle |
 | Headset initiates after explicit disconnect | Incoming acceptance ignored local policy | Apply policy before selecting a channel and before exposing a completed OPEN |
 | Remote and local CLOSE overlap | Both could submit CLOSE for the same handle; failure erased ownership | Serialize CLOSE per channel, retain the handle after failed CLOSE |
-| Delayed notification/work after reconnect | No channel incarnation identity; an old close could tear down its replacement | Channel generations in driver/service ABI 6; validate work, publication and service consumption |
+| Delayed notification/work after reconnect | No channel/link incarnation identity; an old close could tear down its replacement | Channel and connection generations in driver/service ABI 7; scope closes to their owning link, validate work/publication/consumption, and bar queued OPENs from already-closed links |
 | Delayed encoder failure after reconfiguration | A retired encoder's queued error could terminate its replacement on the same media channel | Independent encoder-generation validation |
 | Disconnect completion while transport is unfinished | Jack and parent carried independent completion events | One referenced transport-owned event, validated against both actual channel states; kernel bus ABI 3 |
 | PnP stop/resume | A queued DeviceGone from the previous lifetime could terminate the replacement session | Clear the old event backlog before the new PnP lifetime starts |
@@ -24,6 +24,14 @@ indication. Allocation failure can no longer fabricate a completed remote
 close. Failed or in-progress transport closes cannot acknowledge the native
 disconnect property. An unavailable codec service may unplug its audio jack
 before the physical transport is closed; these are distinct states.
+
+OPEN/CLOSE notification enqueueing and their state transitions share the same
+lock. A peer MEDIA OPEN cannot overtake its signalling OPEN notification.
+Closing an old link returns its generation even if a replacement already
+exists; it preserves the replacement handles. Cleanup of unknown pending
+state records the closed generation, preventing a queued old OPEN from
+recreating a phantom connection in the service. Lost event backlogs instead
+force cleanup of unknown generations before negotiating a new link.
 
 ## Offline checks
 

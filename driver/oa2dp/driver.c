@@ -232,16 +232,14 @@ static VOID DeliverPendingEvents(_In_ OA2DP_DEVICE_CONTEXT *dev)
     }
 }
 
-VOID Oa2dpPostEvent(_In_ OA2DP_DEVICE_CONTEXT *dev, _In_ ULONG type,
-                   _In_opt_ OA2DP_CHANNEL *ch, ULONG generation)
+VOID Oa2dpQueueEventLocked(OA2DP_DEVICE_CONTEXT *dev, ULONG type,
+                           OA2DP_CHANNEL *ch, ULONG generation)
 {
     OA2DP_EVENT event;
     RtlZeroMemory(&event, sizeof(event));
     event.Type = type;
-    WdfSpinLockAcquire(dev->Lock);
     if (ch) {
         if (!Oa2dpChannelEventReady(&ch->Life, generation, type == Oa2dpEventChannelOpened)) {
-            WdfSpinLockRelease(dev->Lock);
             return;
         }
         event.Kind = ch->Kind;
@@ -249,6 +247,7 @@ VOID Oa2dpPostEvent(_In_ OA2DP_DEVICE_CONTEXT *dev, _In_ ULONG type,
         event.Channel.OutMtu = ch->OutMtu;
         event.Channel.InMtu = ch->InMtu;
         event.Channel.Generation = generation;
+        event.Channel.ConnectionGeneration = ch->Life.ConnectionGeneration;
     }
     if (type == Oa2dpEventDeviceGone) {
         dev->EventHead = dev->EventCount = 0;
@@ -264,6 +263,18 @@ VOID Oa2dpPostEvent(_In_ OA2DP_DEVICE_CONTEXT *dev, _In_ ULONG type,
             ++dev->EventCount;
         }
     }
+}
+
+VOID Oa2dpDeliverEvents(OA2DP_DEVICE_CONTEXT *dev)
+{
+    DeliverPendingEvents(dev);
+}
+
+VOID Oa2dpPostEvent(OA2DP_DEVICE_CONTEXT *dev, ULONG type,
+                    OA2DP_CHANNEL *ch, ULONG generation)
+{
+    WdfSpinLockAcquire(dev->Lock);
+    Oa2dpQueueEventLocked(dev, type, ch, generation);
     WdfSpinLockRelease(dev->Lock);
     DeliverPendingEvents(dev);
 }
@@ -413,11 +424,18 @@ VOID Oa2dpEvtIoDeviceControl(_In_ WDFQUEUE Queue, _In_ WDFREQUEST Request,
 
     case IOCTL_OA2DP_CLOSE_CHANNEL: {
         OA2DP_CLOSE_CHANNEL_IN *in;
+        OA2DP_CLOSE_CHANNEL_OUT *out;
         status = WdfRequestRetrieveInputBuffer(Request, sizeof(*in), (PVOID *)&in, NULL);
         if (NT_SUCCESS(status))
-            status = in->Kind < Oa2dpChannelCount
-                         ? Oa2dpCloseChannel(dev, (OA2DP_CHANNEL_KIND)in->Kind)
-                         : STATUS_INVALID_PARAMETER;
+            status = WdfRequestRetrieveOutputBuffer(Request, sizeof(*out), (PVOID *)&out, NULL);
+        if (NT_SUCCESS(status)) {
+            // METHOD_BUFFERED input/output may alias; snapshot before writing.
+            const ULONG kind = in->Kind, connection = in->ConnectionGeneration;
+            if (kind >= Oa2dpChannelCount) status = STATUS_INVALID_PARAMETER;
+            else status = Oa2dpCloseConnectionChannel(dev, (OA2DP_CHANNEL_KIND)kind,
+                                                      connection, &out->ConnectionGeneration);
+            if (NT_SUCCESS(status)) info = sizeof(*out);
+        }
         break;
     }
 

@@ -3,7 +3,8 @@
 #include "oa2dp.h"
 
 static NTSTATUS CloseChannelGeneration(OA2DP_DEVICE_CONTEXT *dev,
-                                       OA2DP_CHANNEL_KIND kind, ULONG generation);
+                                       OA2DP_CHANNEL_KIND kind, ULONG generation,
+                                       ULONG connection, PULONG closedConnection);
 
 /* ------------------------------------------------------------------------ */
 /* Submission helpers                                                       */
@@ -143,6 +144,8 @@ static void AcceptIncoming(OA2DP_DEVICE_CONTEXT *dev, PINDICATION_PARAMETERS p)
             generation = Oa2dpChannelBeginOpen(&ch->Life, TRUE, FALSE);
         }
         if (generation) {
+            ch->Life.ConnectionGeneration = ch->Kind == Oa2dpChannelSignaling
+                ? generation : dev->Channels[Oa2dpChannelSignaling].Life.Generation;
             KeClearEvent(&ch->OpenFinished);
             KeClearEvent(&dev->DisconnectedEvent);
         }
@@ -213,11 +216,14 @@ static void OpenResponseDone(_In_ WDFREQUEST Request, _In_ WDFIOTARGET Target,
             (ch->Life.CloseRequested || !dev->PolicyConnected || dev->TransportStopping);
         if (close) Oa2dpChannelRequestClose(&ch->Life);
         if (opened) KeSetEvent(&ch->OpenFinished, IO_NO_INCREMENT, FALSE);
+        // Queue OPEN before making this lock available to a peer MEDIA open
+        // or a remote CLOSE. Event delivery keeps the same transition order.
+        if (!close && opened && NT_SUCCESS(Params->IoStatus.Status))
+            Oa2dpQueueEventLocked(dev, Oa2dpEventChannelOpened, ch, rc->Generation);
         WdfSpinLockRelease(dev->Lock);
         if (close)
             WdfWorkItemEnqueue(ch->CloseWork);
-        else if (opened && NT_SUCCESS(Params->IoStatus.Status))
-            Oa2dpPostEvent(dev, Oa2dpEventChannelOpened, ch, rc->Generation);
+        Oa2dpDeliverEvents(dev);
     }
     dev->Profile.BthFreeBrb((PBRB)brb);
     WdfObjectDelete(Request);
@@ -263,9 +269,8 @@ static VOID CloseWorkItem(_In_ WDFWORKITEM WorkItem)
     WdfSpinLockAcquire(dev->Lock);
     generation = ch->Life.CloseRequested ? ch->Life.Generation : 0;
     WdfSpinLockRelease(dev->Lock);
-    if (generation && NT_SUCCESS(CloseChannelGeneration(dev, ch->Kind, generation))) {
+    if (generation && NT_SUCCESS(CloseChannelGeneration(dev, ch->Kind, generation, 0, NULL))) {
         (void)Oa2dpPublishConnected(dev, FALSE);
-        Oa2dpPostEvent(dev, Oa2dpEventChannelClosed, ch, generation);
     }
 }
 
@@ -359,6 +364,8 @@ VOID Oa2dpOpenChannel(_In_ OA2DP_DEVICE_CONTEXT *dev, _In_ WDFREQUEST request,
     }
     KeClearEvent(&ch->OpenFinished);
     KeClearEvent(&dev->DisconnectedEvent);
+    ch->Life.ConnectionGeneration = ch->Kind == Oa2dpChannelSignaling
+        ? generation : dev->Channels[Oa2dpChannelSignaling].Life.Generation;
     WdfSpinLockRelease(dev->Lock);
 
     brb = (struct _BRB_L2CA_OPEN_CHANNEL *)dev->Profile.BthAllocateBrb(BRB_L2CA_OPEN_CHANNEL,
@@ -427,6 +434,7 @@ static void OpenDone(_In_ WDFREQUEST Lower, _In_ WDFIOTARGET Target,
         openedInfo.OutMtu = ch->OutMtu;
         openedInfo.InMtu = ch->InMtu;
         openedInfo.Generation = rc->Generation;
+        openedInfo.ConnectionGeneration = ch->Life.ConnectionGeneration;
     }
     if (current) KeSetEvent(&ch->OpenFinished, IO_NO_INCREMENT, FALSE);
     WdfSpinLockRelease(dev->Lock);
@@ -449,7 +457,8 @@ static void OpenDone(_In_ WDFREQUEST Lower, _In_ WDFIOTARGET Target,
 }
 
 static NTSTATUS CloseChannelGeneration(OA2DP_DEVICE_CONTEXT *dev,
-                                       OA2DP_CHANNEL_KIND kind, ULONG expectedGeneration)
+                                       OA2DP_CHANNEL_KIND kind, ULONG expectedGeneration,
+                                       ULONG expectedConnection, PULONG closedConnection)
 {
     OA2DP_CHANNEL *ch = &dev->Channels[kind];
     struct _BRB_L2CA_CLOSE_CHANNEL *brb;
@@ -465,6 +474,16 @@ static NTSTATUS CloseChannelGeneration(OA2DP_DEVICE_CONTEXT *dev,
     if (!NT_SUCCESS(status)) return status;
     WdfSpinLockAcquire(dev->Lock);
     generation = ch->Life.Generation;
+    if (closedConnection)
+        *closedConnection = expectedConnection ? expectedConnection : ch->Life.ConnectionGeneration;
+    if (expectedConnection &&
+        !Oa2dpChannelCloseTargets(&ch->Life, 0, expectedConnection)) {
+        // The requested old connection has ended. It does not own this
+        // replacement handle, so closing it would destroy a fresh link.
+        WdfSpinLockRelease(dev->Lock);
+        status = STATUS_SUCCESS;
+        goto done;
+    }
     if (expectedGeneration && generation != expectedGeneration) {
         WdfSpinLockRelease(dev->Lock);
         status = STATUS_NOT_FOUND;
@@ -513,9 +532,13 @@ static NTSTATUS CloseChannelGeneration(OA2DP_DEVICE_CONTEXT *dev,
     closed = NT_SUCCESS(status) || status == STATUS_CONNECTION_DISCONNECTED ||
              status == STATUS_INVALID_HANDLE;
     WdfSpinLockAcquire(dev->Lock);
-    if (Oa2dpChannelFinishClose(&ch->Life, generation, closed))
+    if (Oa2dpChannelFinishClose(&ch->Life, generation, closed)) {
         ch->Handle = NULL;
+        if (expectedGeneration)
+            Oa2dpQueueEventLocked(dev, Oa2dpEventChannelClosed, ch, generation);
+    }
     WdfSpinLockRelease(dev->Lock);
+    if (closed && expectedGeneration) Oa2dpDeliverEvents(dev);
     if (closed) status = STATUS_SUCCESS;
     /* The caller already knows a local close completed. Only the remote
      * disconnect work item emits a notification; a local echo could tear
@@ -527,7 +550,13 @@ done:
 
 NTSTATUS Oa2dpCloseChannel(OA2DP_DEVICE_CONTEXT *dev, OA2DP_CHANNEL_KIND kind)
 {
-    return CloseChannelGeneration(dev, kind, 0);
+    return CloseChannelGeneration(dev, kind, 0, 0, NULL);
+}
+
+NTSTATUS Oa2dpCloseConnectionChannel(OA2DP_DEVICE_CONTEXT *dev, OA2DP_CHANNEL_KIND kind,
+                                    ULONG expectedConnection, PULONG closedConnection)
+{
+    return CloseChannelGeneration(dev, kind, 0, expectedConnection, closedConnection);
 }
 
 VOID Oa2dpCloseAllChannels(_In_ OA2DP_DEVICE_CONTEXT *dev)

@@ -11,6 +11,7 @@ typedef enum {
 typedef struct {
     OA2DP_CHANNEL_STATE State;
     uint32_t Generation;
+    uint32_t ConnectionGeneration;
     int CloseRequested;
 } OA2DP_CHANNEL_LIFECYCLE;
 
@@ -55,6 +56,12 @@ static inline int Oa2dpChannelFinishClose(OA2DP_CHANNEL_LIFECYCLE *c,
 static inline int Oa2dpChannelEventCurrent(uint32_t current, uint32_t event)
 {
     return event != 0 && event == current;
+}
+static inline int Oa2dpChannelCloseTargets(const OA2DP_CHANNEL_LIFECYCLE *c,
+                                          uint32_t channel, uint32_t connection)
+{
+    return (!channel || channel == c->Generation) &&
+           (!connection || connection == c->ConnectionGeneration);
 }
 static inline int Oa2dpChannelEventReady(const OA2DP_CHANNEL_LIFECYCLE *c,
                                         uint32_t generation, int opened)

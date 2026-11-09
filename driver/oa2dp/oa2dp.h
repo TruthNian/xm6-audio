@@ -140,6 +140,8 @@ VOID Oa2dpUnregisterServer(_In_ OA2DP_DEVICE_CONTEXT *dev);
 VOID Oa2dpOpenChannel(_In_ OA2DP_DEVICE_CONTEXT *dev, _In_ WDFREQUEST request,
                       _In_ const OA2DP_OPEN_CHANNEL_IN *in);
 NTSTATUS Oa2dpCloseChannel(_In_ OA2DP_DEVICE_CONTEXT *dev, _In_ OA2DP_CHANNEL_KIND kind);
+NTSTATUS Oa2dpCloseConnectionChannel(OA2DP_DEVICE_CONTEXT *dev, OA2DP_CHANNEL_KIND kind,
+                                    ULONG expectedConnection, PULONG closedConnection);
 VOID Oa2dpCloseAllChannels(_In_ OA2DP_DEVICE_CONTEXT *dev);
 VOID Oa2dpTransfer(_In_ OA2DP_DEVICE_CONTEXT *dev, _In_ WDFREQUEST request,
                    _In_ OA2DP_CHANNEL_KIND kind, _In_ BOOLEAN send);
@@ -147,6 +149,9 @@ VOID Oa2dpTransfer(_In_ OA2DP_DEVICE_CONTEXT *dev, _In_ WDFREQUEST request,
 /* driver.c */
 VOID Oa2dpPostEvent(_In_ OA2DP_DEVICE_CONTEXT *dev, _In_ ULONG type,
                    _In_opt_ OA2DP_CHANNEL *ch, ULONG generation);
+VOID Oa2dpQueueEventLocked(OA2DP_DEVICE_CONTEXT *dev, ULONG type,
+                           OA2DP_CHANNEL *ch, ULONG generation);
+VOID Oa2dpDeliverEvents(OA2DP_DEVICE_CONTEXT *dev);
 NTSTATUS Oa2dpCreateAudioChild(_In_ OA2DP_DEVICE_CONTEXT *dev);
 NTSTATUS Oa2dpRegisterVolumeInterface(_In_ OA2DP_DEVICE_CONTEXT *dev);
 NTSTATUS Oa2dpRegisterBusInterface(_In_ OA2DP_DEVICE_CONTEXT *dev, _In_ WDFDEVICE child);

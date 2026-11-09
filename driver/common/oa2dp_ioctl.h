@@ -9,7 +9,7 @@
 #ifndef OA2DP_IOCTL_H
 #define OA2DP_IOCTL_H
 
-#define OA2DP_IOCTL_VERSION 6
+#define OA2DP_IOCTL_VERSION 7
 
 #include "../../core/include/oa2dp/pcm_format.h"
 
@@ -61,11 +61,16 @@ typedef struct _OA2DP_CHANNEL_INFO {
     USHORT OutMtu;            /* negotiated: max SDU we may send */
     USHORT InMtu;
     ULONG Generation;        /* channel incarnation; never a kernel handle */
+    ULONG ConnectionGeneration; /* signalling incarnation shared with its media channel */
 } OA2DP_CHANNEL_INFO;
 
 typedef struct _OA2DP_CLOSE_CHANNEL_IN {
     ULONG Kind;
+    ULONG ConnectionGeneration; /* 0 = cleanup unknown/pending state */
 } OA2DP_CLOSE_CHANNEL_IN;
+typedef struct _OA2DP_CLOSE_CHANNEL_OUT {
+    ULONG ConnectionGeneration; /* closed/requested old epoch, even if a replacement exists */
+} OA2DP_CLOSE_CHANNEL_OUT;
 
 /* SEND: input buffer = OA2DP_SEND_IN; output (direct) buffer = SDU bytes.
  * RECV: input buffer = OA2DP_RECV_IN; output (direct) buffer receives one

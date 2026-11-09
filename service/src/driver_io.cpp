@@ -156,14 +156,20 @@ bool Transport::open_channel(OA2DP_CHANNEL_KIND kind, OA2DP_CHANNEL_INFO &out)
     return err == ERROR_SUCCESS && n == sizeof(out);
 }
 
-bool Transport::close_channel(OA2DP_CHANNEL_KIND kind)
+bool Transport::close_channel(OA2DP_CHANNEL_KIND kind, ULONG connection, ULONG *closed_connection)
 {
     if (kind == Oa2dpChannelSignaling)
         cancel_receive();
     OA2DP_CLOSE_CHANNEL_IN in{};
     in.Kind = kind;
-    return dev_.ioctl(IOCTL_OA2DP_CLOSE_CHANNEL, &in, sizeof(in), nullptr, 0, nullptr, 5000) ==
-           ERROR_SUCCESS;
+    in.ConnectionGeneration = connection;
+    OA2DP_CLOSE_CHANNEL_OUT out{};
+    DWORD bytes = 0;
+    const bool ok = dev_.ioctl(IOCTL_OA2DP_CLOSE_CHANNEL, &in, sizeof(in),
+                               &out, sizeof(out), &bytes, 15000) == ERROR_SUCCESS &&
+                    bytes == sizeof(out);
+    if (ok && closed_connection) *closed_connection = out.ConnectionGeneration;
+    return ok;
 }
 
 bool Transport::send(OA2DP_CHANNEL_KIND kind, const uint8_t *data, size_t len)

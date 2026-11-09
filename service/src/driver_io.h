@@ -48,7 +48,8 @@ public:
 
     bool get_info(OA2DP_DEVICE_INFO &out);
     bool open_channel(OA2DP_CHANNEL_KIND kind, OA2DP_CHANNEL_INFO &out);
-    bool close_channel(OA2DP_CHANNEL_KIND kind);
+    bool close_channel(OA2DP_CHANNEL_KIND kind, ULONG connection = 0,
+                        ULONG *closed_connection = nullptr);
     bool send(OA2DP_CHANNEL_KIND kind, const uint8_t *data, size_t len);
     // > 0 bytes, 0 timeout, < 0 channel closed / error
     int recv(OA2DP_CHANNEL_KIND kind, uint8_t *buf, size_t cap, DWORD timeout_ms,

@@ -2,7 +2,7 @@
 
 The controlled developer trial targets WH-1000XM6 on Windows 10 x64, build 19045. It uses a local development signature under explicitly authorized test signing. This is separate from the production installer, which still requires Microsoft-signed catalogs.
 
-Latest source audit: [0.3.22 lifecycle review](LIFECYCLE-REVIEW.md). This batch
+Latest source audit: [0.3.23 lifecycle review](LIFECYCLE-REVIEW.md). This batch
 has not been deployed. The earlier 0.3.21 package is staged with a pending PnP
 restart; its install success message did not establish a loaded native stack.
 Do not treat source, staging, CI or backend commands as completed hardware/UI
