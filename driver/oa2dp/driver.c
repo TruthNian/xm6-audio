@@ -1,5 +1,18 @@
 /* SPDX-License-Identifier: MIT */
 #include "oa2dp.h"
+#include <devpropdef.h>
+
+/* Windows resolves an audio endpoint's profile through its own devnode,
+ * not just the shared headset container. Keep the render PDO's identity
+ * consistent with the Bluetooth service that this transport implements. */
+static const DEVPROPKEY BluetoothAddressKey =
+    {{0x2bd67d8b,0x8beb,0x48d5,{0x87,0xe0,0x6c,0xda,0x34,0x28,0x04,0x0a}},1};
+static const DEVPROPKEY BluetoothServiceKey =
+    {{0x2bd67d8b,0x8beb,0x48d5,{0x87,0xe0,0x6c,0xda,0x34,0x28,0x04,0x0a}},2};
+static const GUID AudioSinkService =
+    {0x0000110b,0x0000,0x1000,{0x80,0x00,0x00,0x80,0x5f,0x9b,0x34,0xfb}};
+static const GUID BluetoothBusType =
+    {0x4e72db9b,0xd9a3,0x4f6d,{0x9f,0x9d,0xb3,0xb4,0xed,0x94,0x1a,0x3f}};
 
 #ifdef ALLOC_PRAGMA
 #pragma alloc_text(INIT, DriverEntry)
@@ -62,6 +75,13 @@ NTSTATUS Oa2dpEvtDeviceAdd(_In_ WDFDRIVER Driver, _Inout_ PWDFDEVICE_INIT Device
     RtlZeroMemory(dev, sizeof(*dev));
     dev->Device = device;
     dev->IoTarget = WdfDeviceGetIoTarget(device);
+    {
+        PNP_BUS_INFORMATION bus;
+        RtlZeroMemory(&bus, sizeof(bus));
+        bus.BusTypeGuid = BluetoothBusType;
+        bus.LegacyBusType = PNPBus;
+        WdfDeviceSetBusInformationForChildren(device, &bus);
+    }
     InitializeListHead(&dev->VolumeFiles);
     KeInitializeEvent(&dev->DisconnectedEvent, NotificationEvent, TRUE);
     dev->VolumeDb = -30L * 65536L;
@@ -296,6 +316,26 @@ NTSTATUS Oa2dpCreateAudioChild(_In_ OA2DP_DEVICE_CONTEXT *dev)
         WDF_DEVICE_PNP_CAPABILITIES_INIT(&caps);
         caps.UniqueID = WdfTrue;
         WdfDeviceSetPnpCapabilities(child, &caps);
+    }
+    {
+        WDF_DEVICE_PROPERTY_DATA property;
+        WCHAR address[13];
+        status = RtlStringCchPrintfW(address, ARRAYSIZE(address), L"%012I64x",
+                                     (ULONGLONG)dev->RemoteAddress);
+        if (NT_SUCCESS(status)) {
+            WDF_DEVICE_PROPERTY_DATA_INIT(&property, &BluetoothAddressKey);
+            status = WdfDeviceAssignProperty(child, &property,
+                DEVPROP_TYPE_STRING, sizeof(address), address);
+        }
+        if (NT_SUCCESS(status)) {
+            WDF_DEVICE_PROPERTY_DATA_INIT(&property, &BluetoothServiceKey);
+            status = WdfDeviceAssignProperty(child, &property,
+                DEVPROP_TYPE_GUID, sizeof(AudioSinkService), (PVOID)&AudioSinkService);
+        }
+        if (!NT_SUCCESS(status)) {
+            WdfObjectDelete(child);
+            return status;
+        }
     }
     status = Oa2dpRegisterBusInterface(dev, child);
     if (!NT_SUCCESS(status)) {

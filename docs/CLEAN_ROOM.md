@@ -5,7 +5,8 @@
 The strict clean-room description below records the upstream project's
 policy and original specification. It does **not** describe the entire
 Windows compatibility layer in this fork. The AVRCP volume-cache and
-multi-profile-manager interfaces were investigated using the local Microsoft
+multi-profile-manager interfaces and Settings' Bluetooth endpoint/profile
+association were investigated using the local Microsoft
 Windows binaries and Microsoft's public debugging symbols. They are observed
 Windows 10 compatibility contracts, rather than documented cross-version APIs.
 This fork must not be presented as strictly clean-room for those components.

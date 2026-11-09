@@ -124,6 +124,33 @@ devnode value. Registration does not add another audio endpoint or new process.
 The Windows 10 category/key remain observed compatibility contracts. Actual
 settings disconnect/reconnect and retained-client playback must be revalidated.
 
+## Audio-child Bluetooth identity correction in 0.3.21
+
+Direct inspection of Windows Settings confirmed that 0.3.20 still leaves the
+per-device Disconnect button inconsistent with the actual Classic link. The
+transport is 0.3.20; the active audio module is 0.3.19, whose executable sections
+match the staged 0.3.20 audio module. Both modules being staged is not evidence
+that both are active.
+
+The render PDO lacked the Bluetooth address and service GUID carried by the
+inbox HFP audio PDO. Settings' provider resolves endpoint profiles through the
+endpoint's devnode. Sharing the physical headset container alone does not
+identify its A2DP profile. A reversible local metadata correction made Settings
+recognize native LDAC as "Connected voice, music" and its Disconnect request
+reached the service and closed the link. The UI still remained Disconnecting;
+this is a partial result, not completed disconnect/reconnect acceptance.
+
+The transport now publishes the render PDO's real remote address and Audio Sink
+service GUID before enumeration. It also supplies Bluetooth bus information for
+its children, matching the bus identity of the inbox HFP audio child. No connection
+status is fabricated, no Microsoft devnode policy is cleared, and no helper process
+is added. Bus identity and complete Settings behavior still require deployment
+and hardware validation.
+
+References: the SDK's Bluetooth device property keys and the observed local
+Microsoft endpoint association; documented
+[WdfDeviceSetBusInformationForChildren](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/wdfdevice/nf-wdfdevice-wdfdevicesetbusinformationforchildren).
+
 ## Earlier investigation, before 0.3.12
 
 - The KMDF transport and PortCls/WaveRT child load and enumerate through the Windows Bluetooth stack. Windows retains the radio, pairing and AVRCP profiles.
