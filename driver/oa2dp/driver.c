@@ -423,18 +423,20 @@ VOID Oa2dpEvtIoDeviceControl(_In_ WDFQUEUE Queue, _In_ WDFREQUEST Request,
     }
 
     case IOCTL_OA2DP_CLOSE_CHANNEL: {
-        OA2DP_CLOSE_CHANNEL_IN *in;
-        OA2DP_CLOSE_CHANNEL_OUT *out;
+        OA2DP_CLOSE_CHANNEL_IN *in = NULL;
+        OA2DP_CLOSE_CHANNEL_OUT *out = NULL;
         status = WdfRequestRetrieveInputBuffer(Request, sizeof(*in), (PVOID *)&in, NULL);
         if (NT_SUCCESS(status))
             status = WdfRequestRetrieveOutputBuffer(Request, sizeof(*out), (PVOID *)&out, NULL);
-        if (NT_SUCCESS(status)) {
+        if (NT_SUCCESS(status) && in && out) {
             // METHOD_BUFFERED input/output may alias; snapshot before writing.
             const ULONG kind = in->Kind, connection = in->ConnectionGeneration;
             if (kind >= Oa2dpChannelCount) status = STATUS_INVALID_PARAMETER;
             else status = Oa2dpCloseConnectionChannel(dev, (OA2DP_CHANNEL_KIND)kind,
                                                       connection, &out->ConnectionGeneration);
             if (NT_SUCCESS(status)) info = sizeof(*out);
+        } else if (NT_SUCCESS(status)) {
+            status = STATUS_INVALID_USER_BUFFER;
         }
         break;
     }
