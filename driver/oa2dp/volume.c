@@ -24,9 +24,11 @@ static const DEVPROPKEY AvdtpConnectedKey =
 
 VOID Oa2dpPublishConnected(OA2DP_DEVICE_CONTEXT *dev, BOOLEAN connected)
 {
+    if (connected) KeClearEvent(&dev->DisconnectedEvent);
     const DEVPROP_BOOLEAN value = connected ? DEVPROP_TRUE : DEVPROP_FALSE;
     (void)IoSetDevicePropertyData(WdfDeviceWdmGetPhysicalDevice(dev->Device),
         &AvdtpConnectedKey, LOCALE_NEUTRAL, 0, DEVPROP_TYPE_BOOLEAN, sizeof(value), (PVOID)&value);
+    if (!connected) KeSetEvent(&dev->DisconnectedEvent, IO_NO_INCREMENT, FALSE);
 }
 
 static VOID BusSetConnected(PVOID context, BOOLEAN connected)
@@ -294,6 +296,16 @@ NTSTATUS Oa2dpVolumePreprocess(WDFDEVICE device, PIRP irp)
                 ? dev->AudioConnectionRequest(dev->AudioContext, property.Id == KSPROPERTY_ONESHOT_RECONNECT)
                 : STATUS_DEVICE_NOT_READY;
             WdfSpinLockRelease(dev->Lock);
+            if (NT_SUCCESS(status) && property.Id == KSPROPERTY_ONESHOT_DISCONNECT) {
+                // Windows' one-shot disconnect waits for the real channel close.
+                // The callback above only queues the command and cannot wait
+                // while the parent spin lock protects its topology registration.
+                LARGE_INTEGER timeout;
+                timeout.QuadPart = -10LL * 1000 * 1000 * 10;
+                status = KeWaitForSingleObject(&dev->DisconnectedEvent, Executive,
+                    KernelMode, FALSE, &timeout);
+                if (status == STATUS_TIMEOUT) status = STATUS_IO_TIMEOUT;
+            }
         } else {
             status = STATUS_INVALID_PARAMETER;
         }

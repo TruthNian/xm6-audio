@@ -296,7 +296,18 @@ NTSTATUS Oa2dpBluetoothProperty(_Inout_ OA2DP_AUDIO_DEVICE *dev,
     if (!(request->Verb & KSPROPERTY_TYPE_GET) || request->InstanceSize != 0)
         return STATUS_INVALID_PARAMETER;
     request->ValueSize = 0;
-    return Oa2dpRequestConnection(dev, id == KSPROPERTY_ONESHOT_RECONNECT);
+    NTSTATUS status = Oa2dpRequestConnection(dev, id == KSPROPERTY_ONESHOT_RECONNECT);
+    if (NT_SUCCESS(status) && id == KSPROPERTY_ONESHOT_DISCONNECT) {
+        // A successfully queued command is not a completed disconnect. Keep
+        // the KS request alive until the service closes AVDTP and publishes
+        // the jack state; never hold the device spin lock across this wait.
+        LARGE_INTEGER timeout;
+        timeout.QuadPart = -10LL * 1000 * 1000 * 10;
+        status = KeWaitForSingleObject(&dev->DisconnectedEvent, Executive,
+            KernelMode, FALSE, &timeout);
+        if (status == STATUS_TIMEOUT) status = STATUS_IO_TIMEOUT;
+    }
+    return status;
 }
 
 static NTSTATUS PropertyHandler_Volume(_In_ PPCPROPERTY_REQUEST request)
@@ -445,11 +456,14 @@ extern "C" NTSTATUS Oa2dpSetConnected(_Inout_ OA2DP_AUDIO_DEVICE *dev, _In_ BOOL
     }
     LONG value = connected ? 1 : 0;
     const BOOLEAN changed = InterlockedExchange(&dev->Connected, value) != value;
+    if (connected) KeClearEvent(&dev->DisconnectedEvent);
     KeReleaseSpinLock(&dev->Lock, irql);
     if (dev->Bus.SetConnected)
         dev->Bus.SetConnected(dev->Bus.Header.Context, connected);
-    if (!changed)
+    if (!changed) {
+        if (!connected) KeSetEvent(&dev->DisconnectedEvent, IO_NO_INCREMENT, FALSE);
         return STATUS_SUCCESS;
+    }
     PPORTEVENTS events = NULL;
     Oa2dpLock(&dev->FilterLock);
     if (dev->TopoPort)
@@ -460,5 +474,6 @@ extern "C" NTSTATUS Oa2dpSetConnected(_Inout_ OA2DP_AUDIO_DEVICE *dev, _In_ BOOL
             KSEVENT_PINCAPS_JACKINFOCHANGE, TRUE, OA2DP_TOPO_PIN_OUT, FALSE, ULONG(-1));
         events->Release();
     }
+    if (!connected) KeSetEvent(&dev->DisconnectedEvent, IO_NO_INCREMENT, FALSE);
     return STATUS_SUCCESS;
 }

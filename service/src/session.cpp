@@ -526,14 +526,17 @@ void Session::teardown(const char *why)
 {
     LOGI("teardown: %s", why);
     end_streaming();
-    if (audio_ready_)
-        audio_.set_connected(false);
     if (media_open_)
         tr_.close_channel(Oa2dpChannelMedia);
     media_open_ = false;
     if (sig_open_)
         tr_.close_channel(Oa2dpChannelSignaling);
     sig_open_ = false;
+    // The one-shot KS disconnect completes on this notification. Report it
+    // after both synchronous channel closes, not before the link teardown.
+    // Keep the audio handle, ring and PortCls filters for every existing app.
+    if (audio_ready_)
+        audio_.set_connected(false);
     rx_failed_ = false;
     oa2dp_avdtp_reset(&av_);
     responses_.clear();

@@ -361,6 +361,7 @@ extern "C" NTSTATUS Oa2dpRequestConnection(_Inout_ OA2DP_AUDIO_DEVICE *dev,
 extern "C" VOID Oa2dpControlInit(_Inout_ OA2DP_AUDIO_DEVICE *dev)
 {
     KeInitializeSpinLock(&dev->Lock);
+    KeInitializeEvent(&dev->DisconnectedEvent, NotificationEvent, TRUE);
     KeInitializeEvent(&dev->ControlLock, SynchronizationEvent, TRUE);
     KeInitializeSpinLock(&dev->WaitLock);
     InitializeListHead(&dev->WaitList);

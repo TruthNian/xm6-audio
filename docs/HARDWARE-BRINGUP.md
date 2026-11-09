@@ -56,6 +56,16 @@ The volume/mute basic-support descriptions now expose two channels, both require
 
 These changes require hardware-volume, Bluetooth UI and existing-client reconnect acceptance. They are not a claim that all lifecycle cases are complete. Reference: [Microsoft's multichannel-node contract](https://learn.microsoft.com/en-us/windows-hardware/drivers/audio/exposing-multichannel-nodes).
 
+The user subsequently confirmed bidirectional headset/Windows master-volume synchronization. QQ Music's application volume remains independent. The Bluetooth settings disconnect still fails or leaves the wrong button state, so connection integration remains unaccepted.
+
+The transport loaded the 0.3.16 image, but a query of the actual loaded audio module and its KS range description still identified the earlier audio image. An installed INF, service ImagePath, successful build, or working volume cache does not establish that a pending kernel update has taken effect. The endpoint-lifetime changes must be tested with the new audio module actually loaded.
+
+## Disconnect completion ordering in 0.3.17
+
+The service previously published disconnected before closing the media and signalling channels, and the one-shot KS request returned as soon as its command was queued. Disconnect now publishes after the synchronous close operations. Both the parent's control reference and the PortCls filters wait on notification events for that publication, with a bounded ten-second timeout reported as an error. The parent releases its registration spin lock before waiting; its topology callback remains nonblocking.
+
+The existing PortCls filters, audio handle and PCM ring remain in place during Bluetooth-only reconnects. This does not install application hooks, restart players, capture their output, or add a recovery watchdog. Acceptance requires Windows settings to complete disconnect/reconnect correctly and existing application processes to produce audio through the same endpoint afterward. Build results and direct diagnostic reconnects alone do not meet that acceptance condition.
+
 ## Earlier investigation, before 0.3.12
 
 - The KMDF transport and PortCls/WaveRT child load and enumerate through the Windows Bluetooth stack. Windows retains the radio, pairing and AVRCP profiles.

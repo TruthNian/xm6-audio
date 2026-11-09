@@ -81,6 +81,7 @@ struct _OA2DP_DEVICE_CONTEXT {
     ULONG VolumeFileCount;
     LONG VolumeDb;
     BOOLEAN VolumeMuted;
+    KEVENT DisconnectedEvent;     /* actual AVDTP teardown, not command receipt */
     PVOID AudioContext;
     OA2DP_VOLUME_NOTIFY AudioVolumeNotify;
     OA2DP_CONNECTION_REQUEST AudioConnectionRequest;

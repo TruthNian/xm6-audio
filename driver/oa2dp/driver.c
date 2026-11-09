@@ -63,6 +63,7 @@ NTSTATUS Oa2dpEvtDeviceAdd(_In_ WDFDRIVER Driver, _Inout_ PWDFDEVICE_INIT Device
     dev->Device = device;
     dev->IoTarget = WdfDeviceGetIoTarget(device);
     InitializeListHead(&dev->VolumeFiles);
+    KeInitializeEvent(&dev->DisconnectedEvent, NotificationEvent, TRUE);
     dev->VolumeDb = -30L * 65536L;
     for (ULONG i = 0; i < Oa2dpChannelCount; i++) {
         dev->Channels[i].Dev = dev;
