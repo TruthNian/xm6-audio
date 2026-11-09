@@ -3,7 +3,8 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory=$true)][string]$BuildDirectory,
-    [Parameter(Mandatory=$true)][string]$OutputDirectory
+    [Parameter(Mandatory=$true)][string]$OutputDirectory,
+    [string]$WdkToolsRoot
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -17,11 +18,12 @@ $fileVersion = $version + '.0'
 $output = [IO.Path]::GetFullPath($OutputDirectory)
 if (Test-Path -LiteralPath $output) { throw 'Use a new, empty output directory.' }
 New-Item -ItemType Directory -Path $output | Out-Null
-$kits = Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10'
-$inf2cat = Get-ChildItem "$kits\bin\*\x86\Inf2Cat.exe" | Sort-Object FullName | Select-Object -Last 1
+if (-not $WdkToolsRoot) { $WdkToolsRoot = Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10' }
+$kits = (Resolve-Path -LiteralPath $WdkToolsRoot).Path
+$inf2cat = Get-ChildItem "$kits\bin\*\x86\Inf2Cat.exe" -ErrorAction SilentlyContinue | Sort-Object FullName | Select-Object -Last 1
 $infverif = Get-ChildItem "$kits\Tools\*\x64\infverif.exe" -ErrorAction SilentlyContinue | Sort-Object FullName | Select-Object -Last 1
 if (-not $infverif) {
-    $infverif = Get-ChildItem "$kits\bin\*\x86\infverif.exe" | Sort-Object FullName | Select-Object -Last 1
+    $infverif = Get-ChildItem "$kits\bin\*\x86\infverif.exe" -ErrorAction SilentlyContinue | Sort-Object FullName | Select-Object -Last 1
 }
 if (-not $inf2cat -or -not $infverif) { throw 'WDK Inf2Cat and InfVerif are required.' }
 foreach ($driver in @('oa2dp','oa2dpaudio')) {

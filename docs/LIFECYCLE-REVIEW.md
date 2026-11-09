@@ -236,6 +236,30 @@ authorized hardware cycle, rather than interpreting a successful backend
 command as GUI acceptance. No trace or new driver was activated on the host
 as part of this source-only change.
 
+The saved Settings failure trace was subsequently decoded with TDH rather
+than the Event Log XML renderer, which had emitted only decoding errors.
+All 15 trace records decoded; the trace header reported no lost events or
+buffers. The UI changed from Disconnecting back to Connected in about 10 ms
+and recorded `FailedToDisconnect` with generic `0x80004005`. An earlier
+`0x8007023e` belongs to a separate temporary activity; the observed UI call
+order disposes that activity before invoking the broker. Neither code
+identifies the underlying Bluetooth failure.
+
+Read-only inspection of the local Microsoft call sites also found that the
+broker tries endpoint one-shot commands, then separately requests Bluetooth
+device disconnection. The latter public export's null-radio path aggregates
+results and returns 1168 when no per-radio call succeeds, losing the individual
+error codes. A later authorized capture must therefore distinguish property,
+profile-manager, broker and per-radio results. The saved trace contains only
+the UI provider's events and cannot supply the missing lower-level result.
+
+The inbox driver's disconnect request also performs a bounded wait before
+returning. There is no evidence that deleting our completion wait fixes the
+UI. Microsoft's [one-shot disconnect contract](https://learn.microsoft.com/en-us/windows-hardware/drivers/audio/ksproperty-oneshot-disconnect)
+describes success of the attempt, not proof of final disconnection. Keep that
+distinction when interpreting either a property result or the jack state.
+No connection-policy or completion-wait change was made from this trace.
+
 References: Microsoft [device status and problem codes](https://learn.microsoft.com/en-us/windows-hardware/drivers/install/retrieving-the-status-and-problem-code-for-a-device-instance),
 [framework work items](https://learn.microsoft.com/en-us/windows-hardware/drivers/wdf/using-framework-work-items),
 and [WdfWorkItemFlush](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/wdfworkitem/nf-wdfworkitem-wdfworkitemflush).

@@ -35,9 +35,22 @@ ctest --test-dir build/native -C Release --output-on-failure
 
 The packager requires InfVerif and Inf2Cat to pass; includes both SYS/INF/CAT/PDB sets, user-mode files and licenses; and records source/dependency commits and SHA-256 hashes. Its CAT files are **unsigned**. The manifest proves integrity relative to that build, not Microsoft trust or hardware compatibility. Symbols are included for the signing provider and crash analysis.
 
+For a workspace-local WDK layout, set the process's `WDKContentRoot` before
+CMake configuration and keep matching SDK shared headers with the WDK kernel
+headers and libraries. The packager accepts `-WdkToolsRoot <kit-root>` to locate
+`bin/<version>/x86/Inf2Cat.exe` and `Tools/<version>/x64/infverif.exe` there;
+without this option it uses the installed Windows Kits directory. This also
+supports build files extracted from Microsoft's [WDK NuGet distribution](https://learn.microsoft.com/en-us/windows-hardware/drivers/install-the-wdk-using-nuget),
+without running a system-wide WDK installer. Tool selection does not sign or
+deploy the package.
+
 In the 0.3 package layout, `drivers/oa2dp/` contains the transport SYS/INF/CAT plus `oa2dpsvc.exe`, `oa2dpctl.exe`, `ldac.dll` and `sbc.dll`. All loadable transport/service files are included in that INF's CopyFiles/catalog payload. There is no separate `user-mode/` installation directory. The INF registers a demand-start Win32 service with a device-interface trigger, running from Driver Store. User-mode targets link their MSVC runtime statically; no separate VC runtime installer is required.
 
-The two drivers and service must come from the same build: IOCTL version 3 distinguishes integer/float, container width and valid bits, including integer 32 and 24-in-32 PCM. Kernel compile success does not establish hardware correctness.
+The two drivers and service must come from the same build. The shared IOCTL
+and kernel-bus contracts carry explicit versions and reject mismatches. PCM
+metadata distinguishes integer/float, container width and valid bits,
+including integer 32 and 24-in-32 PCM. Kernel compile success does not establish
+hardware correctness.
 
 ## Deployment and recovery
 
