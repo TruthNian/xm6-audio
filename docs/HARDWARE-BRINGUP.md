@@ -33,6 +33,17 @@ successful connection. Current headset availability, actual sound, controls,
 Settings disconnect/connect labels and existing-client recovery still require
 acceptance. No player was restarted or individually rerouted in this trial.
 
+A later bounded controller trace narrowed the current connection failure.
+The submitted L2CAP OPEN used AVDTP PSM 0x19 and the selected peer address.
+The controller accepted Create Connection (opcode 0x0405, Command Status 0),
+but two Connection Complete events for that peer reported 0x04, defined as
+PAGE_TIMEOUT by the Windows SDK. The failure therefore occurs before ACL
+establishment, authentication and AVDTP codec negotiation. It does not prove
+whether the headset is powered or available for a connection. The trace was
+stopped after capture; raw packets, addresses and controller data remain in
+the protected local diagnostic directory. Headset availability confirmation
+is pending, and no further driver or codec change was made from this result.
+
 ## Current acceptance after the 0.3.18 restart (2026-11-09)
 
 The installed audio package is source commit `2cb9079edb146e6b41b25144a2c0cd4f9c104050`, built by [CI run 42635173749](https://github.com/TruthNian/xm6-audio/actions/runs/42635173749). After the authorized restart, actual kernel-module paths and on-disk image hashes matched both locally signed candidate drivers. The audio topology returned the new 88-byte support description: two channels with MULTICHANNEL and UNIFORM flags. This distinguishes the loaded update from a staged package or a service ImagePath setting.
