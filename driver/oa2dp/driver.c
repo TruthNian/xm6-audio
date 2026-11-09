@@ -138,6 +138,12 @@ NTSTATUS Oa2dpEvtPrepareHardware(_In_ WDFDEVICE Device, _In_ WDFCMRESLIST Raw,
     UNREFERENCED_PARAMETER(Translated);
     PAGED_CODE();
 
+    WdfSpinLockAcquire(dev->Lock);
+    dev->TransportStopping = TRUE; // no admission until the whole prepare transaction succeeds
+    dev->PowerSuspended = FALSE;
+    dev->PowerQuiesced = FALSE;
+    dev->SurpriseRemoved = FALSE;
+    WdfSpinLockRelease(dev->Lock);
     status = WdfFdoQueryForInterface(Device, &GUID_BTHDDI_PROFILE_DRIVER_INTERFACE,
                                      (PINTERFACE)&dev->Profile, sizeof(dev->Profile),
                                      BTHDDI_PROFILE_DRIVER_INTERFACE_VERSION_FOR_QI, NULL);
@@ -150,6 +156,17 @@ NTSTATUS Oa2dpEvtPrepareHardware(_In_ WDFDEVICE Device, _In_ WDFCMRESLIST Raw,
     status = Oa2dpQueryRemoteAddress(dev);
     if (!NT_SUCCESS(status))
         return status;
+    // Resource rebalance/restart can follow a failed cleanup. Finish old
+    // ownership first; never reset rundown state or duplicate registration.
+    Oa2dpMpmStop(dev);
+    status = Oa2dpUnregisterServer(dev);
+    if (!NT_SUCCESS(status)) return status;
+    Oa2dpCloseAllChannels(dev);
+    WdfSpinLockAcquire(dev->Lock);
+    const BOOLEAN closed = (BOOLEAN)Oa2dpConnectionClosed(
+        &dev->Channels[Oa2dpChannelSignaling].Life, &dev->Channels[Oa2dpChannelMedia].Life);
+    WdfSpinLockRelease(dev->Lock);
+    if (!closed) return STATUS_DEVICE_BUSY;
     WdfSpinLockAcquire(dev->Lock);
     // ReleaseHardware may have queued DeviceGone after the old waiter was
     // canceled. That event belongs to the previous PnP lifetime, never to a
@@ -159,22 +176,20 @@ NTSTATUS Oa2dpEvtPrepareHardware(_In_ WDFDEVICE Device, _In_ WDFCMRESLIST Raw,
     WdfSpinLockRelease(dev->Lock);
     Oa2dpPublishConnected(dev, FALSE, 0);
 
-    WdfSpinLockAcquire(dev->Lock);
-    dev->TransportStopping = FALSE;
-    dev->PowerSuspended = FALSE;
-    dev->PowerQuiesced = FALSE;
-    dev->SurpriseRemoved = FALSE;
-    WdfSpinLockRelease(dev->Lock);
     status = Oa2dpMpmStart(dev);
     if (!NT_SUCCESS(status))
         return status;
     /* Establish policy before allowing peer-initiated channels. */
-    (void)Oa2dpRegisterServer(dev);
-    status = Oa2dpCreateAudioChild(dev);
+    status = Oa2dpRegisterServer(dev);
+    if (NT_SUCCESS(status)) status = Oa2dpCreateAudioChild(dev);
     if (!NT_SUCCESS(status)) {
+        (void)Oa2dpUnregisterServer(dev);
         Oa2dpMpmStop(dev);
-        Oa2dpUnregisterServer(dev);
+        return status;
     }
+    WdfSpinLockAcquire(dev->Lock);
+    dev->TransportStopping = FALSE;
+    WdfSpinLockRelease(dev->Lock);
     return status;
 }
 
@@ -260,14 +275,15 @@ NTSTATUS Oa2dpEvtReleaseHardware(_In_ WDFDEVICE Device, _In_ WDFCMRESLIST Transl
     WdfSpinLockAcquire(dev->Lock);
     dev->TransportStopping = TRUE;
     WdfSpinLockRelease(dev->Lock);
-    Oa2dpUnregisterServer(dev);
+    NTSTATUS status = Oa2dpUnregisterServer(dev);
     Oa2dpCloseAllChannels(dev);
     for (ULONG i = 0; i < Oa2dpChannelCount; ++i)
         WdfWorkItemFlush(dev->Channels[i].CloseWork);
-    Oa2dpPublishConnected(dev, FALSE, 0);
+    NTSTATUS published = Oa2dpPublishConnected(dev, FALSE, 0);
     Oa2dpMpmStop(dev);
+    if (NT_SUCCESS(status) && !NT_SUCCESS(published)) status = published;
     Oa2dpPostEvent(dev, Oa2dpEventDeviceGone, NULL, 0);
-    return STATUS_SUCCESS;
+    return status;
 }
 
 /* ------------------------------------------------------------------------ */
@@ -494,7 +510,7 @@ VOID Oa2dpEvtIoDeviceControl(_In_ WDFQUEUE Queue, _In_ WDFREQUEST Request,
             RtlZeroMemory(out, sizeof(*out));
             out->Version = OA2DP_IOCTL_VERSION;
             WdfSpinLockAcquire(dev->Lock);
-            if (dev->MpmHandle) out->Flags |= OA2DP_DEVICE_MPM_REGISTERED;
+            if (dev->MpmHandle && !dev->MpmStopping) out->Flags |= OA2DP_DEVICE_MPM_REGISTERED;
             if (dev->PowerSuspended) out->Flags |= OA2DP_DEVICE_SUSPENDED;
             out->PowerSerial = dev->PowerSerial;
             WdfSpinLockRelease(dev->Lock);

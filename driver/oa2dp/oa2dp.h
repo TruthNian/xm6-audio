@@ -24,6 +24,7 @@
 #include "../common/oa2dp_bus.h"
 #include "../common/channel_lifecycle.h"
 #include "../common/mpm_lifecycle.h"
+#include "../common/server_lifecycle.h"
 
 #define OA2DP_POOL_TAG 'pd2A'
 #define OA2DP_AVDTP_PSM 0x0019
@@ -66,8 +67,7 @@ struct _OA2DP_DEVICE_CONTEXT {
     ULONG EventCount;
     BOOLEAN EventOverflow;
 
-    BOOLEAN PsmRegistered;
-    L2CAP_SERVER_HANDLE ServerHandle;
+    OA2DP_SERVER_REGISTRATION Server;
 
     volatile LONG TxQueuedPackets;
     volatile LONG TxQueuedBytes;
@@ -154,7 +154,7 @@ NTSTATUS Oa2dpQueryLocalAddress(_In_ OA2DP_DEVICE_CONTEXT *dev);
 NTSTATUS Oa2dpQueryRemoteAddress(_In_ OA2DP_DEVICE_CONTEXT *dev);
 NTSTATUS Oa2dpRegisterServer(_In_ OA2DP_DEVICE_CONTEXT *dev);
 NTSTATUS Oa2dpInitializeChannels(OA2DP_DEVICE_CONTEXT *dev);
-VOID Oa2dpUnregisterServer(_In_ OA2DP_DEVICE_CONTEXT *dev);
+NTSTATUS Oa2dpUnregisterServer(_In_ OA2DP_DEVICE_CONTEXT *dev);
 VOID Oa2dpOpenChannel(_In_ OA2DP_DEVICE_CONTEXT *dev, _In_ WDFREQUEST request,
                       _In_ const OA2DP_OPEN_CHANNEL_IN *in);
 NTSTATUS Oa2dpCloseChannel(_In_ OA2DP_DEVICE_CONTEXT *dev, _In_ OA2DP_CHANNEL_KIND kind);

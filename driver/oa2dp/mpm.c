@@ -94,6 +94,7 @@ NTSTATUS Oa2dpMpmStart(OA2DP_DEVICE_CONTEXT *dev)
     PVOID handle = NULL;
     NTSTATUS status;
     PAGED_CODE();
+    if (dev->MpmHandle) return STATUS_DEVICE_BUSY; // failed unregister still owns callbacks
     ExInitializeRundownProtection(&dev->MpmCalls);
     ExInitializeRundownProtection(&dev->MpmCallbacks);
     dev->MpmStopping = FALSE;
@@ -128,6 +129,8 @@ VOID Oa2dpMpmStop(OA2DP_DEVICE_CONTEXT *dev)
     // callback context alive while Windows removes its queued notifications.
     ExWaitForRundownProtectionRelease(&dev->MpmCalls);
     handle = InterlockedExchangePointer(&dev->MpmHandle, NULL);
+    // Observed local contract consumes this handle and returns zero. Do not
+    // invent a retryable-failure ownership contract for this private API.
     if (handle) (void)BtaMpmUnregister(handle);
     ExWaitForRundownProtectionRelease(&dev->MpmCallbacks);
     // No callback can enqueue a publication after this final drain.
@@ -160,7 +163,8 @@ NTSTATUS Oa2dpMpmConnected(OA2DP_DEVICE_CONTEXT *dev, BOOLEAN connected)
 {
     NTSTATUS status;
     ULONG serial;
-    if (!AcquireManager(dev)) return connected ? STATUS_DEVICE_NOT_READY : STATUS_SUCCESS;
+    if (!AcquireManager(dev))
+        return !connected && !dev->MpmHandle ? STATUS_SUCCESS : STATUS_DEVICE_NOT_READY;
     WdfSpinLockAcquire(dev->Lock);
     serial = Oa2dpMpmCompletion(&dev->MpmRequest, connected);
     WdfSpinLockRelease(dev->Lock);

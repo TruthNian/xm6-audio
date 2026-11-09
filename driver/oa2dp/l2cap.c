@@ -298,8 +298,9 @@ static VOID CloseWorkItem(_In_ WDFWORKITEM WorkItem)
 /* Server registration                                                      */
 /* ------------------------------------------------------------------------ */
 
-NTSTATUS Oa2dpRegisterServer(_In_ OA2DP_DEVICE_CONTEXT *dev)
+static int32_t RegisterPsm(void *context)
 {
+    OA2DP_DEVICE_CONTEXT *dev = context;
     NTSTATUS status;
     struct _BRB_PSM *psm = (struct _BRB_PSM *)dev->Profile.BthAllocateBrb(BRB_REGISTER_PSM,
                                                                           OA2DP_POOL_TAG);
@@ -308,51 +309,76 @@ NTSTATUS Oa2dpRegisterServer(_In_ OA2DP_DEVICE_CONTEXT *dev)
     psm->Psm = OA2DP_AVDTP_PSM;
     status = Oa2dpSubmitBrbSync(dev, (struct _BRB *)psm, sizeof(*psm));
     dev->Profile.BthFreeBrb((PBRB)psm);
-    if (!NT_SUCCESS(status))
-        return status;
-    dev->PsmRegistered = TRUE;
+    return status;
+}
 
+static int32_t RegisterServer(void *context, uintptr_t *handle)
+{
+    OA2DP_DEVICE_CONTEXT *dev = context;
     struct _BRB_L2CA_REGISTER_SERVER *srv = (struct _BRB_L2CA_REGISTER_SERVER *)
         dev->Profile.BthAllocateBrb(BRB_L2CA_REGISTER_SERVER, OA2DP_POOL_TAG);
     if (!srv)
         return STATUS_INSUFFICIENT_RESOURCES;
     srv->BtAddress = dev->RemoteAddress; /* only our headset */
-    srv->PSM = 0;                        /* every PSM we registered */
+    srv->PSM = OA2DP_AVDTP_PSM;
     srv->IndicationCallback = IndicationCallback;
     srv->IndicationCallbackContext = dev;
     srv->IndicationFlags = 0;
     srv->ReferenceObject = WdfDeviceWdmGetDeviceObject(dev->Device);
-    status = Oa2dpSubmitBrbSync(dev, (struct _BRB *)srv, sizeof(*srv));
+    NTSTATUS status = Oa2dpSubmitBrbSync(dev, (struct _BRB *)srv, sizeof(*srv));
     if (NT_SUCCESS(status))
-        dev->ServerHandle = srv->ServerHandle;
+        *handle = (uintptr_t)srv->ServerHandle;
+    if (NT_SUCCESS(status) && !*handle) status = STATUS_INVALID_HANDLE;
     dev->Profile.BthFreeBrb((PBRB)srv);
     return status;
 }
 
-VOID Oa2dpUnregisterServer(_In_ OA2DP_DEVICE_CONTEXT *dev)
+static int32_t UnregisterServer(void *context, uintptr_t handle)
 {
-    if (dev->ServerHandle) {
-        struct _BRB_L2CA_UNREGISTER_SERVER *b = (struct _BRB_L2CA_UNREGISTER_SERVER *)
-            dev->Profile.BthAllocateBrb(BRB_L2CA_UNREGISTER_SERVER, OA2DP_POOL_TAG);
-        if (b) {
-            b->BtAddress = dev->RemoteAddress;
-            b->Psm = 0;
-            b->ServerHandle = dev->ServerHandle;
-            (void)Oa2dpSubmitBrbSync(dev, (struct _BRB *)b, sizeof(*b));
-            dev->Profile.BthFreeBrb((PBRB)b);
-        }
-        dev->ServerHandle = NULL;
-    }
-    if (dev->PsmRegistered) {
-        struct _BRB_PSM *psm = (struct _BRB_PSM *)dev->Profile.BthAllocateBrb(
-            BRB_UNREGISTER_PSM, OA2DP_POOL_TAG);
-        if (psm) {
-            psm->Psm = OA2DP_AVDTP_PSM;
-            (void)Oa2dpSubmitBrbSync(dev, (struct _BRB *)psm, sizeof(*psm));
-            dev->Profile.BthFreeBrb((PBRB)psm);
-        }
-        dev->PsmRegistered = FALSE;
-    }
+    OA2DP_DEVICE_CONTEXT *dev = context;
+    struct _BRB_L2CA_UNREGISTER_SERVER *b = (struct _BRB_L2CA_UNREGISTER_SERVER *)
+        dev->Profile.BthAllocateBrb(BRB_L2CA_UNREGISTER_SERVER, OA2DP_POOL_TAG);
+    if (!b) return STATUS_INSUFFICIENT_RESOURCES;
+    b->BtAddress = dev->RemoteAddress;
+    b->Psm = OA2DP_AVDTP_PSM;
+    b->ServerHandle = (PVOID)handle;
+    NTSTATUS status = Oa2dpSubmitBrbSync(dev, (struct _BRB *)b, sizeof(*b));
+    dev->Profile.BthFreeBrb((PBRB)b);
+    return status;
+}
+
+static int32_t UnregisterPsm(void *context)
+{
+    OA2DP_DEVICE_CONTEXT *dev = context;
+    struct _BRB_PSM *psm = (struct _BRB_PSM *)dev->Profile.BthAllocateBrb(
+        BRB_UNREGISTER_PSM, OA2DP_POOL_TAG);
+    if (!psm) return STATUS_INSUFFICIENT_RESOURCES;
+    psm->Psm = OA2DP_AVDTP_PSM;
+    NTSTATUS status = Oa2dpSubmitBrbSync(dev, (struct _BRB *)psm, sizeof(*psm));
+    dev->Profile.BthFreeBrb((PBRB)psm);
+    return status;
+}
+
+static const OA2DP_SERVER_OPERATIONS ServerOperations = {
+    RegisterServer, RegisterPsm, UnregisterServer, UnregisterPsm
+};
+
+NTSTATUS Oa2dpRegisterServer(_In_ OA2DP_DEVICE_CONTEXT *dev)
+{
+    NTSTATUS status = Oa2dpServerRegister(&dev->Server, &ServerOperations, dev);
+    if (!NT_SUCCESS(status))
+        KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL,
+            "oa2dp: server registration incomplete 0x%08X\n", status));
+    return status;
+}
+
+NTSTATUS Oa2dpUnregisterServer(_In_ OA2DP_DEVICE_CONTEXT *dev)
+{
+    NTSTATUS status = Oa2dpServerUnregister(&dev->Server, &ServerOperations, dev);
+    if (!NT_SUCCESS(status))
+        KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_WARNING_LEVEL,
+            "oa2dp: server unregister failed; retaining ownership 0x%08X\n", status));
+    return status;
 }
 
 /* ------------------------------------------------------------------------ */

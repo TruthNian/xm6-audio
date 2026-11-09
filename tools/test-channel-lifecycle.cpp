@@ -1,8 +1,10 @@
 /* SPDX-License-Identifier: MIT */
 #include "../driver/common/channel_lifecycle.h"
 #include "../driver/common/mpm_lifecycle.h"
+#include "../driver/common/server_lifecycle.h"
 #include <cstdio>
 #include <cstdlib>
+#include <vector>
 #define REQUIRE(x) do { if (!(x)) { std::fprintf(stderr, "line %d: %s\n", __LINE__, #x); std::exit(1); } } while (0)
 
 static OA2DP_CHANNEL_LIFECYCLE opened(uint32_t previous, uint32_t connection)
@@ -61,8 +63,80 @@ static void data_and_publication_boundaries()
     REQUIRE(!Oa2dpConnectionReady(&signal, &media, replacement, 1, 0)); // mismatched pair
 }
 
+struct FakeServer {
+    int32_t register_server = 0, register_psm = 0, unregister_server = 0, unregister_psm = 0;
+    std::vector<int> calls;
+};
+static const OA2DP_SERVER_OPERATIONS fake_server_operations = {
+    [](void *context, uintptr_t *handle) -> int32_t {
+        auto &f = *static_cast<FakeServer *>(context);
+        f.calls.push_back(1);
+        if (f.register_server >= 0) *handle = 0x42;
+        return f.register_server;
+    },
+    [](void *context) -> int32_t {
+        auto &f = *static_cast<FakeServer *>(context);
+        f.calls.push_back(2);
+        return f.register_psm;
+    },
+    [](void *context, uintptr_t handle) -> int32_t {
+        auto &f = *static_cast<FakeServer *>(context);
+        REQUIRE(handle == 0x42); // exactly the returned owner, never a guessed handle
+        f.calls.push_back(3);
+        return f.unregister_server;
+    },
+    [](void *context) -> int32_t {
+        auto &f = *static_cast<FakeServer *>(context);
+        f.calls.push_back(4);
+        return f.unregister_psm;
+    }
+};
+
+static void server_ownership_failures()
+{
+    OA2DP_SERVER_REGISTRATION r{};
+    FakeServer f;
+    f.register_psm = -1; // failure after server acquired (allocation or lower BRB failure)
+    REQUIRE(Oa2dpServerRegister(&r, &fake_server_operations, &f) == -1);
+    REQUIRE(r.Handle == 0x42 && !r.PsmRegistered);
+    REQUIRE(f.calls == std::vector<int>({1, 2}));
+    f.register_psm = 0;
+    REQUIRE(Oa2dpServerRegister(&r, &fake_server_operations, &f) == 0);
+    REQUIRE(f.calls == std::vector<int>({1, 2, 2})); // retry does not duplicate server
+    REQUIRE(r.PsmRegistered);
+    REQUIRE(Oa2dpServerRegister(&r, &fake_server_operations, &f) == 0);
+    REQUIRE(f.calls.size() == 3);
+    f.unregister_server = -2;
+    REQUIRE(Oa2dpServerUnregister(&r, &fake_server_operations, &f) == -2);
+    REQUIRE(r.Handle == 0x42 && r.PsmRegistered);
+    REQUIRE(f.calls.back() == 3 && f.calls.size() == 4); // no PSM drop after failed server close
+    f.unregister_server = 0;
+    f.unregister_psm = -3;
+    REQUIRE(Oa2dpServerUnregister(&r, &fake_server_operations, &f) == -3);
+    REQUIRE(!r.Handle && r.PsmRegistered);
+    REQUIRE(f.calls == std::vector<int>({1, 2, 2, 3, 3, 4}));
+    f.unregister_psm = 0;
+    REQUIRE(Oa2dpServerUnregister(&r, &fake_server_operations, &f) == 0);
+    REQUIRE(!r.Handle && !r.PsmRegistered);
+    REQUIRE(f.calls == std::vector<int>({1, 2, 2, 3, 3, 4, 4})); // retry only the remaining resource
+    REQUIRE(Oa2dpServerUnregister(&r, &fake_server_operations, &f) == 0);
+    REQUIRE(f.calls.size() == 7);
+
+    f = FakeServer{};
+    f.register_server = -4;
+    REQUIRE(Oa2dpServerRegister(&r, &fake_server_operations, &f) == -4);
+    REQUIRE(!r.Handle && !r.PsmRegistered && f.calls == std::vector<int>({1}));
+    f = FakeServer{};
+    f.register_psm = -5;
+    REQUIRE(Oa2dpServerRegister(&r, &fake_server_operations, &f) == -5);
+    REQUIRE(Oa2dpServerUnregister(&r, &fake_server_operations, &f) == 0);
+    REQUIRE(!r.Handle && !r.PsmRegistered);
+    REQUIRE(f.calls == std::vector<int>({1, 2, 3})); // never unregister an unacquired PSM
+}
+
 int main()
 {
+    server_ownership_failures();
     OA2DP_MPM_REQUEST request{};
     REQUIRE(!Oa2dpMpmCompletion(&request, 1)); // unsolicited peer connection
     auto connect = Oa2dpMpmBeginRequest(&request, 1);

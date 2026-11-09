@@ -1,8 +1,8 @@
-# Native lifecycle review, 0.3.27
+# Native lifecycle review, 0.3.28
 
 This source batch is not a declaration of hardware acceptance. Source review
 and focused offline checks precede another hardware trial. Versions 0.3.23
-through 0.3.27 have not been installed on the host. The host was restored to Microsoft
+through 0.3.28 have not been installed on the host. The host was restored to Microsoft
 BthA2dp; the custom codec service is stopped. Current host audio is not evidence
 of native LDAC. No further installation or reboot is part of this source review.
 
@@ -27,6 +27,7 @@ of native LDAC. No further installation or reboot is part of this source review.
 | Unsolicited state change or overlapping Windows requests | Every MPM connection update claimed to complete a requested operation | Distinguish unsolicited status from a matching pending request; serial-bound local retirement and failed outgoing OPEN completion |
 | Device enters low power with idle receive/event wait | Power-managed queues had indefinite requests without EvtIoStop; no suspend/restart transport lifecycle | Explicit self-managed suspend/restart, non-power-managed control/event queues, gated/bounded Bluetooth teardown and current power state/serial in ABI 9 |
 | Music idles or HFP suspend/resume requests overlap | Encoder stop was equated with profile suspension; cache changed before MPM accepted it, and replies had no request identity | Separate profile availability from idle PCM, echo suspend request serial and link epoch in ABI 10/bus ABI 5, serialize MPM calls, retain failed updates and reject stale replies |
+| Server/PSM allocation or registration/unregistration fails | Setup ignored registration failure; cleanup erased ownership even when no unregister BRB could be allocated | Transactional registration state shared with off-host failure injection; retain each resource until confirmed release, gate admission through prepare and finish old ownership before a new registration |
 
 Channel close work is preallocated rather than allocated in a disconnect
 indication. Allocation failure can no longer fabricate a completed remote
@@ -125,6 +126,22 @@ audio/video timing. They cannot prove those properties without hardware use.
 
 ## Outstanding acceptance
 
+L2CAP server registration now follows the documented server-then-PSM sequence
+with the explicit AVDTP PSM (0x19) for registration and unregister. The pure
+resource transaction is the one called by the kernel driver. Fake callbacks
+exercise failure before acquiring a server, failed PSM acquisition, failed
+server release, partial cleanup, retry of only the remaining resource and
+duplicate no-op calls. These cover ownership/ordering, not Bluetooth callback
+cancellation or physical radio removal. Prepare reports registration failures
+instead of enabling a partial profile, and release returns cleanup errors.
+
+MPM unregister was separately inspected: the observed local implementation
+consumes its opaque handle and returns zero. No speculative retry of a consumed
+MPM handle was introduced. Its callback/API rundown remains separate from the
+documented L2CAP server/PSM transaction. Permanent removal while lower-stack
+cleanup fails remains a hardware/lifetime acceptance item; retaining ownership
+is not proof that Windows completed cleanup.
+
 Windows Settings still needs a complete per-device Disconnect -> Connect cycle
 with correct final labels. In 0.3.21's local metadata experiment it recognized
 "voice, music" and closed the Classic link, but retained Disconnecting/Connected.
@@ -147,3 +164,6 @@ Power contracts: [Using power-managed I/O queues](https://learn.microsoft.com/en
 [Using self-managed I/O](https://learn.microsoft.com/en-us/windows-hardware/drivers/wdf/using-self-managed-i-o),
 [Self-managed suspend](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/wdfdevice/nc-wdfdevice-evt_wdf_device_self_managed_io_suspend),
 and [self-managed restart](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/wdfdevice/nc-wdfdevice-evt_wdf_device_self_managed_io_restart).
+Server ownership/order: [L2CAP server registration](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/bthddi/ns-bthddi-_brb_l2ca_register_server),
+[server unregister](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/bthddi/ns-bthddi-_brb_l2ca_unregister_server),
+and [PSM registration](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/bthddi/ns-bthddi-_brb_psm).
