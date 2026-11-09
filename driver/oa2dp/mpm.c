@@ -37,15 +37,17 @@ static NTSTATUS NTAPI ConnectionRequest(PVOID context, ULONG connect)
         status = STATUS_DELETE_PENDING;
     } else {
         dev->PolicyConnected = enabled;
+        if (!enabled) KeClearEvent(&dev->DisconnectedEvent);
         if (dev->AudioPolicyRequest)
             status = dev->AudioPolicyRequest(dev->AudioContext, enabled, dev->PolicySuspended);
         acknowledge = NT_SUCCESS(status) && dev->MpmConnected == enabled &&
-            (enabled || (dev->Channels[Oa2dpChannelSignaling].State == ChannelClosed &&
-                         dev->Channels[Oa2dpChannelMedia].State == ChannelClosed));
+            (enabled || (dev->Channels[Oa2dpChannelSignaling].Life.State == ChannelClosed &&
+                         dev->Channels[Oa2dpChannelMedia].Life.State == ChannelClosed));
     }
     WdfSpinLockRelease(dev->Lock);
     if (acknowledge && AcquireManager(dev)) {
         (void)BtaMpmUpdateConnectionStatus(dev->MpmHandle, enabled, 1);
+        if (!enabled) KeSetEvent(&dev->DisconnectedEvent, IO_NO_INCREMENT, FALSE);
         ExReleaseRundownProtection(&dev->MpmCalls);
     }
     ExReleaseRundownProtection(&dev->MpmCallbacks);
@@ -130,6 +132,16 @@ NTSTATUS Oa2dpMpmRequestConnection(PVOID context, BOOLEAN enabled)
     OA2DP_DEVICE_CONTEXT *dev = context;
     NTSTATUS status;
     if (!AcquireManager(dev)) return STATUS_DEVICE_NOT_READY;
+    // A pending automatic OPEN may precede MPM's connected state. Explicit
+    // user disconnect must latch local policy even if MPM has no live profile
+    // transition to call back for yet. Coordination still goes through MPM.
+    if (!enabled) {
+        status = ConnectionRequest(dev, FALSE);
+        if (!NT_SUCCESS(status)) {
+            ExReleaseRundownProtection(&dev->MpmCalls);
+            return status;
+        }
+    }
     status = BtaMpmConnectionRequest(dev->MpmHandle, enabled, 0);
     ExReleaseRundownProtection(&dev->MpmCalls);
     // A one-shot property queues policy; it is not a pending KS method IRP.

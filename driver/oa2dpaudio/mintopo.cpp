@@ -300,11 +300,12 @@ NTSTATUS Oa2dpBluetoothProperty(_Inout_ OA2DP_AUDIO_DEVICE *dev,
         id == KSPROPERTY_ONESHOT_RECONNECT);
     if (NT_SUCCESS(status) && id == KSPROPERTY_ONESHOT_DISCONNECT) {
         // A successfully queued command is not a completed disconnect. Keep
-        // the KS request alive until the service closes AVDTP and publishes
-        // the jack state; never hold the device spin lock across this wait.
+        // the KS request alive until the transport really closes AVDTP. Both
+        // interfaces wait on that one referenced event, not a jack-state copy.
         LARGE_INTEGER timeout;
         timeout.QuadPart = -10LL * 1000 * 1000 * 10;
-        status = KeWaitForSingleObject(&dev->DisconnectedEvent, Executive,
+        if (!dev->Bus.DisconnectedEvent) return STATUS_DEVICE_NOT_READY;
+        status = KeWaitForSingleObject(dev->Bus.DisconnectedEvent, Executive,
             KernelMode, FALSE, &timeout);
         if (status == STATUS_TIMEOUT) status = STATUS_IO_TIMEOUT;
     }
@@ -455,15 +456,18 @@ extern "C" NTSTATUS Oa2dpSetConnected(_Inout_ OA2DP_AUDIO_DEVICE *dev, _In_ BOOL
         KeReleaseSpinLock(&dev->Lock, irql);
         return status;
     }
+    KeReleaseSpinLock(&dev->Lock, irql);
+    if (dev->Bus.SetConnected) {
+        status = dev->Bus.SetConnected(dev->Bus.Header.Context, connected);
+        if (!NT_SUCCESS(status) && connected) return status;
+    }
+    // The transport validates completion first. Failed/unfinished channel
+    // closes cannot acknowledge the KS disconnect. An unavailable encoder may
+    // still unplug its audio jack before the physical transport finishes.
     LONG value = connected ? 1 : 0;
     const BOOLEAN changed = InterlockedExchange(&dev->Connected, value) != value;
-    if (connected) KeClearEvent(&dev->DisconnectedEvent);
-    KeReleaseSpinLock(&dev->Lock, irql);
-    if (dev->Bus.SetConnected)
-        dev->Bus.SetConnected(dev->Bus.Header.Context, connected);
     if (!changed) {
-        if (!connected) KeSetEvent(&dev->DisconnectedEvent, IO_NO_INCREMENT, FALSE);
-        return STATUS_SUCCESS;
+        return status;
     }
     PPORTEVENTS events = NULL;
     Oa2dpLock(&dev->FilterLock);
@@ -475,6 +479,5 @@ extern "C" NTSTATUS Oa2dpSetConnected(_Inout_ OA2DP_AUDIO_DEVICE *dev, _In_ BOOL
             KSEVENT_PINCAPS_JACKINFOCHANGE, TRUE, OA2DP_TOPO_PIN_OUT, FALSE, ULONG(-1));
         events->Release();
     }
-    if (!connected) KeSetEvent(&dev->DisconnectedEvent, IO_NO_INCREMENT, FALSE);
-    return STATUS_SUCCESS;
+    return status;
 }

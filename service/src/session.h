@@ -53,7 +53,7 @@ private:
     void main_loop();
     void event_loop();
     void audio_loop();
-    void stream_loop();
+    void stream_loop(ULONG generation);
 
     // signalling helpers (main thread only)
     void post(const Command &c);
@@ -92,6 +92,9 @@ private:
     std::map<int, oa2dp_avdtp_event> responses_;   // label -> response
     uint16_t sig_mtu_ = 0, media_mtu_ = 0;
     bool sig_open_ = false, media_open_ = false;
+    ULONG sig_generation_ = 0, media_generation_ = 0;
+    ULONG stream_generation_ = 0;
+    bool teardown_pending_ = false;
     bool rx_failed_ = false;   // owned by the signalling thread
 
     // negotiated stream

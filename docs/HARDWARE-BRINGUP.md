@@ -2,6 +2,12 @@
 
 The controlled developer trial targets WH-1000XM6 on Windows 10 x64, build 19045. It uses a local development signature under explicitly authorized test signing. This is separate from the production installer, which still requires Microsoft-signed catalogs.
 
+Latest source audit: [0.3.22 lifecycle review](LIFECYCLE-REVIEW.md). This batch
+has not been deployed. The earlier 0.3.21 package is staged with a pending PnP
+restart; its install success message did not establish a loaded native stack.
+Do not treat source, staging, CI or backend commands as completed hardware/UI
+acceptance. The observations below retain their original tested versions.
+
 ## Current acceptance after the 0.3.18 restart (2026-11-09)
 
 The installed audio package is source commit `2cb9079edb146e6b41b25144a2c0cd4f9c104050`, built by [CI run 42635173749](https://github.com/TruthNian/xm6-audio/actions/runs/42635173749). After the authorized restart, actual kernel-module paths and on-disk image hashes matched both locally signed candidate drivers. The audio topology returned the new 88-byte support description: two channels with MULTICHANNEL and UNIFORM flags. This distinguishes the loaded update from a staged package or a service ImagePath setting.

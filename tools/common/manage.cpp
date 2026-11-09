@@ -2,6 +2,7 @@
 #include "manage.h"
 
 #include <bluetoothapis.h>
+#include <cfgmgr32.h>
 #include <newdev.h>
 
 #include <algorithm>
@@ -215,8 +216,23 @@ bool install_driver(HDEVINFO set, SP_DEVINFO_DATA &dev, bool ours, std::wstring 
     if (!ok)
         return fail(L"DiInstallDevice failed (" + std::to_wstring(e) + L")" +
                     (e == ERROR_ACCESS_DENIED ? L": run as administrator" : L""));
+    // DiInstallDevice can report no *new* reboot requirement while an earlier
+    // rebind is still pending on this devnode. Registry Service/INF values
+    // already describe the staged package in that case, not the loaded stack.
+    ULONG node_status = 0, problem = 0;
+    CONFIGRET cr = CM_Get_DevNode_Status(&node_status, &problem, dev.DevInst, 0);
+    if (cr != CR_SUCCESS)
+        return fail(L"Cannot verify device state after installation (" +
+                    std::to_wstring(cr) + L")");
+    SP_DEVINSTALL_PARAMS_W params{};
+    params.cbSize = sizeof(params);
+    if (!SetupDiGetDeviceInstallParamsW(set, &dev, &params))
+        return fail(L"Cannot verify pending device install flags (" +
+                    std::to_wstring(GetLastError()) + L")");
     if (reboot)
-        *reboot = need_reboot != FALSE;
+        *reboot = need_reboot != FALSE || (node_status & DN_NEED_RESTART) != 0 ||
+                  ((node_status & DN_HAS_PROBLEM) && problem == CM_PROB_NEED_RESTART) ||
+                  (params.Flags & (DI_NEEDRESTART | DI_NEEDREBOOT)) != 0;
     return true;
 }
 

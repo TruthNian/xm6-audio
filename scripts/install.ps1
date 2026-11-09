@@ -17,6 +17,20 @@ function Invoke-Checked([string]$File,[string[]]$Arguments) {
     if ($result -notin @(0,3010)) { throw "$File failed ($result)." }
     if ($result -eq 3010) { $script:RestartRequired = $true }
 }
+function Test-NativeDeviceState([string]$InstanceId) {
+    $problem = [uint32](Get-PnpDeviceProperty -InstanceId $InstanceId -KeyName DEVPKEY_Device_ProblemCode).Data
+    $nodeStatus = [uint32](Get-PnpDeviceProperty -InstanceId $InstanceId -KeyName DEVPKEY_Device_DevNodeStatus).Data
+    if ($problem -eq 14 -or ($nodeStatus -band 0x100) -ne 0) {
+        # CM_PROB_NEED_RESTART / DN_NEED_RESTART are pending activation,
+        # including a previous operation whose installer returned success.
+        $script:RestartRequired = $true
+        return
+    }
+    if ($problem -ne 0 -or ($nodeStatus -band 0x8) -eq 0) {
+        $problemStatus = (Get-PnpDeviceProperty -InstanceId $InstanceId -KeyName DEVPKEY_Device_ProblemStatus).Data
+        throw ('Native device is not started: problem {0}, status 0x{1:X8}.' -f $problem,[uint32]$problemStatus)
+    }
+}
 function Assert-Administrator {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
     if (-not ([Security.Principal.WindowsPrincipal]$identity).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
@@ -114,17 +128,19 @@ try {
     $oldService = Get-Service oa2dpsvc -ErrorAction SilentlyContinue
     if ($oldService -and $oldService.Status -ne 'Stopped') { Stop-Service oa2dpsvc }
     Invoke-Checked $ctl @('use',$address)
-    $problem = (Get-PnpDeviceProperty -InstanceId $headset[0].InstanceId -KeyName DEVPKEY_Device_ProblemCode).Data
-    if ($problem -ne 0) {
-        $problemStatus = (Get-PnpDeviceProperty -InstanceId $headset[0].InstanceId -KeyName DEVPKEY_Device_ProblemStatus).Data
-        throw ('Native transport failed to start: problem {0}, status 0x{1:X8}.' -f $problem,[uint32]$problemStatus)
-    }
+    Test-NativeDeviceState $headset[0].InstanceId
     # Staging alone leaves an existing child bound to its previous package.
     # The preflight rejects another present native headset before this update.
     Invoke-Checked pnputil.exe @('/add-driver',"$package\drivers\oa2dpaudio\oa2dpaudio.inf",'/install')
-    $service = Get-Service oa2dpsvc
-    if ($service.Status -eq 'Stopped') { Start-Service oa2dpsvc }
-    $service.WaitForStatus('Running',[TimeSpan]::FromSeconds(30))
+    Test-NativeDeviceState $headset[0].InstanceId
+    $child = Get-PnpDevice -InstanceId ('OA2DP\Render\'+$address) -PresentOnly -ErrorAction SilentlyContinue
+    if ($child) { Test-NativeDeviceState $child.InstanceId }
+    if (-not $script:RestartRequired) {
+        if (-not $child) { throw 'Native audio child did not enumerate.' }
+        $service = Get-Service oa2dpsvc
+        if ($service.Status -eq 'Stopped') { Start-Service oa2dpsvc }
+        $service.WaitForStatus('Running',[TimeSpan]::FromSeconds(30))
+    }
 } catch {
     $failure = $_
     if ($bindingAttempted) {

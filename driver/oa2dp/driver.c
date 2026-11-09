@@ -95,6 +95,9 @@ NTSTATUS Oa2dpEvtDeviceAdd(_In_ WDFDRIVER Driver, _Inout_ PWDFDEVICE_INIT Device
     status = WdfSpinLockCreate(&attrs, &dev->Lock);
     if (!NT_SUCCESS(status))
         return status;
+    status = Oa2dpInitializeChannels(dev);
+    if (!NT_SUCCESS(status))
+        return status;
 
     /* PASSIVE_LEVEL dispatch: CLOSE_CHANNEL submits BRBs synchronously. */
     WDF_IO_QUEUE_CONFIG_INIT_DEFAULT_QUEUE(&qcfg, WdfIoQueueDispatchParallel);
@@ -135,17 +138,21 @@ NTSTATUS Oa2dpEvtPrepareHardware(_In_ WDFDEVICE Device, _In_ WDFCMRESLIST Raw,
     status = Oa2dpQueryRemoteAddress(dev);
     if (!NT_SUCCESS(status))
         return status;
+    WdfSpinLockAcquire(dev->Lock);
+    // ReleaseHardware may have queued DeviceGone after the old waiter was
+    // canceled. That event belongs to the previous PnP lifetime, never to a
+    // replacement service session after resume/radio restart.
+    dev->EventHead = dev->EventCount = 0;
+    dev->EventOverflow = FALSE;
+    WdfSpinLockRelease(dev->Lock);
     Oa2dpPublishConnected(dev, FALSE);
 
-    /* Accepting headset-initiated connections is best effort: if another
-     * driver already owns PSM 0x19 we still work as connection initiator. */
-    (void)Oa2dpRegisterServer(dev);
-
+    dev->TransportStopping = FALSE;
     status = Oa2dpMpmStart(dev);
-    if (!NT_SUCCESS(status)) {
-        Oa2dpUnregisterServer(dev);
+    if (!NT_SUCCESS(status))
         return status;
-    }
+    /* Establish policy before allowing peer-initiated channels. */
+    (void)Oa2dpRegisterServer(dev);
     status = Oa2dpCreateAudioChild(dev);
     if (!NT_SUCCESS(status)) {
         Oa2dpMpmStop(dev);
@@ -159,11 +166,16 @@ NTSTATUS Oa2dpEvtReleaseHardware(_In_ WDFDEVICE Device, _In_ WDFCMRESLIST Transl
     OA2DP_DEVICE_CONTEXT *dev = Oa2dpGetDevice(Device);
     UNREFERENCED_PARAMETER(Translated);
     PAGED_CODE();
+    WdfSpinLockAcquire(dev->Lock);
+    dev->TransportStopping = TRUE;
+    WdfSpinLockRelease(dev->Lock);
+    Oa2dpUnregisterServer(dev);
     Oa2dpCloseAllChannels(dev);
+    for (ULONG i = 0; i < Oa2dpChannelCount; ++i)
+        WdfWorkItemFlush(dev->Channels[i].CloseWork);
     Oa2dpPublishConnected(dev, FALSE);
     Oa2dpMpmStop(dev);
-    Oa2dpUnregisterServer(dev);
-    Oa2dpPostEvent(dev, Oa2dpEventDeviceGone, NULL);
+    Oa2dpPostEvent(dev, Oa2dpEventDeviceGone, NULL, 0);
     return STATUS_SUCCESS;
 }
 
@@ -177,6 +189,7 @@ VOID Oa2dpEvtFileCleanup(_In_ WDFFILEOBJECT file)
     Oa2dpVolumeFileCleanup(dev, file);
     if (control) {
         Oa2dpCloseAllChannels(dev);
+        (void)Oa2dpPublishConnected(dev, FALSE);
         WdfSpinLockAcquire(dev->Lock);
         if (dev->ServiceFile == file) dev->ServiceFile = NULL;
         WdfSpinLockRelease(dev->Lock);
@@ -219,17 +232,23 @@ static VOID DeliverPendingEvents(_In_ OA2DP_DEVICE_CONTEXT *dev)
     }
 }
 
-VOID Oa2dpPostEvent(_In_ OA2DP_DEVICE_CONTEXT *dev, _In_ ULONG type, _In_ OA2DP_CHANNEL *ch)
+VOID Oa2dpPostEvent(_In_ OA2DP_DEVICE_CONTEXT *dev, _In_ ULONG type,
+                   _In_opt_ OA2DP_CHANNEL *ch, ULONG generation)
 {
     OA2DP_EVENT event;
     RtlZeroMemory(&event, sizeof(event));
     event.Type = type;
     WdfSpinLockAcquire(dev->Lock);
     if (ch) {
+        if (!Oa2dpChannelEventReady(&ch->Life, generation, type == Oa2dpEventChannelOpened)) {
+            WdfSpinLockRelease(dev->Lock);
+            return;
+        }
         event.Kind = ch->Kind;
         event.Channel.Kind = ch->Kind;
         event.Channel.OutMtu = ch->OutMtu;
         event.Channel.InMtu = ch->InMtu;
+        event.Channel.Generation = generation;
     }
     if (type == Oa2dpEventDeviceGone) {
         dev->EventHead = dev->EventCount = 0;

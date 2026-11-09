@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include "session.h"
+#include "../../driver/common/channel_lifecycle.h"
 
 #include <bluetoothapis.h>
 #include <avrt.h>
@@ -288,10 +289,10 @@ bool Session::connect_signaling()
 {
     OA2DP_CHANNEL_INFO ci{};
     if (!tr_.open_channel(Oa2dpChannelSignaling, ci)) {
-        if (audio_ready_)
-            audio_.set_connected(false);  // complete a failed native connect attempt
+        teardown("signalling open failed");
         return false;
     }
+    sig_generation_ = ci.Generation;
     sig_mtu_ = ci.OutMtu;
     av_.out_mtu = sig_mtu_ < 48 ? 48 : sig_mtu_;
     sig_open_ = true;
@@ -307,6 +308,7 @@ bool Session::open_media_channel()
     OA2DP_CHANNEL_INFO ci{};
     if (!tr_.open_channel(Oa2dpChannelMedia, ci))
         return false;
+    media_generation_ = ci.Generation;
     media_mtu_ = ci.OutMtu;
     media_open_ = true;
     LOGI("media channel open (MTU %u)", media_mtu_);
@@ -443,7 +445,7 @@ bool Session::setup_audio_endpoint()
             {0, 0, 24, 24, OA2DP_PCM_INTEGER}, {0, 0, 16, 16, OA2DP_PCM_INTEGER}};
         for (const OA2DP_FORMAT &representation : representations) {
             USHORT depth = representation.BitsPerSample;
-            if (settings_.bits && depth != settings_.bits)
+            if (settings_.bits && representation.ValidBitsPerSample != settings_.bits)
                 continue;
             if (list.Count >= OA2DP_MAX_FORMATS)
                 break;
@@ -467,7 +469,7 @@ bool Session::setup_audio_endpoint()
 bool Session::start_stream()
 {
     oa2dp_avdtp_sep *sep = oa2dp_avdtp_sep_get(&av_, local_seid_);
-    if (!connection_enabled_ || suspend_requested_ || !sep || !media_open_)
+    if (!connection_enabled_ || suspend_requested_ || teardown_pending_ || !sep || !media_open_)
         return false;
     if (sep->state == OA2DP_SEP_STREAMING) {
         begin_streaming();
@@ -536,12 +538,21 @@ void Session::teardown(const char *why)
 {
     LOGI("teardown: %s", why);
     end_streaming();
-    if (media_open_)
-        tr_.close_channel(Oa2dpChannelMedia);
-    media_open_ = false;
-    if (sig_open_)
-        tr_.close_channel(Oa2dpChannelSignaling);
-    sig_open_ = false;
+    // Also close an OPEN whose caller timed out before receiving its handle.
+    // A failed close must retain ownership and suppress a replacement open.
+    const bool media_closed = tr_.close_channel(Oa2dpChannelMedia);
+    const bool sig_closed = tr_.close_channel(Oa2dpChannelSignaling);
+    if (media_closed) media_open_ = false;
+    if (sig_closed) sig_open_ = false;
+    teardown_pending_ = !media_closed || !sig_closed;
+    init_deadline_ = 0;
+    need_remote_caps_ = false;
+    if (teardown_pending_) {
+        LOGW("channel close is incomplete; retaining transport ownership");
+        next_reconnect_ = GetTickCount() + kReconnectPollMs;
+        publish("disconnect-pending");
+        return;
+    }
     // The one-shot KS disconnect completes on this notification. Report it
     // after both synchronous channel closes, not before the link teardown.
     // Keep the audio handle, ring and PortCls filters for every existing app.
@@ -559,6 +570,8 @@ void Session::handle(const Command &c)
 {
     switch (c.cmd) {
     case Cmd::SignalingOpenedByPeer:
+        if (!Oa2dpChannelGenerationAfter(c.channel.Generation, sig_generation_)) break;
+        sig_generation_ = c.channel.Generation;
         if (!connection_enabled_) {
             tr_.close_channel(Oa2dpChannelSignaling);
             break;
@@ -571,6 +584,8 @@ void Session::handle(const Command &c)
         LOGI("headset opened signalling");
         break;
     case Cmd::MediaOpenedByPeer:
+        if (!Oa2dpChannelGenerationAfter(c.channel.Generation, media_generation_)) break;
+        media_generation_ = c.channel.Generation;
         if (!connection_enabled_) {
             tr_.close_channel(Oa2dpChannelMedia);
             break;
@@ -580,13 +595,17 @@ void Session::handle(const Command &c)
         setup_audio_endpoint();
         break;
     case Cmd::SignalingClosed:
+        if (!Oa2dpChannelEventCurrent(sig_generation_, c.channel.Generation)) break;
         teardown("signalling closed");
         break;
     case Cmd::MediaClosed:
+        if (!Oa2dpChannelEventCurrent(media_generation_, c.channel.Generation)) break;
         teardown("media closed");
         next_reconnect_ = GetTickCount() + kReconnectPollMs;
         break;
     case Cmd::StreamFailed:
+        if (c.channel.Generation &&
+            !Oa2dpChannelEventCurrent(stream_generation_, c.channel.Generation)) break;
         teardown("encoder or transport failure");
         publish("stream-error");
         next_reconnect_ = GetTickCount() + kReconnectPollMs;
@@ -616,6 +635,7 @@ void Session::handle(const Command &c)
             suspend_stream();
         audio_format_ = c.format.Format;
         audio_running_ = c.format.Running != 0;
+        if (teardown_pending_) break;
         if (suspend_requested_) {
             suspend_stream();
             // Report stopped transport after the encoder has joined/drained.
@@ -677,10 +697,21 @@ void Session::publish(const char *state)
 
 void Session::main_loop()
 {
-    if (!tr_.open(path_)) {
-        LOGE("cannot open %ls (%lu)", path_.c_str(), GetLastError());
-        return;
+    while (!stopping_ && !tr_.open(path_)) {
+        const DWORD error = GetLastError();
+        // Interface arrival can precede cleanup of the retired session's
+        // exclusive control file. Retry here in this existing session thread;
+        // a one-time sharing violation must not disable audio until next boot.
+        if (error != ERROR_SHARING_VIOLATION && error != ERROR_BUSY &&
+            error != ERROR_NOT_READY && error != ERROR_FILE_NOT_FOUND &&
+            error != ERROR_PATH_NOT_FOUND && error != ERROR_DEVICE_NOT_CONNECTED &&
+            error != ERROR_DELETE_PENDING) {
+            LOGE("cannot open native transport (%lu)", error);
+            return;
+        }
+        WaitForSingleObject(stop_event_, 200);
     }
+    if (stopping_) return;
     if (!tr_.get_info(info_) || info_.Version != OA2DP_IOCTL_VERSION) {
         LOGE("driver version mismatch or GET_INFO failed");
         tr_.close();
@@ -726,6 +757,8 @@ void Session::main_loop()
     next_reconnect_ = GetTickCount();
 
     while (!stopping_) {
+        if (teardown_pending_ && is_after(GetTickCount(), next_reconnect_))
+            teardown("retry incomplete channel close");
         // Opening L2CAP establishes the ACL link when needed. Waiting for
         // BluetoothGetDeviceInfo.fConnected first deadlocks reconnect when
         // this profile is the only component that could create that link.
@@ -733,13 +766,13 @@ void Session::main_loop()
             if (!ensure_audio_endpoint())
                 next_reconnect_ = GetTickCount() + kReconnectPollMs;
         }
-        if (audio_ready_ && connection_enabled_ && !sig_open_ &&
+        if (audio_ready_ && connection_enabled_ && !teardown_pending_ && !sig_open_ &&
             is_after(GetTickCount(), next_reconnect_)) {
             next_reconnect_ = GetTickCount() + kReconnectPollMs;
             if (connect_signaling())
                 init_deadline_ = GetTickCount() + kPeerConfigGraceMs;
         }
-        if (sig_open_ && init_deadline_ && !local_seid_ && is_after(GetTickCount(), init_deadline_)) {
+        if (!teardown_pending_ && sig_open_ && init_deadline_ && !local_seid_ && is_after(GetTickCount(), init_deadline_)) {
             init_deadline_ = 0;
             if (!configure_as_initiator())
                 teardown("configuration failed");
@@ -775,8 +808,7 @@ void Session::main_loop()
         oa2dp_avdtp_check_timeouts(&av_);
     }
 
-    if (sig_open_)
-        teardown("session stopping");
+    teardown("session stopping");
     end_streaming();
     SetEvent(stop_event_);
     tr_.cancel_all();
@@ -796,7 +828,7 @@ void Session::main_loop()
 
 void Session::begin_streaming()
 {
-    if (!connection_enabled_ || suspend_requested_ || streaming_ || !media_open_ || !audio_ready_)
+    if (!connection_enabled_ || suspend_requested_ || teardown_pending_ || streaming_ || !media_open_ || !audio_ready_)
         return;
     if (audio_format_.SampleRate &&
         audio_format_.SampleRate != oa2dp_codec_sample_rate(&config_)) {
@@ -808,7 +840,9 @@ void Session::begin_streaming()
     if (stream_.joinable())  // previous loop exited on its own (encoder error)
         stream_.join();
     streaming_ = true;
-    stream_ = std::thread([this] { stream_loop(); });
+    if (++stream_generation_ == 0) ++stream_generation_;
+    const ULONG generation = stream_generation_;
+    stream_ = std::thread([this, generation] { stream_loop(generation); });
     audio_.set_suspended(false);
     publish("streaming");
 }
@@ -827,9 +861,14 @@ void Session::end_streaming()
     publish("open");
 }
 
-void Session::stream_loop()
+void Session::stream_loop(ULONG generation)
 {
     AudioScheduling scheduling;
+    auto fail_stream = [this, generation] {
+        Command command{Cmd::StreamFailed};
+        command.channel.Generation = generation;
+        post(command);
+    };
     const oa2dp_codec_caps cfg = config_;
     oa2dp_settings set = settings_;
     if (!set.bits)
@@ -840,7 +879,7 @@ void Session::stream_loop()
     int err = oa2dp_encoder_create(&cfg, &set, media_mtu_, &enc);
     if (err != OA2DP_OK) {
         LOGE("encoder for %s failed: %s", oa2dp_codec_name(cfg.codec), oa2dp_strerror(err));
-        post({Cmd::StreamFailed});
+        fail_stream();
         return;
     }
     const oa2dp_encoder_info info = enc->info;
@@ -851,7 +890,7 @@ void Session::stream_loop()
     if (oa2dp_ring_snapshot(ring, &ring_format) != OA2DP_OK || ring_format.channels > 2) {
         LOGE("PCM format unavailable when starting the encoder");
         oa2dp_encoder_destroy(enc);
-        post({Cmd::StreamFailed});
+        fail_stream();
         return;
     }
     oa2dp_ring_discard(ring);
@@ -884,7 +923,7 @@ void Session::stream_loop()
                 bytes_sent += len;
             else {
                 LOGE("Bluetooth media send failed");
-                post({Cmd::StreamFailed});
+                fail_stream();
                 streaming_ = false;
             }
         }
@@ -909,7 +948,7 @@ void Session::stream_loop()
         }
         if (read_status != OA2DP_OK || read_frames != spc) {
             LOGE("invalid PCM block; stopping the encoder");
-            post({Cmd::StreamFailed});
+            fail_stream();
             break;
         }
         // Ring -> int32 24-bit -> codec channel layout.
@@ -931,7 +970,7 @@ void Session::stream_loop()
         uint8_t frames = 0;
         if (oa2dp_encoder_encode(enc, pcm.data(), out.data(), out.size(), &len, &frames) != OA2DP_OK) {
             LOGE("encode failed; stopping instead of reporting a silent stream");
-            post({Cmd::StreamFailed});
+            fail_stream();
             break;
         }
         if (len == 0 || frames == 0)

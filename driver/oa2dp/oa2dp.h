@@ -22,6 +22,7 @@
 
 #include "../common/oa2dp_ioctl.h"
 #include "../common/oa2dp_bus.h"
+#include "../common/channel_lifecycle.h"
 
 #define OA2DP_POOL_TAG 'pd2A'
 #define OA2DP_AVDTP_PSM 0x0019
@@ -32,22 +33,16 @@
 
 typedef struct _OA2DP_DEVICE_CONTEXT OA2DP_DEVICE_CONTEXT;
 
-typedef enum _OA2DP_CHANNEL_STATE {
-    ChannelClosed = 0,
-    ChannelOpening,
-    ChannelOpen,
-    ChannelClosing,
-} OA2DP_CHANNEL_STATE;
-
 typedef struct _OA2DP_CHANNEL {
     OA2DP_DEVICE_CONTEXT *Dev;
     OA2DP_CHANNEL_KIND Kind;
-    OA2DP_CHANNEL_STATE State;
+    OA2DP_CHANNEL_LIFECYCLE Life;
     L2CAP_CHANNEL_HANDLE Handle;
     USHORT OutMtu;
     USHORT InMtu;
-    WDFREQUEST OpenRequest;  /* user request waiting for an outgoing open */
-    struct _BRB *OpenBrb;
+    KEVENT OpenFinished;
+    WDFWAITLOCK CloseLock;
+    WDFWORKITEM CloseWork;
 } OA2DP_CHANNEL;
 
 struct _OA2DP_DEVICE_CONTEXT {
@@ -90,6 +85,7 @@ struct _OA2DP_DEVICE_CONTEXT {
     EX_RUNDOWN_REF MpmCalls;
     EX_RUNDOWN_REF MpmCallbacks;
     BOOLEAN MpmStopping;
+    BOOLEAN TransportStopping;
     BOOLEAN PolicyConnected;
     BOOLEAN PolicySuspended;
     BOOLEAN MpmConnected;
@@ -113,6 +109,8 @@ typedef struct _OA2DP_REQUEST_CONTEXT {
     struct _BRB *Brb;
     OA2DP_CHANNEL *Channel;
     ULONG Bytes;
+    ULONG Generation;
+    WDFREQUEST UserRequest;   /* exact outgoing caller; never a replacement channel's request */
 } OA2DP_REQUEST_CONTEXT;
 
 WDF_DECLARE_CONTEXT_TYPE_WITH_NAME(OA2DP_REQUEST_CONTEXT, Oa2dpGetRequest)
@@ -137,6 +135,7 @@ NTSTATUS Oa2dpSubmitBrbSync(_In_ OA2DP_DEVICE_CONTEXT *dev, _In_ struct _BRB *br
 NTSTATUS Oa2dpQueryLocalAddress(_In_ OA2DP_DEVICE_CONTEXT *dev);
 NTSTATUS Oa2dpQueryRemoteAddress(_In_ OA2DP_DEVICE_CONTEXT *dev);
 NTSTATUS Oa2dpRegisterServer(_In_ OA2DP_DEVICE_CONTEXT *dev);
+NTSTATUS Oa2dpInitializeChannels(OA2DP_DEVICE_CONTEXT *dev);
 VOID Oa2dpUnregisterServer(_In_ OA2DP_DEVICE_CONTEXT *dev);
 VOID Oa2dpOpenChannel(_In_ OA2DP_DEVICE_CONTEXT *dev, _In_ WDFREQUEST request,
                       _In_ const OA2DP_OPEN_CHANNEL_IN *in);
@@ -146,12 +145,13 @@ VOID Oa2dpTransfer(_In_ OA2DP_DEVICE_CONTEXT *dev, _In_ WDFREQUEST request,
                    _In_ OA2DP_CHANNEL_KIND kind, _In_ BOOLEAN send);
 
 /* driver.c */
-VOID Oa2dpPostEvent(_In_ OA2DP_DEVICE_CONTEXT *dev, _In_ ULONG type, _In_ OA2DP_CHANNEL *ch);
+VOID Oa2dpPostEvent(_In_ OA2DP_DEVICE_CONTEXT *dev, _In_ ULONG type,
+                   _In_opt_ OA2DP_CHANNEL *ch, ULONG generation);
 NTSTATUS Oa2dpCreateAudioChild(_In_ OA2DP_DEVICE_CONTEXT *dev);
 NTSTATUS Oa2dpRegisterVolumeInterface(_In_ OA2DP_DEVICE_CONTEXT *dev);
 NTSTATUS Oa2dpRegisterBusInterface(_In_ OA2DP_DEVICE_CONTEXT *dev, _In_ WDFDEVICE child);
 VOID Oa2dpVolumeFileCleanup(_In_ OA2DP_DEVICE_CONTEXT *dev, _In_ WDFFILEOBJECT file);
-VOID Oa2dpPublishConnected(_In_ OA2DP_DEVICE_CONTEXT *dev, _In_ BOOLEAN connected);
+NTSTATUS Oa2dpPublishConnected(_In_ OA2DP_DEVICE_CONTEXT *dev, _In_ BOOLEAN connected);
 /* mpm.c: observed Windows 10 profile-manager compatibility contract. */
 NTSTATUS Oa2dpMpmStart(OA2DP_DEVICE_CONTEXT *dev);
 VOID Oa2dpMpmStop(OA2DP_DEVICE_CONTEXT *dev);

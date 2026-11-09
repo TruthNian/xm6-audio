@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(XM6Audio VERSION 0.3.21 LANGUAGES C CXX)
+project(XM6Audio VERSION 0.3.22 LANGUAGES C CXX)
 
 # The loaded binary's version must agree with the configured project and INF.
 # Generate resources in the build tree rather than keeping a stale copy.
@@ -48,6 +48,8 @@ if(OA2DP_BUILD_TESTS)
     target_link_libraries(test_ring_concurrency PRIVATE oa2dp_core Threads::Threads)
     add_test(NAME ring_concurrency COMMAND test_ring_concurrency)
     set_tests_properties(ring_concurrency PROPERTIES TIMEOUT 15)
+    add_executable(test_channel_lifecycle tools/test-channel-lifecycle.cpp)
+    add_test(NAME channel_lifecycle COMMAND test_channel_lifecycle)
 endif()
 
 if(NOT WIN32)
@@ -129,7 +131,7 @@ target_link_libraries(oa2dpsvc PRIVATE oa2dp_codecs cfgmgr32 bthprops shell32 ad
 add_library(oa2dp_manage STATIC tools/common/manage.cpp)
 target_include_directories(oa2dp_manage PUBLIC tools/common)
 target_compile_definitions(oa2dp_manage PUBLIC UNICODE _UNICODE)
-target_link_libraries(oa2dp_manage PUBLIC oa2dp_core setupapi bthprops advapi32)
+target_link_libraries(oa2dp_manage PUBLIC oa2dp_core setupapi bthprops advapi32 cfgmgr32)
 
 add_executable(oa2dpctl tools/oa2dpctl/oa2dpctl.cpp ${XM6_VERSION_RESOURCE})
 target_link_libraries(oa2dpctl PRIVATE oa2dp_manage)

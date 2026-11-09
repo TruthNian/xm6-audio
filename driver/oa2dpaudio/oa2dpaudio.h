@@ -67,7 +67,6 @@ typedef struct _OA2DP_AUDIO_DEVICE {
     BOOLEAN SuspendRequested;
     ULONG ConnectionSerial;
     volatile LONG Connected;  /* standard KS jack presence, initially false */
-    KEVENT DisconnectedEvent; /* completion after the jack/property notification */
     BOOLEAN EventPending;       /* Event not yet picked up by WAIT_FORMAT */
     OA2DP_FORMAT_CHANGE Event;
 

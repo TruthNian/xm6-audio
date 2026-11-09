@@ -26,8 +26,18 @@ static const GUID GeneralPropertyType = { STATIC_KSPROPTYPESETID_General };
 static const DEVPROPKEY AvdtpConnectedKey =
     {{0x29ce83d4,0x7a82,0x4744,{0xbd,0x1d,0xab,0xec,0x85,0x32,0x1d,0xd6}},2};
 
-VOID Oa2dpPublishConnected(OA2DP_DEVICE_CONTEXT *dev, BOOLEAN connected)
+NTSTATUS Oa2dpPublishConnected(OA2DP_DEVICE_CONTEXT *dev, BOOLEAN connected)
 {
+    WdfSpinLockAcquire(dev->Lock);
+    const BOOLEAN open = dev->Channels[Oa2dpChannelSignaling].Life.State == ChannelOpen &&
+                         dev->Channels[Oa2dpChannelMedia].Life.State == ChannelOpen;
+    const BOOLEAN closed = dev->Channels[Oa2dpChannelSignaling].Life.State == ChannelClosed &&
+                           dev->Channels[Oa2dpChannelMedia].Life.State == ChannelClosed;
+    NTSTATUS actual = connected
+        ? (open && dev->PolicyConnected && !dev->TransportStopping ? STATUS_SUCCESS : STATUS_DEVICE_NOT_READY)
+        : (closed ? STATUS_SUCCESS : STATUS_DEVICE_BUSY);
+    WdfSpinLockRelease(dev->Lock);
+    if (!NT_SUCCESS(actual)) return actual;
     if (connected) KeClearEvent(&dev->DisconnectedEvent);
     const DEVPROP_BOOLEAN value = connected ? DEVPROP_TRUE : DEVPROP_FALSE;
     for (ULONG i = 0; i < ARRAYSIZE(dev->AudioInterfacePaths); ++i) {
@@ -47,11 +57,12 @@ VOID Oa2dpPublishConnected(OA2DP_DEVICE_CONTEXT *dev, BOOLEAN connected)
         &AvdtpConnectedKey, LOCALE_NEUTRAL, 0, DEVPROP_TYPE_EMPTY, 0, NULL);
     Oa2dpMpmConnected(dev, connected);
     if (!connected) KeSetEvent(&dev->DisconnectedEvent, IO_NO_INCREMENT, FALSE);
+    return STATUS_SUCCESS;
 }
 
-static VOID BusSetConnected(PVOID context, BOOLEAN connected)
+static NTSTATUS BusSetConnected(PVOID context, BOOLEAN connected)
 {
-    Oa2dpPublishConnected(context, connected);
+    return Oa2dpPublishConnected(context, connected);
 }
 
 static VOID BusReference(PVOID context) { WdfObjectReference(((OA2DP_DEVICE_CONTEXT *)context)->Device); }
@@ -141,6 +152,7 @@ NTSTATUS Oa2dpRegisterBusInterface(OA2DP_DEVICE_CONTEXT *dev, WDFDEVICE child)
     bus.GetVolume = BusGetVolume;
     bus.SetVolume = BusSetVolume;
     bus.SetConnected = BusSetConnected;
+    bus.DisconnectedEvent = &dev->DisconnectedEvent;
     bus.RequestConnection = Oa2dpMpmRequestConnection;
     bus.SetPlaying = Oa2dpMpmPlaying;
     bus.SetSuspended = Oa2dpMpmSuspended;
