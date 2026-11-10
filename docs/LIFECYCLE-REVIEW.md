@@ -1,5 +1,32 @@
 # Native lifecycle review
 
+## 0.3.49: retain failed endpoint setup for retry, source only
+
+The production setup/reconciliation fixture demonstrates another lost request:
+after format, latency or connected-state publication fails, the old code has
+already cleared pending configuration. A temporary failure leaves an accepted
+peer START without a local sender, even after the external call would succeed.
+The old production body fails the new pending-request assertion.
+
+Keep configuration pending until all three publication steps succeed. A failed
+publication schedules a one-second backoff, consumed by the existing main
+thread reconciliation method using current PCM, codec, connection and policy.
+Successful setup clears both the request and backoff before local admission.
+Fresh peer configuration/media readiness can still request immediate work.
+There is one new deadline field, with no worker, timer object or process.
+
+The two-AVDTP-core fixture checks each failed publication at initial setup and
+after an accepted rate change, recovery without another PCM/START, no retry
+before its deadline, repeated failures, tick-counter wrap, current PCM changed
+during backoff, and disconnect/stop/peer SUSPEND/CLOSE before recovery. An
+accepted rate change is retained and recovery does not originate another
+START. Production setup/reconciliation/rate/start/suspend procedures execute;
+audio calls and worker admission remain controlled fakes. The actual admission
+fixture separately checks the pending gate and its release. These checks do
+not establish a Windows Settings fix, actual radio/headset recovery, Chrome
+stutter resolution or measured performance gains. Source 0.3.49 is not installed;
+the last observed host runtime remains 0.3.44.
+
 ## 0.3.48: reconcile peer configuration with running PCM, source only
 
 Two real AVDTP cores and the production session event/configuration/setup

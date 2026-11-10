@@ -21,6 +21,7 @@ static unsigned failures;
 #define LOGE(...) ((void)0)
 using USHORT = uint16_t;
 using ULONG = uint32_t;
+static uint32_t GetTickCount() { return 100; }
 using OA2DP_FORMAT = oa2dp_pcm_format;
 constexpr ULONG OA2DP_MAX_FORMATS = 32;
 struct OA2DP_FORMAT_LIST {
@@ -50,6 +51,8 @@ struct Session {
     oa2dp_codec_caps config_{}, remote_caps_{};
     OA2DP_FORMAT audio_format_{48000, 2, 32, 32, OA2DP_PCM_FLOAT};
     bool connection_enabled_ = true, have_remote_caps_ = true, publication_pending_ = false;
+    bool peer_configuration_pending_ = false;
+    uint32_t next_peer_configuration_retry_ = 0;
     uint32_t delay_report_us_ = 0;
     ULONG sig_generation_ = 1;
     oa2dp_avdtp av_{};

@@ -267,6 +267,7 @@ void Session::on_avdtp_event(const oa2dp_avdtp_event &ev)
             local_seid_ = ev.local_seid;
             have_remote_caps_ = false;
             peer_configuration_pending_ = true;
+            next_peer_configuration_retry_ = GetTickCount();
             init_deadline_ = 0;
             LOGI("headset configured %s at %u Hz", oa2dp_codec_name(config_.codec),
                  oa2dp_codec_sample_rate(&config_));
@@ -275,8 +276,10 @@ void Session::on_avdtp_event(const oa2dp_avdtp_event &ev)
         break;
     case OA2DP_AVDTP_RECONFIGURE:
         if (ev.caps.media_codec &&
-            oa2dp_codec_parse(ev.caps.codec, ev.caps.codec_len, &config_) == OA2DP_OK)
+            oa2dp_codec_parse(ev.caps.codec, ev.caps.codec_len, &config_) == OA2DP_OK) {
             peer_configuration_pending_ = true;
+            next_peer_configuration_retry_ = GetTickCount();
+        }
         break;
     case OA2DP_AVDTP_START:
         begin_streaming();
@@ -451,6 +454,11 @@ bool Session::setup_audio_endpoint()
 {
     if (!ensure_audio_endpoint() || !connection_enabled_)
         return false;
+    auto retry_setup = [this] {
+        peer_configuration_pending_ = true;
+        next_peer_configuration_retry_ = GetTickCount() + 1000;
+        return false;
+    };
 
     // Offer every rate the headset accepts for this codec, so Windows can
     // switch rate and we follow with RECONFIGURE instead of resampling.
@@ -500,9 +508,11 @@ bool Session::setup_audio_endpoint()
     }
     if (!audio_.set_formats(list) || !audio_.set_latency(0, delay_report_us_)) {
         LOGE("cannot configure the native audio endpoint");
-        return false;
+        return retry_setup();
     }
-    if (!audio_.set_connected(true, sig_generation_)) return false;
+    if (!audio_.set_connected(true, sig_generation_)) return retry_setup();
+    peer_configuration_pending_ = false;
+    next_peer_configuration_retry_ = 0;
     publication_pending_ = false; // an old FALSE must not follow this new link
     // A newer HFP request can arrive while configuring. Its policy update
     // follows through WAIT_FORMAT; preserve this valid AVDTP configuration.
@@ -588,7 +598,8 @@ void Session::reconfigure_rate(uint32_t rate)
 void Session::reconcile_peer_configuration()
 {
     if (!peer_configuration_pending_ || stopping_ || transport_suspended_ || teardown_pending_ ||
-        !connection_enabled_ || !audio_ready_ || !sig_open_ || rx_failed_ || !media_open_ || !local_seid_)
+        !connection_enabled_ || !audio_ready_ || !sig_open_ || rx_failed_ || !media_open_ || !local_seid_ ||
+        !is_after(GetTickCount(), next_peer_configuration_retry_))
         return;
     const uint8_t seid = local_seid_;
     const ULONG connection = sig_generation_;
@@ -616,7 +627,6 @@ void Session::reconcile_peer_configuration()
             have_remote_caps_ = true;
         }
     }
-    peer_configuration_pending_ = false;
     // Publish the complete format list before reconciling the accepted START.
     // Otherwise an unchanged PCM stream can remain at 96 kHz while the peer's
     // 48 kHz configuration permanently prevents local encoder admission.
@@ -719,6 +729,7 @@ void Session::handle(const Command &c)
         media_mtu_ = c.channel.OutMtu;
         media_open_ = true;
         peer_configuration_pending_ = true;
+        next_peer_configuration_retry_ = GetTickCount();
         break;
     case Cmd::SignalingClosed:
         if (!Oa2dpChannelEventCurrent(sig_generation_, c.channel.ConnectionGeneration)) break;

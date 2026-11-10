@@ -25,6 +25,10 @@
 #define LOGI(...) ((void)0)
 using ULONG = uint32_t;
 using USHORT = uint16_t;
+using DWORD = uint32_t;
+static DWORD now = 100;
+static DWORD GetTickCount() { return now; }
+static bool is_after(DWORD a, DWORD b) { return static_cast<int32_t>(a - b) >= 0; }
 using OA2DP_FORMAT = oa2dp_pcm_format;
 constexpr ULONG OA2DP_MAX_FORMATS = 32;
 struct OA2DP_FORMAT_LIST {
@@ -34,14 +38,18 @@ struct OA2DP_FORMAT_LIST {
 struct Session {
     struct Audio {
         unsigned publications = 0;
+        unsigned failed_stage = 0, failed_attempt = 1;
         OA2DP_FORMAT_LIST formats;
         bool set_formats(const OA2DP_FORMAT_LIST &list) {
             formats = list;
             ++publications;
-            return true;
+            return passes(1);
         }
-        bool set_latency(unsigned, unsigned) { return true; }
-        bool set_connected(bool value, ULONG) { return value; }
+        bool passes(unsigned stage) const {
+            return stage != failed_stage || publications != failed_attempt;
+        }
+        bool set_latency(unsigned, unsigned) { return passes(2); }
+        bool set_connected(bool value, ULONG) { return value && passes(3); }
     } audio_;
     oa2dp_settings settings_{};
     oa2dp_codec_caps config_{}, remote_caps_{};
@@ -51,6 +59,7 @@ struct Session {
     bool stopping_ = false, publication_pending_ = false;
     bool sig_open_ = true, rx_failed_ = false;
     bool have_remote_caps_ = false, peer_configuration_pending_ = false, audio_running_ = true;
+    DWORD next_peer_configuration_retry_ = 0;
     uint32_t delay_report_us_ = 0, init_deadline_ = 0;
     ULONG sig_generation_ = 1;
     oa2dp_avdtp av_{}, peer_{};
@@ -175,6 +184,104 @@ struct Session {
 // clang-format on
 
 int main() {
+    for (unsigned stage = 1; stage <= 3; ++stage) {
+        Session s;
+        now = 100;
+        s.audio_.failed_stage = stage;
+        s.peer_configure_and_start(96000);
+        s.reconcile_peer_configuration();
+        CHECK(!s.streaming_ && s.peer_configuration_pending_);
+        CHECK(s.audio_.publications == 1);
+        now = 1099;
+        s.reconcile_peer_configuration();
+        CHECK(s.audio_.publications == 1 && !s.streaming_);
+        now = 1100;
+        s.reconcile_peer_configuration(); // transient failure cleared, no new PCM/START
+        CHECK(s.streaming_ && s.admissions == 1 && !s.peer_configuration_pending_);
+        CHECK(s.audio_.publications == 2 && s.reconfigures == 0 && s.starts == 0);
+    }
+    for (unsigned stage = 1; stage <= 3; ++stage) {
+        Session s;
+        now = 200;
+        s.audio_.failed_stage = stage;
+        s.audio_.failed_attempt = 2; // failure after the codec has changed to 96 kHz
+        s.peer_configure_and_start(48000);
+        s.reconcile_peer_configuration();
+        CHECK(oa2dp_codec_sample_rate(&s.config_) == 96000);
+        CHECK(!s.streaming_ && s.peer_configuration_pending_ && s.audio_.publications == 2);
+        CHECK(s.starts == 1 && s.reconfigures == 1);
+        now = 1199;
+        s.reconcile_peer_configuration();
+        CHECK(s.audio_.publications == 2 && !s.streaming_);
+        now = 1200;
+        s.reconcile_peer_configuration();
+        CHECK(s.streaming_ && s.admissions == 1 && !s.peer_configuration_pending_);
+        CHECK(s.audio_.publications == 3 && s.starts == 1 && s.reconfigures == 1);
+    }
+    {
+        Session s;
+        now = 100;
+        s.audio_.failed_stage = 1;
+        s.peer_configure_and_start(96000);
+        s.reconcile_peer_configuration();
+        s.audio_.failed_attempt = 2; // a second failure is also rate-limited
+        now = 1100;
+        s.reconcile_peer_configuration();
+        CHECK(!s.streaming_ && s.peer_configuration_pending_ && s.audio_.publications == 2);
+        now = 2099;
+        s.reconcile_peer_configuration();
+        CHECK(s.audio_.publications == 2);
+        now = 2100;
+        s.reconcile_peer_configuration();
+        CHECK(s.streaming_ && s.admissions == 1 && s.audio_.publications == 3);
+    }
+    {
+        Session s;
+        now = UINT32_MAX - 499;
+        s.audio_.failed_stage = 1;
+        s.peer_configure_and_start(96000);
+        s.reconcile_peer_configuration();
+        CHECK(!s.streaming_ && s.peer_configuration_pending_);
+        now = 499;
+        s.reconcile_peer_configuration();
+        CHECK(!s.streaming_ && s.audio_.publications == 1);
+        now = 500;
+        s.reconcile_peer_configuration();
+        CHECK(s.streaming_ && s.audio_.publications == 2);
+    }
+    {
+        Session s;
+        now = 100;
+        s.audio_.failed_stage = 1;
+        s.peer_configure_and_start(96000);
+        s.reconcile_peer_configuration();
+        s.audio_format_.SampleRate = 48000; // retry must use current PCM, not a cached format list
+        now = 1100;
+        s.reconcile_peer_configuration();
+        CHECK(s.streaming_ && s.admissions == 1 && s.reconfigures == 1);
+        CHECK(oa2dp_codec_sample_rate(&s.config_) == 48000);
+        CHECK(s.audio_.formats.Formats[s.audio_.formats.Preferred].SampleRate == 48000);
+    }
+    for (unsigned policy = 0; policy < 4; ++policy) {
+        Session s;
+        now = 100;
+        s.audio_.failed_stage = 1;
+        s.peer_configure_and_start(96000);
+        s.reconcile_peer_configuration();
+        if (policy == 0)
+            s.connection_enabled_ = false;
+        if (policy == 1)
+            s.stopping_ = true;
+        if (policy >= 2) {
+            CHECK((policy == 2 ? oa2dp_avdtp_suspend(&s.peer_, s.peer_seid_)
+                               : oa2dp_avdtp_close(&s.peer_, s.peer_seid_)) >= 0);
+            s.pump_all();
+        }
+        now = 1100;
+        s.reconcile_peer_configuration();
+        CHECK(!s.streaming_ && s.admissions == 0 && s.starts == 0 && s.reconfigures == 0);
+        CHECK(s.audio_.publications == (policy == 2 ? 2u : 1u));
+    }
     for (auto rates : {std::pair<uint32_t, uint32_t>{96000, 48000},
                        {48000, 96000},
                        {44100, 48000},

@@ -174,7 +174,7 @@ int main() {
         REQUIRE(s.workers == 1);
     }
     // Reconciliation must not create a new remote START or bypass admission.
-    for (int condition = 0; condition < 9; ++condition) {
+    for (int condition = 0; condition < 8; ++condition) {
         Session s;
         now = 12;
         s.av_.sep.state = OA2DP_SEP_STREAMING;
@@ -203,12 +203,21 @@ int main() {
         case 7:
             s.local_seid_ = 0;
             break;
-        case 8:
-            s.peer_configuration_pending_ = true;
-            break;
         }
         REQUIRE(s.finish_endpoint_setup());
         REQUIRE(!s.streaming_ && s.starts == 0 && s.workers == 0);
+    }
+    {
+        Session s;
+        s.peer_configuration_pending_ = true;
+        s.av_.sep.state = OA2DP_SEP_STREAMING;
+        s.begin_streaming();
+        REQUIRE(!s.streaming_ && s.starts == 0 && s.workers == 0);
+        s.peer_configuration_pending_ = false; // successful endpoint setup releases the gate
+        s.begin_streaming();
+        REQUIRE(s.streaming_ && s.starts == 0);
+        s.end_streaming();
+        REQUIRE(s.workers == 1);
     }
     {
         Session s;

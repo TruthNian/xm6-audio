@@ -38,6 +38,10 @@ with a different peer-selected rate using normal AVDTP reconfiguration; it
 does not depend on another player or PCM event. Encoder admission waits for
 this pending configuration work. Requests that pump peer commands recheck
 the current channel/SEP and stop state before publishing capabilities.
+Failed format, latency or connected-state publication retains pending work
+with a one-second backoff on that same main thread. Successful setup clears
+the request before encoder admission; retries rebuild from current state
+and respect peer suspension, disconnection and service stop.
 
 The format contract distinguishes sample rate, channels, container width, valid precision and integer/float representation. Integer32 remains integer32 in the shared ring; 24-in-32 follows WAVEFORMATEXTENSIBLE's left-aligned precision convention. Conversion to 16/24 useful bits occurs at the selected encoder boundary.
 
