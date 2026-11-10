@@ -43,6 +43,8 @@ typedef struct _OA2DP_AUDIO_RING {
     SIZE_T Bytes;
     PVOID UserVa;           /* service mapping, if any */
     PEPROCESS UserProcess;  /* referenced while UserVa is set */
+    PKEVENT DataEvent;      /* referenced, accessed only under Lock */
+    ULONG MinimumFrames;
     int32_t Scratch[OA2DP_PUMP_CHUNK * OA2DP_RING_MAX_CHANNELS];
 } OA2DP_AUDIO_RING;
 
@@ -62,6 +64,7 @@ typedef struct _OA2DP_AUDIO_DEVICE {
     OA2DP_FORMAT_LIST Formats;  /* what the negotiated codec accepts */
     OA2DP_LATENCY Latency;
     OA2DP_FORMAT Current;       /* format of the open (or last) stream */
+    ULONG PcmSequence;          /* ring epoch committed with Current */
     BOOLEAN Running;
     BOOLEAN ConnectionEnabled;
     BOOLEAN SuspendRequested;
@@ -98,6 +101,8 @@ NTSTATUS Oa2dpRingCreate(_Inout_ OA2DP_AUDIO_RING *r, _In_ ULONG rate, _In_ USHO
 VOID Oa2dpRingDestroy(_Inout_ OA2DP_AUDIO_RING *r);
 NTSTATUS Oa2dpRingMapUser(_Inout_ OA2DP_AUDIO_RING *r, _Out_ OA2DP_RING_MAPPING *out);
 VOID Oa2dpRingUnmapUser(_Inout_ OA2DP_AUDIO_RING *r);
+NTSTATUS Oa2dpRingSetDataEvent(_Inout_ OA2DP_AUDIO_RING *r, HANDLE event,
+                              ULONG minimumFrames, KPROCESSOR_MODE mode);
 /* Rewrite the header in place; TRUE if the format changed. */
 BOOLEAN Oa2dpRingSetFormat(_Inout_ OA2DP_AUDIO_RING *r, _In_ ULONG rate, _In_ USHORT channels,
                            _In_ USHORT format);

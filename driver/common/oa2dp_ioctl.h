@@ -9,7 +9,7 @@
 #ifndef OA2DP_IOCTL_H
 #define OA2DP_IOCTL_H
 
-#define OA2DP_IOCTL_VERSION 10
+#define OA2DP_IOCTL_VERSION 11
 
 #include "../../core/include/oa2dp/pcm_format.h"
 
@@ -119,6 +119,15 @@ typedef struct _OA2DP_TX_STATE {
 #define IOCTL_OA2DP_AUDIO_SET_CONNECTED OA2DP_CTL(38, METHOD_BUFFERED)
 #define IOCTL_OA2DP_AUDIO_GET_STATE     OA2DP_CTL(39, METHOD_BUFFERED)
 #define IOCTL_OA2DP_AUDIO_SET_SUSPENDED OA2DP_CTL(40, METHOD_BUFFERED)
+#define IOCTL_OA2DP_AUDIO_SET_DATA_EVENT OA2DP_CTL(41, METHOD_BUFFERED)
+
+/* Referenced by the driver until replaced, unmapped or the control file closes.
+ * Fixed-width handle permits explicit validation on both architectures. */
+typedef struct _OA2DP_DATA_EVENT_IN {
+    ULONGLONG EventHandle;    /* 0 unregisters; otherwise an event owned by caller */
+    ULONG MinimumFrames;     /* wake when a complete encoder input block exists */
+    ULONG Reserved;
+} OA2DP_DATA_EVENT_IN;
 
 typedef struct _OA2DP_RING_MAPPING {
     ULONGLONG Address;        /* user-mode address of oa2dp_pcm_ring */
@@ -153,6 +162,7 @@ typedef struct _OA2DP_SUSPENDED_IN {
 /* Completed when Windows opens a stream with a new format (F4.3). */
 typedef struct _OA2DP_FORMAT_CHANGE {
     OA2DP_FORMAT Format;
+    ULONG PcmSequence;        /* distinguishes A -> B -> A even if events coalesce */
     ULONG Running;            /* 1 = stream started, 0 = stopped */
     ULONG ConnectionEnabled;  /* Windows one-shot disconnect suppresses retries */
     ULONG ConnectionSerial;   /* distinguishes an explicit reconnect request */

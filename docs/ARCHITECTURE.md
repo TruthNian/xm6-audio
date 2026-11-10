@@ -29,6 +29,10 @@ Ring protocol v2 fixes the allocated frame stride, independent of the active cha
 
 Windows shared mode supplies a mixed stream. The driver cannot infer the original format of each contributing file. Exclusive mode can supply a supported player-selected stream format. Unsupported rate changes do not become a falsely labeled fixed-rate success.
 
+Driver/service ABI 11 registers a referenced PCM data-ready event at the actual encoder block threshold. The consumer rechecks the ring before waiting and can be woken by PCM, format changes or stream/service cancellation. Committed format epochs survive coalesced A -> B -> A changes. The encoder no longer polls with Sleep(2); the virtual WaveRT position timer remains a separate software hardware-emulation mechanism.
+
+Media completion waits preserve pending OVERLAPPED/buffer ownership on cancellation, and retirement has one shared realtime drain budget. Final destruction still waits for the kernel to release outstanding I/O. Registry status publication runs on the existing session thread, outside the encoder's lock and realtime work. Optional ETW probes and their measurement limits are described in the [0.3.35 review](LIFECYCLE-REVIEW.md).
+
 LDAC encode calls consume 128 samples per channel. At 88.2/96 kHz, a codec frame represents 256 samples; RTP uses the codec-frame duration, not the API-call block size. AVDTP headset delay reports affect the WaveRT presentation position. The virtual endpoint reports zero local hardware FIFO/chipset/codec delay; remote Bluetooth delay must not be compared against the local cyclic buffer's size. Hardware video synchronization is still unvalidated.
 
 ## Connection and service lifecycle

@@ -12,7 +12,9 @@ XM6 Audio adds an A2DP profile driver and a WaveRT render endpoint while Windows
 
 > **Development status:** the native drivers, service and codec checks build in CI. Microsoft kernel signing and native headset acceptance are still pending. CI artifacts are unsigned development candidates, not installable releases for a normally protected Windows system.
 
-The [hardware bring-up record](docs/HARDWARE-BRINGUP.md) documents audible QQ Music and PotPlayer playback, media controls, wearing detection and bidirectional master volume in the controlled developer trial. Version 0.3.32 corrected a child-enumeration startup defect and loaded without an OS reboot; native LDAC playback was also observed after a subsequent user restart. **Windows Settings still reports incorrect connection state and per-device disconnect/connect remains broken.** The 0.3.33–0.3.34 source corrects request-ownership races and missing transport-owned disconnect publication; these candidates have not been installed or hardware-accepted. See the [lifecycle review](docs/LIFECYCLE-REVIEW.md). **Do not load candidate 0.3.5**; its descriptor ABI error caused a developer-machine bugcheck and is corrected in the 0.3.6 source.
+The [controlled developer trial](docs/HARDWARE-BRINGUP.md) established native QQ Music/PotPlayer playback, media controls, wearing detection and bidirectional master volume. The last verified runtime is 0.3.32. **Its Windows connection labels and per-device disconnect/connect still fail acceptance.**
+
+Source-only 0.3.35 includes the connection fixes, event-driven PCM consumption, cancellable media waits, format-epoch tracking and opt-in timing probes. It has not been installed or hardware-accepted, and no measured performance gain is claimed. See the [lifecycle review](docs/LIFECYCLE-REVIEW.md). **Do not load candidate 0.3.5**; its descriptor ABI error caused a developer-machine bugcheck and is corrected in 0.3.6.
 
 **[Architecture](docs/ARCHITECTURE.md) · [Build from source](BUILDING.md) · [Signing status](docs/SIGNING.md) · [Roadmap](docs/ROADMAP.md)**
 

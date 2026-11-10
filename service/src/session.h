@@ -65,7 +65,6 @@ private:
         oa2dp_ring_format ring_format;
         oa2dp_pcm_ring *ring;
         USHORT mtu;
-        uint64_t address;
     };
     void stream_loop(const StreamContext &stream);
 
@@ -88,6 +87,7 @@ private:
     void begin_streaming();
     void end_streaming();
     bool update_suspend_state(); // profile availability is independent of idle PCM
+    bool publish_disconnected_state();
     void publish(const char *state);
 
     // AVDTP callbacks
@@ -112,6 +112,9 @@ private:
     ULONG stream_generation_ = 0;
     ULONG closed_connection_generation_ = 0;
     bool teardown_pending_ = false;
+    bool publication_pending_ = false;
+    DWORD next_publication_retry_ = 0;
+    bool media_drain_pending_ = false;
     bool transport_suspended_ = false;
     ULONG power_serial_ = 0;
     bool rx_failed_ = false;   // owned by the signalling thread
@@ -127,6 +130,7 @@ private:
     ULONG suspend_serial_ = 0;
     ULONG connection_serial_ = 0;
     OA2DP_FORMAT audio_format_{};  // actual Windows stream, not file metadata
+    ULONG pcm_sequence_ = 0;
     DWORD idle_since_ = 0;
     DWORD init_deadline_ = 0;      // become INT if the peer has not configured us by then
     DWORD next_reconnect_ = 0;
@@ -138,6 +142,7 @@ private:
     // thread plumbing
     HANDLE stop_event_ = nullptr;
     HANDLE wake_event_ = nullptr;
+    HANDLE stream_stop_event_ = nullptr;
     std::thread main_, ev_, audio_thr_, stream_;
     std::mutex mu_;
     std::deque<Command> cmd_q_;

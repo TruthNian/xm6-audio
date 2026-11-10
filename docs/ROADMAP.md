@@ -11,7 +11,9 @@ The repository contains a buildable native prototype. The initial hardware targe
 - Buffered connection events, persistent overlapped signalling, service/device cleanup and stale-PCM discard.
 - INF-owned, device-triggered codec service with Driver Store payload and signed-catalog deployment gate.
 - Ring producer rejects a stale sample rate under the format-change spin lock; endpoint format matching includes valid bits through the shared PCM comparator.
-- MMCSS Audio scheduling with thread-scoped cleanup. Ring consumption still polls; this is not a measured jitter guarantee.
+- MMCSS Audio scheduling, driver-to-service PCM data-ready events and cancellable stream waits; no Sleep(2) PCM polling.
+- Media cancellation retains pending I/O ownership and uses one realtime drain budget; state-publication failures remain visible.
+- Committed PCM epochs handle coalesced A -> B -> A formats. Opt-in ETW exposes PCM wait/buffering and media completion timing.
 - Standalone inbox A2DP recovery, independent of native service registration and package integrity, with class-independent address-scoped selection.
 - Public CMake/MSVC/WDK CI, pinned dependencies, license bundle and source/hash manifest.
 
@@ -27,6 +29,6 @@ The repository contains a buildable native prototype. The initial hardware targe
 
 Improve measured latency and queue behavior, broaden tested headset/radio combinations, and evaluate additional Windows/architecture targets. LE Audio/LC3 requires a separate supported platform/transport path; an A2DP capability parser is not an LE Audio implementation.
 
-Replace PCM polling with driver-to-service data-ready notification only after validating wakeup, cancellation and teardown ordering. Use ETW to correlate ring occupancy/overruns, wakeup delay and L2CAP completion latency under load. Neither event-driven consumption nor this timing evidence is implemented yet. The ring's stale-rate guard and portable format checks do not constitute a concurrent hardware format-switch test.
+The source-only 0.3.35 batch implements PCM data-ready notification, media-wait cancellation and opt-in timing probes. Its production-body fake-API checks cover wakeup and ownership ordering; they do not validate actual KMDF/Windows scheduling. Capture and compare real CPU use, buffering/overruns, wakeup and media-completion timing under load before making performance claims. Generic IOCTL/receive cancellation and final pending-I/O destruction still lack a universal hard deadline. The ring/epoch checks are not a concurrent hardware format-switch test.
 
 The inherited [SPEC.md](SPEC.md) is a protocol requirement catalogue, not proof of current hardware compatibility. The status table in the README and this acceptance list describe the current fork.

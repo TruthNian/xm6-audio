@@ -282,6 +282,7 @@ static VOID SnapshotStateLocked(_In_ const OA2DP_AUDIO_DEVICE *dev,
 {
     RtlZeroMemory(ev, sizeof(*ev));
     ev->Format = dev->Current;
+    ev->PcmSequence = dev->PcmSequence;
     ev->Running = dev->Running ? 1 : 0;
     ev->ConnectionEnabled = dev->ConnectionEnabled ? 1 : 0;
     ev->ConnectionSerial = dev->ConnectionSerial;
@@ -317,6 +318,19 @@ extern "C" VOID Oa2dpReportStream(_Inout_ OA2DP_AUDIO_DEVICE *dev, _In_ const OA
     PIRP irp;
 
     KeAcquireSpinLock(&dev->Lock, &irql);
+    // Commit format and epoch together. A GET_STATE between RingSetFormat and
+    // this report must retain the old epoch, so the encoder defers starting.
+    // Device -> ring is the only nested order; ring producers do not take Lock.
+    KeAcquireSpinLockAtDpcLevel(&dev->Ring.Lock);
+    const oa2dp_pcm_ring *ring = dev->Ring.Ring;
+    if (!ring || ring->sample_rate != format->SampleRate || ring->channels != format->Channels ||
+        ring->format != oa2dp_pcm_format_ring_type(format)) {
+        KeReleaseSpinLockFromDpcLevel(&dev->Ring.Lock);
+        KeReleaseSpinLock(&dev->Lock, irql);
+        return; // an obsolete stream cannot replace the new stream's state
+    }
+    dev->PcmSequence = ring->format_sequence;
+    KeReleaseSpinLockFromDpcLevel(&dev->Ring.Lock);
     dev->Current = *format;
     dev->Running = running;
     SnapshotStateLocked(dev, &ev);
@@ -639,11 +653,40 @@ static NTSTATUS ControlIoctl(_Inout_ OA2DP_AUDIO_DEVICE *dev, _Inout_ PIRP irp, 
     ULONG_PTR info = 0;
     KIRQL irql;
 
-    status = Oa2dpControlStatus(dev, code == IOCTL_OA2DP_AUDIO_UNMAP_RING);
+    status = Oa2dpControlStatus(dev, code == IOCTL_OA2DP_AUDIO_UNMAP_RING ||
+                                   code == IOCTL_OA2DP_AUDIO_SET_DATA_EVENT);
     if (!NT_SUCCESS(status)) {
         goto done;
     }
     switch (code) {
+    case IOCTL_OA2DP_AUDIO_SET_DATA_EVENT: {
+        if (!buf || inLen != sizeof(OA2DP_DATA_EVENT_IN)) {
+            status = STATUS_BUFFER_TOO_SMALL;
+            break;
+        }
+        const auto value = *static_cast<OA2DP_DATA_EVENT_IN *>(buf);
+        HANDLE event = reinterpret_cast<HANDLE>(static_cast<ULONG_PTR>(value.EventHandle));
+        if (event && irp->RequestorMode == UserMode &&
+            IoGetRequestorProcess(irp) != PsGetCurrentProcess()) {
+            status = STATUS_INVALID_DEVICE_STATE;
+            break;
+        }
+        if (value.Reserved || static_cast<ULONGLONG>(reinterpret_cast<ULONG_PTR>(event)) != value.EventHandle) {
+            status = STATUS_INVALID_PARAMETER;
+            break;
+        }
+        Oa2dpLock(&dev->ControlLock);
+        status = Oa2dpControlStatus(dev, !event);
+        if (NT_SUCCESS(status))
+            status = Oa2dpRingSetDataEvent(&dev->Ring, event, value.MinimumFrames, irp->RequestorMode);
+        if (NT_SUCCESS(status) && event) {
+            status = Oa2dpControlStatus(dev, FALSE);
+            if (!NT_SUCCESS(status))
+                (void)Oa2dpRingSetDataEvent(&dev->Ring, NULL, 0, KernelMode);
+        }
+        Oa2dpUnlock(&dev->ControlLock);
+        break;
+    }
     case IOCTL_OA2DP_AUDIO_MAP_RING: {
         OA2DP_RING_MAPPING m;
         if (outLen < sizeof(m) || !buf) {

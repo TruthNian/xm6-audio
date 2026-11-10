@@ -121,8 +121,11 @@ bool Transport::open(const std::wstring &path)
 
 void Transport::close()
 {
+    dev_.cancel_all();
     cancel_receive();
-    drain_media();
+    // Final object destruction cannot release buffers still owned by the
+    // kernel. This safety wait is deliberately outside the realtime loop.
+    drain_media(INFINITE);
     dev_.close();
     for (auto &s : slots_) {
         if (s.event)
@@ -255,29 +258,40 @@ bool Transport::tx_state(OA2DP_TX_STATE &out)
            n == sizeof(out);
 }
 
-bool Transport::finish_slot(Slot &s, DWORD timeout_ms)
+bool Transport::finish_slot(Slot &s, DWORD timeout_ms, HANDLE cancel)
 {
     if (!s.busy)
         return true;
-    if (WaitForSingleObject(s.event, timeout_ms) != WAIT_OBJECT_0) {
-        CancelIoEx(dev_.get(), &s.ov);
-    }
     DWORD n = 0;
-    BOOL ok = GetOverlappedResult(dev_.get(), &s.ov, &n, TRUE);
+    BOOL ok = GetOverlappedResult(dev_.get(), &s.ov, &n, FALSE);
+    if (!ok && GetLastError() == ERROR_IO_INCOMPLETE) {
+        HANDLE waits[] = {cancel, s.event};
+        const DWORD wake = WaitForMultipleObjects(cancel ? 2 : 1,
+            cancel ? waits : waits + 1, FALSE, timeout_ms);
+        if (wake != WAIT_OBJECT_0 + (cancel ? 1 : 0)) {
+            // Cancellation requests completion; it does not finish ownership.
+            // Keep busy/OVERLAPPED/data intact for a later bounded drain.
+            if (wake == WAIT_TIMEOUT) CancelIoEx(dev_.get(), &s.ov);
+            return false;
+        }
+        ok = GetOverlappedResult(dev_.get(), &s.ov, &n, FALSE);
+        if (!ok && GetLastError() == ERROR_IO_INCOMPLETE) return false;
+    }
     s.busy = false;
     return ok != FALSE;
 }
 
-bool Transport::send_media(const OA2DP_SEND_IN &binding, const uint8_t *data, size_t len)
+bool Transport::send_media(const OA2DP_SEND_IN &binding, const uint8_t *data, size_t len, HANDLE cancel)
 {
+    if (cancel && WaitForSingleObject(cancel, 0) == WAIT_OBJECT_0) return false;
     Slot &s = slots_[next_slot_];
-    next_slot_ = (next_slot_ + 1) % kSlots;
-    // Oldest send must finish before its slot is reused; 1 s is far beyond
-    // any healthy link and means the headset is gone.
-    if (!finish_slot(s, 1000)) {
-        LOGE("media send completed with error");
+    if (!finish_slot(s, 1000, cancel)) {
+        if (!cancel || WaitForSingleObject(cancel, 0) != WAIT_OBJECT_0)
+            LOGE("media send failed or exceeded its wait budget");
         return false;
     }
+    if (cancel && WaitForSingleObject(cancel, 0) == WAIT_OBJECT_0) return false;
+    next_slot_ = (next_slot_ + 1) % kSlots;
 
     s.binding = binding;
     s.data.assign(data, data + len);
@@ -294,24 +308,43 @@ bool Transport::send_media(const OA2DP_SEND_IN &binding, const uint8_t *data, si
     return true;
 }
 
-void Transport::drain_media()
+void Transport::cancel_media()
 {
-    if (!dev_.is_open())
-        return;
     for (auto &s : slots_)
-        finish_slot(s, 1000);
+        if (s.busy && dev_.is_open()) CancelIoEx(dev_.get(), &s.ov);
+}
+
+bool Transport::drain_media(DWORD timeout_ms)
+{
+    if (!dev_.is_open()) return true;
+    const ULONGLONG start = GetTickCount64();
+    bool retired = true;
+    for (auto &s : slots_) {
+        const ULONGLONG elapsed = GetTickCount64() - start;
+        const DWORD left = timeout_ms == INFINITE ? INFINITE :
+            elapsed >= timeout_ms ? 0 : static_cast<DWORD>(timeout_ms - elapsed);
+        (void)finish_slot(s, left);
+        retired = retired && !s.busy;
+    }
+    return retired;
 }
 
 // --------------------------------------------------------------------------
 
 bool AudioEndpoint::open(uint64_t bt_addr)
 {
+    close();
     std::wstring want = address_key(bt_addr);
     for (const auto &path : enumerate_interfaces(GUID_DEVINTERFACE_OA2DP_AUDIO)) {
         std::wstring upper = path;
         std::transform(upper.begin(), upper.end(), upper.begin(), ::towupper);
         if (upper.find(L"#" + want + L"#") != std::wstring::npos)
-            return dev_.open(path);
+        {
+            if (!dev_.open(path)) return false;
+            data_event_ = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+            if (!data_event_) { dev_.close(); return false; }
+            return true;
+        }
     }
     return false;
 }
@@ -322,6 +355,16 @@ void AudioEndpoint::close()
         set_connected(false);
     unmap_ring();
     dev_.close();
+    if (data_event_) CloseHandle(data_event_);
+    data_event_ = nullptr;
+}
+
+bool AudioEndpoint::set_data_event(ULONG minimum_frames)
+{
+    OA2DP_DATA_EVENT_IN value{static_cast<ULONGLONG>(reinterpret_cast<uintptr_t>(data_event_)),
+                              minimum_frames, 0};
+    return data_event_ && dev_.ioctl(IOCTL_OA2DP_AUDIO_SET_DATA_EVENT, &value, sizeof(value),
+        nullptr, 0, nullptr, 5000) == ERROR_SUCCESS;
 }
 
 bool AudioEndpoint::set_connected(bool connected, ULONG connection)

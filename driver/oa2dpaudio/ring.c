@@ -112,6 +112,7 @@ VOID Oa2dpRingUnmapUser(_Inout_ OA2DP_AUDIO_RING *r)
 {
     KAPC_STATE apc;
 
+    (void)Oa2dpRingSetDataEvent(r, NULL, 0, KernelMode);
     if (!r->UserVa)
         return;
     if (r->UserProcess == PsGetCurrentProcess()) {
@@ -124,6 +125,40 @@ VOID Oa2dpRingUnmapUser(_Inout_ OA2DP_AUDIO_RING *r)
     ObDereferenceObject(r->UserProcess);
     r->UserVa = NULL;
     r->UserProcess = NULL;
+}
+
+/* No lost wakeup: register before checking data, and signal as a level
+ * condition after every producer commit. The consumer rechecks the ring
+ * before waiting, so auto-reset event coalescing never hides queued frames. */
+NTSTATUS Oa2dpRingSetDataEvent(OA2DP_AUDIO_RING *r, HANDLE event,
+                              ULONG minimumFrames, KPROCESSOR_MODE mode)
+{
+    PKEVENT next = NULL, old;
+    KIRQL irql;
+    NTSTATUS status = STATUS_SUCCESS;
+    if ((!event && minimumFrames) || (event && (!minimumFrames || minimumFrames > RING_FRAMES)))
+        return STATUS_INVALID_PARAMETER;
+    if (event) {
+        status = ObReferenceObjectByHandle(event, EVENT_MODIFY_STATE,
+            *ExEventObjectType, mode, (PVOID *)&next, NULL);
+        if (!NT_SUCCESS(status)) return status;
+    }
+    KeAcquireSpinLock(&r->Lock, &irql);
+    old = NULL;
+    if (next && !r->Ring) {
+        status = STATUS_DEVICE_NOT_READY;
+    } else {
+        old = r->DataEvent;
+        r->DataEvent = next;
+        r->MinimumFrames = minimumFrames;
+        next = NULL;
+        if (r->DataEvent && oa2dp_ring_readable(r->Ring) >= minimumFrames)
+            KeSetEvent(r->DataEvent, IO_NO_INCREMENT, FALSE);
+    }
+    KeReleaseSpinLock(&r->Lock, irql);
+    if (old) ObDereferenceObject(old);
+    if (next) ObDereferenceObject(next);
+    return status;
 }
 
 /* Rewrites only the format fields: positions keep counting, so a consumer
@@ -139,6 +174,7 @@ BOOLEAN Oa2dpRingSetFormat(_Inout_ OA2DP_AUDIO_RING *r, _In_ ULONG rate, _In_ US
     KeAcquireSpinLock(&r->Lock, &irql);
     if (r->Ring)
         changed = oa2dp_ring_set_format(r->Ring, rate, channels, format) > 0;
+    if (changed && r->DataEvent) KeSetEvent(r->DataEvent, IO_NO_INCREMENT, FALSE);
     KeReleaseSpinLock(&r->Lock, irql);
     return changed;
 }
@@ -154,6 +190,7 @@ VOID Oa2dpRingSetRunning(_Inout_ OA2DP_AUDIO_RING *r, _In_ BOOLEAN running)
         else
             InterlockedAnd((volatile LONG *)&r->Ring->flags, ~(LONG)OA2DP_RING_FLAG_RUNNING);
     }
+    if (r->DataEvent) KeSetEvent(r->DataEvent, IO_NO_INCREMENT, FALSE);
     KeReleaseSpinLock(&r->Lock, irql);
 }
 
@@ -213,6 +250,8 @@ VOID Oa2dpRingPump(_Inout_ OA2DP_AUDIO_RING *r, _In_reads_bytes_(cyclicBytes) co
                 pos = 0;
             frames -= n;
         }
+        if (r->DataEvent && oa2dp_ring_readable(r->Ring) >= r->MinimumFrames)
+            KeSetEvent(r->DataEvent, IO_NO_INCREMENT, FALSE);
     }
     KeReleaseSpinLock(&r->Lock, irql);
 }

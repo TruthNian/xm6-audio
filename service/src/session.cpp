@@ -9,6 +9,7 @@
 #include <cstring>
 
 #include "log.h"
+#include "stream_trace.h"
 #include "oa2dp/encoder.h"
 #include "oa2dp/media.h"
 #include "oa2dp/pcm_ring.h"
@@ -70,6 +71,7 @@ Session::Session(std::wstring transport_path) : path_(std::move(transport_path))
 {
     stop_event_ = CreateEventW(nullptr, TRUE, FALSE, nullptr);
     wake_event_ = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+    stream_stop_event_ = CreateEventW(nullptr, TRUE, TRUE, nullptr);
 }
 
 Session::~Session()
@@ -79,6 +81,7 @@ Session::~Session()
         CloseHandle(stop_event_);
     if (wake_event_)
         CloseHandle(wake_event_);
+    if (stream_stop_event_) CloseHandle(stream_stop_event_);
 }
 
 void Session::start()
@@ -90,6 +93,7 @@ void Session::stop()
 {
     stopping_ = true;
     SetEvent(stop_event_);
+    SetEvent(stream_stop_event_);
     tr_.cancel_all();
     audio_.cancel_all();
     if (main_.joinable())
@@ -427,6 +431,7 @@ bool Session::ensure_audio_endpoint()
         suspend_serial_ = state.SuspendSerial;
         connection_serial_ = state.ConnectionSerial;
         audio_format_ = state.Format;
+        pcm_sequence_ = state.PcmSequence;
         audio_running_ = state.Running != 0;
         audio_ready_ = true;
     }
@@ -477,6 +482,7 @@ bool Session::setup_audio_endpoint()
         return false;
     }
     if (!audio_.set_connected(true, sig_generation_)) return false;
+    publication_pending_ = false; // an old FALSE must not follow this new link
     // A newer HFP request can arrive while configuring. Its policy update
     // follows through WAIT_FORMAT; preserve this valid AVDTP configuration.
     update_suspend_state();
@@ -576,19 +582,24 @@ void Session::teardown(const char *why)
         publish("disconnect-pending");
         return;
     }
-    // The one-shot KS disconnect completes on this notification. Report it
-    // after both synchronous channel closes, not before the link teardown.
-    // Keep the audio handle, ring and PortCls filters for every existing app.
-    if (audio_ready_)
-        update_suspend_state();
-    if (audio_ready_)
-        audio_.set_connected(false);
+    // Transport closure and Windows/endpoint publication are separate results.
+    // The parent independently publishes closure; do not hide child errors.
+    publication_pending_ = !publish_disconnected_state();
+    next_publication_retry_ = GetTickCount() + 1000;
     rx_failed_ = false;
     oa2dp_avdtp_reset(&av_);
     responses_.clear();
     local_seid_ = 0;
     init_deadline_ = 0;
-    publish("disconnected");
+    publish(publication_pending_ ? "state-update-pending" : "disconnected");
+}
+
+bool Session::publish_disconnected_state()
+{
+    if (!audio_ready_) return true; // unavailable child is already unplugged
+    const bool policy = update_suspend_state();
+    const bool endpoint = audio_.set_connected(false);
+    return policy && endpoint;
 }
 
 void Session::refresh_transport_power()
@@ -680,12 +691,15 @@ void Session::handle(const Command &c)
             audio_format_ = c.format.Format;
             audio_running_ = c.format.Running != 0;
             teardown("Windows requested disconnect");
-            publish("user-disconnected");
+            if (!teardown_pending_)
+                publish(publication_pending_ ? "state-update-pending" : "user-disconnected");
             break;
         }
-        if (streaming_ && !oa2dp_pcm_format_same(&audio_format_, &c.format.Format))
+        if (streaming_ && (pcm_sequence_ != c.format.PcmSequence ||
+                          !oa2dp_pcm_format_same(&audio_format_, &c.format.Format)))
             suspend_stream();
         audio_format_ = c.format.Format;
+        pcm_sequence_ = c.format.PcmSequence;
         audio_running_ = c.format.Running != 0;
         if (teardown_pending_ || transport_suspended_) break;
         if (suspend_requested_) {
@@ -742,7 +756,7 @@ void Session::handle(const Command &c)
 
 void Session::publish(const char *state)
 {
-    std::lock_guard<std::mutex> lock(status_mu_);
+    std::unique_lock<std::mutex> lock(status_mu_);
     status_.state = state;
     status_.input_container_bits = audio_format_.BitsPerSample;
     status_.input_valid_bits = audio_format_.ValidBitsPerSample;
@@ -757,7 +771,9 @@ void Session::publish(const char *state)
         status_.bits = oa2dp_codec_pcm_bits(&config_, &effective);
     }
     status_.delay_report_us = delay_report_us_;
-    publish_status(info_.RemoteAddress, status_);
+    const LiveStatus snapshot = status_;
+    lock.unlock(); // registry I/O must not hold the encoder's status lock
+    publish_status(info_.RemoteAddress, snapshot);
 }
 
 // ---------------------------------------------------------------------------
@@ -826,8 +842,26 @@ void Session::main_loop()
     audio_thr_ = std::thread([this] { audio_loop(); });
     publish("connecting");
     next_reconnect_ = GetTickCount();
+    DWORD next_status_write = GetTickCount() + 1000;
 
     while (!stopping_) {
+        if (is_after(GetTickCount(), next_status_write)) {
+            LiveStatus snapshot;
+            {
+                std::lock_guard<std::mutex> lock(status_mu_);
+                snapshot = status_;
+            }
+            publish_status(info_.RemoteAddress, snapshot);
+            next_status_write = GetTickCount() + 1000;
+        }
+        if (publication_pending_ && !transport_suspended_ && audio_ready_ && !sig_open_ && !media_open_ &&
+            is_after(GetTickCount(), next_publication_retry_)) {
+            next_publication_retry_ = GetTickCount() + 1000;
+            if (publish_disconnected_state()) {
+                publication_pending_ = false;
+                publish("disconnected");
+            }
+        }
         if (!transport_suspended_ && teardown_pending_ && is_after(GetTickCount(), next_reconnect_))
             teardown("retry incomplete channel close");
         // Opening L2CAP establishes the ACL link when needed. Waiting for
@@ -863,6 +897,12 @@ void Session::main_loop()
         if (streaming_ && !audio_running_ && idle_since_ &&
             is_after(GetTickCount(), idle_since_ + kIdleSuspendMs))
             suspend_stream();
+
+        if (media_drain_pending_ && tr_.drain_media(0)) {
+            media_drain_pending_ = false;
+            if (audio_running_ && connection_enabled_ && !suspend_requested_ && !transport_suspended_)
+                start_stream();
+        }
 
         // Process received signalling and queued commands.
         while (pump(0)) {
@@ -910,6 +950,12 @@ void Session::begin_streaming()
     }
     if (stream_.joinable())  // previous loop exited on its own (encoder error)
         stream_.join();
+    if (!tr_.drain_media(0)) {
+        media_drain_pending_ = true;
+        publish("draining");
+        return;
+    }
+    media_drain_pending_ = false;
     StreamContext context{};
     context.media = {Oa2dpChannelMedia, media_generation_, sig_generation_};
     context.config = config_;
@@ -917,9 +963,8 @@ void Session::begin_streaming()
     context.pcm = audio_format_;
     context.ring = audio_.ring();
     context.mtu = media_mtu_;
-    context.address = info_.RemoteAddress;
     if (oa2dp_ring_snapshot(context.ring, &context.ring_format) != OA2DP_OK ||
-        context.ring_format.channels > 2) {
+        context.ring_format.channels > 2 || context.ring_format.sequence != pcm_sequence_) {
         LOGE("PCM format unavailable when starting the encoder");
         return;
     }
@@ -930,6 +975,7 @@ void Session::begin_streaming()
         return;
     }
     streaming_ = true;
+    ResetEvent(stream_stop_event_);
     if (++stream_generation_ == 0) ++stream_generation_;
     context.generation = stream_generation_;
     stream_ = std::thread([this, context] { stream_loop(context); });
@@ -939,6 +985,7 @@ void Session::begin_streaming()
 void Session::end_streaming()
 {
     streaming_ = false;
+    SetEvent(stream_stop_event_);
     if (stream_.joinable())
         stream_.join();
     {
@@ -986,6 +1033,13 @@ void Session::stream_loop(const StreamContext &stream)
     oa2dp_ring_discard(ring);
     const uint16_t ring_ch = ring_format.channels;
     const uint8_t ch = info.channels;
+    if (!audio_.set_data_event(spc)) {
+        LOGE("cannot register PCM data-ready notification");
+        oa2dp_encoder_destroy(enc);
+        fail_stream();
+        return;
+    }
+    HANDLE pcm_waits[] = {stream_stop_event_, stop_event_, audio_.data_event()};
 
     std::vector<uint8_t> pkt(stream.mtu), out(info.max_output);
     std::vector<float> fbuf(static_cast<size_t>(spc) * ring_ch);
@@ -1004,36 +1058,64 @@ void Session::stream_loop(const StreamContext &stream)
 
     uint64_t bytes_sent = 0;
     DWORD window_start = GetTickCount(), last_abr = window_start;
+    LARGE_INTEGER clock_rate{};
+    QueryPerformanceFrequency(&clock_rate);
+    uint64_t wait_count = 0, max_wait_us = 0;
+    uint32_t peak_frames = 0;
+    uint64_t previous_overruns = static_cast<uint64_t>(InterlockedCompareExchange64(
+        reinterpret_cast<volatile LONG64 *>(&ring->overruns), 0, 0));
     LOGI("streaming %s: %u Hz, %u ch, %u samples/call", oa2dp_codec_name(cfg.codec),
          info.sample_rate, ch, spc);
 
     auto send_packet = [&](size_t len) {
         if (len && streaming_) {
-            if (tr_.send_media(stream.media, pkt.data(), len))
+            if (tr_.send_media(stream.media, pkt.data(), len, stream_stop_event_))
                 bytes_sent += len;
             else {
-                LOGE("Bluetooth media send failed");
-                fail_stream();
+                if (streaming_) {
+                    LOGE("Bluetooth media send failed");
+                    fail_stream();
+                }
                 streaming_ = false;
             }
         }
     };
 
     while (streaming_) {
+        const bool timing = TraceLoggingProviderEnabled(g_Oa2dpStreamTrace, 5, 0) != FALSE;
+        if (timing) peak_frames = (std::max)(peak_frames, oa2dp_ring_readable(ring));
         if (ring_format.sample_rate != info.sample_rate) {
-            // The format event will suspend/reconfigure this stream. Never
-            // encode a new rate with the previous rate's timing meanwhile.
-            Sleep(2);
-            continue;
+            LOGE("PCM and codec rates differ; refusing mistimed audio");
+            fail_stream();
+            break;
         }
         uint32_t read_frames = 0;
         const bool floating = ring_format.format == OA2DP_RING_FMT_FLOAT32;
         void *input = floating ? static_cast<void *>(fbuf.data()) : static_cast<void *>(pcm.data());
         const size_t input_bytes = floating ? fbuf.size() * sizeof(float) : pcm.size() * sizeof(int32_t);
         const int read_status = oa2dp_ring_read(ring, &ring_format, input, input_bytes, spc, &read_frames);
-        if (read_status == OA2DP_ERR_BUSY || read_status == OA2DP_ERR_STATE ||
+        if (read_status == OA2DP_ERR_STATE) {
+            // Old format cannot become current again. The format waiter will
+            // stop/reconfigure us; wait cancellably instead of polling it.
+            WaitForMultipleObjects(2, pcm_waits, FALSE, INFINITE);
+            break;
+        }
+        if (read_status == OA2DP_ERR_BUSY ||
             (read_status == OA2DP_OK && !read_frames)) {
-            Sleep(2);
+            LARGE_INTEGER before{}, after{};
+            if (timing) QueryPerformanceCounter(&before);
+            const DWORD wake = WaitForMultipleObjects(3, pcm_waits, FALSE, INFINITE);
+            if (timing && clock_rate.QuadPart > 0) {
+                QueryPerformanceCounter(&after);
+                const auto elapsed = static_cast<uint64_t>(after.QuadPart - before.QuadPart);
+                const auto hz = static_cast<uint64_t>(clock_rate.QuadPart);
+                max_wait_us = (std::max)(max_wait_us, elapsed / hz * 1000000 + elapsed % hz * 1000000 / hz);
+                ++wait_count;
+            }
+            if (wake != WAIT_OBJECT_0 + 2) {
+                if (wake == WAIT_FAILED) fail_stream();
+                break;
+            }
             continue;
         }
         if (read_status != OA2DP_OK || read_frames != spc) {
@@ -1101,16 +1183,33 @@ void Session::stream_loop(const StreamContext &stream)
             }
         }
         if (now - window_start >= 1000) {
+            if (timing) {
+                const uint64_t overruns = static_cast<uint64_t>(
+                    InterlockedCompareExchange64(reinterpret_cast<volatile LONG64 *>(&ring->overruns), 0, 0));
+                TraceLoggingWrite(g_Oa2dpStreamTrace, "PcmWindow",
+                    TraceLoggingLevel(5),
+                    TraceLoggingUInt32(generation, "StreamGeneration"),
+                    TraceLoggingUInt32(stream.media.ConnectionGeneration, "ConnectionGeneration"),
+                    TraceLoggingUInt32(info.sample_rate, "SampleRate"),
+                    TraceLoggingUInt64(wait_count, "DataWaitCount"),
+                    TraceLoggingUInt64(max_wait_us, "MaxDataWaitUs"),
+                    TraceLoggingUInt32(peak_frames, "PeakBufferedFrames"),
+                    TraceLoggingUInt64(overruns - previous_overruns, "OverrunFrames"));
+                previous_overruns = overruns;
+                wait_count = max_wait_us = 0;
+                peak_frames = 0;
+            }
             std::lock_guard<std::mutex> lock(status_mu_);
             status_.bitrate = static_cast<uint32_t>(bytes_sent * 8000 / (now - window_start));
             status_.abr_level = abr.level;
-            publish_status(stream.address, status_);
             bytes_sent = 0;
             window_start = now;
         }
     }
     // Retired audio belongs to this encoder/link. Discard a partial packet.
-    tr_.drain_media();
+    tr_.cancel_media();
+    if (!tr_.drain_media())
+        LOGW("media drain budget expired; retaining pending I/O buffers");
     oa2dp_encoder_destroy(enc);
 }
 

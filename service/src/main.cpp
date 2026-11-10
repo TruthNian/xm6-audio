@@ -18,6 +18,10 @@
 #include "driver_io.h"
 #include "log.h"
 #include "session.h"
+#include "stream_trace.h"
+
+TRACELOGGING_DEFINE_PROVIDER(g_Oa2dpStreamTrace, "XM6Audio.Stream",
+    (0x612cfc30, 0x2fe1, 0x4e0e, 0x9b, 0x90, 0xe2, 0x3f, 0x67, 0x72, 0x5a, 0x61));
 
 namespace oa2dp {
 namespace {
@@ -146,15 +150,18 @@ DWORD WINAPI control_handler(DWORD ctrl, DWORD, LPVOID, LPVOID)
 
 void run_until_stopped()
 {
+    (void)TraceLoggingRegister(g_Oa2dpStreamTrace);
     g_stop = CreateEventW(nullptr, TRUE, FALSE, nullptr);
     if (!g_manager.start()) {
         CloseHandle(g_stop);
+        TraceLoggingUnregister(g_Oa2dpStreamTrace);
         return;
     }
     if (g_status_handle)
         set_state(SERVICE_RUNNING);
     WaitForSingleObject(g_stop, INFINITE);
     g_manager.stop();
+    TraceLoggingUnregister(g_Oa2dpStreamTrace);
     CloseHandle(g_stop);
 }
 

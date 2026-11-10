@@ -1,5 +1,89 @@
 # Native lifecycle review
 
+## 0.3.35: PCM notifications and cancellable media waits, source only
+
+This batch changes the driver/service ABI to 11; both drivers and the service
+must be deployed as one matching package. Ring memory layout remains v2 and
+the kernel bus interface remains v5. It has not been installed on the developer
+machine, whose last verified runtime is 0.3.32. Headset testing is still deferred.
+
+### Data readiness instead of encoder polling
+
+The encoder no longer calls Sleep(2) to poll PCM. It registers one auto-reset
+event with the audio driver, using its actual samples-per-call as the wake
+threshold. After producer commits the driver signals if a full block is
+available; registration also signals already-buffered data. The consumer
+checks the ring before waiting. Format and RUN changes signal the same event,
+while separate stream/service stop events cancel the wait immediately. The
+WaveRT software position timer remains; removing service polling is not a
+claim that the whole virtual device is interrupt-driven.
+
+The driver references the supplied event with the caller's access mode and
+event object type, rejects a user handle in the wrong process context, and
+holds the ring lock during use/replacement. It releases old references outside
+the lock and unregisters on unmap/control cleanup, including an unmapped view.
+See [ObReferenceObjectByHandle](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/wdm/nf-wdm-obreferenceobjectbyhandle)
+and [KeSetEvent](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/wdm/nf-wdm-kesetevent).
+
+WAIT_FORMAT/GET_STATE now carry the ring's committed PCM sequence, alongside
+the format. A coalesced A -> B -> A change still restarts the old encoder.
+Format and its epoch are committed together; startup defers if the snapshot
+and ring differ. Reports whose format no longer matches the ring are ignored.
+This avoids waiting forever for an old sequence after apparently unchanged
+metadata, without reinterpreting samples from another epoch.
+
+### Media cancellation and status publication
+
+Media-slot waits accept the stream stop event and collect completion without
+an unbounded GetOverlappedResult(TRUE) on the encoding thread. On timeout or
+cancellation, pending OVERLAPPED objects and buffers remain owned by Transport.
+The retiring encoder cancels its sends and uses one 250 ms total drain budget,
+not a separate second per slot. An incomplete drain prevents new-slot reuse;
+the existing session loop resumes only after those requests retire.
+
+Final object destruction still waits for outstanding kernel I/O before freeing
+its memory. Generic stack-buffer IOCTL cancellation and signalling receive
+retirement retain their existing safety waits. There is no universal hard
+shutdown deadline if the lower driver never completes an operation. This
+batch bounds the realtime media path; it does not hide that remaining limit.
+
+After physical close, failure of suspend/jack publication is reported as
+state-update-pending and retried in the existing main loop while that link
+remains closed. A successful new TRUE publication clears the obsolete retry.
+The explicit user-disconnect path also preserves close/publication errors.
+Periodic registry status writes moved off the encoder thread, and state
+publication releases its status lock before registry I/O.
+
+### Opt-in timing evidence
+
+The service registers XM6Audio.Stream
+(`{612cfc30-2fe1-4e0e-9b90-e23f67725a61}`). At verbose level its PcmWindow event
+records data-wait count, maximum blocked-wait duration, sampled peak buffered
+frames and overrun deltas about once per second. MaxDataWaitUs includes time
+waiting for production; it is not producer-to-scheduler wakeup latency.
+No addresses, filenames, audio samples or account data are recorded.
+
+The existing XM6Audio.Transport provider adds opt-in verbose MediaSendComplete
+events measuring driver submission-to-completion time for media sends.
+These include neither radio packet contents nor an acoustic latency estimate.
+Captures can be correlated with the existing WaveRT state/format events to
+separate paused production, buffering and transport completion. No live trace
+was started for this source batch. No measured hardware performance gain or
+optimality claim follows from adding these probes.
+
+### Offline evidence and limits
+
+New checks compile the actual production ring-notification, media-slot/drain
+and disconnect-publication bodies against fake OS APIs. They cover commit
+before wait, threshold accumulation, event replacement/reference release,
+format/RUN wakeup, A -> B -> A epoch changes, stale-format writes, stop
+cancellation, timeout with retained I/O ownership, one shared drain budget,
+spurious completion events and publication failures. Full local kernel/service
+build and all ten CTest checks pass. The fake fixtures do not prove real KMDF
+callback timing, Windows event security, RF behavior or audible playback.
+Settings state, reconnect, existing-client recovery and measured performance
+remain hardware acceptance requirements.
+
 ## 0.3.34: transport-owned disconnect publication, source only
 
 Local channel close formerly relied on the encoder service subsequently

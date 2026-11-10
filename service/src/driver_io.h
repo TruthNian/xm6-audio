@@ -59,8 +59,9 @@ public:
     bool tx_state(OA2DP_TX_STATE &out);
 
     // Media: up to kSlots sends in flight; blocks when all are busy.
-    bool send_media(const OA2DP_SEND_IN &binding, const uint8_t *data, size_t len);
-    void drain_media();
+    bool send_media(const OA2DP_SEND_IN &binding, const uint8_t *data, size_t len, HANDLE cancel);
+    void cancel_media();
+    bool drain_media(DWORD timeout_ms = 250);
 
 private:
     static constexpr size_t kSlots = 8;
@@ -71,7 +72,7 @@ private:
         bool busy = false;
         OA2DP_SEND_IN binding{}; // stable for the entire overlapped request
     };
-    bool finish_slot(Slot &s, DWORD timeout_ms);
+    bool finish_slot(Slot &s, DWORD timeout_ms, HANDLE cancel = nullptr);
     void cancel_receive();
 
     DriverHandle dev_;
@@ -92,6 +93,8 @@ public:
     bool set_suspended(bool suspended, ULONG request_serial, ULONG connection);
     bool get_state(OA2DP_FORMAT_CHANGE &out);
     bool map_ring();
+    bool set_data_event(ULONG minimum_frames);
+    HANDLE data_event() const { return data_event_; }
     void unmap_ring();
     oa2dp_pcm_ring *ring() const { return ring_; }
     // ERROR_SUCCESS with a new format; preserve the native cancel/device error.
@@ -101,6 +104,7 @@ public:
 private:
     DriverHandle dev_;
     oa2dp_pcm_ring *ring_ = nullptr;
+    HANDLE data_event_ = nullptr;
 };
 
 }  // namespace oa2dp

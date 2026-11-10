@@ -126,6 +126,7 @@ typedef struct _OA2DP_REQUEST_CONTEXT {
     OA2DP_CHANNEL *Channel;
     ULONG Bytes;
     ULONG Generation;
+    ULONGLONG SubmittedAt;    /* opt-in ETW timestamp, media sends only */
     WDFREQUEST UserRequest;   /* exact outgoing caller; never a replacement channel's request */
 } OA2DP_REQUEST_CONTEXT;
 

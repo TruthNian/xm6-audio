@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: MIT */
 /* L2CAP channel management through Bluetooth Request Blocks (BRBs). */
 #include "oa2dp.h"
+#include "trace.h"
 
 static NTSTATUS CloseChannelGeneration(OA2DP_DEVICE_CONTEXT *dev,
                                        OA2DP_CHANNEL_KIND kind, ULONG generation,
@@ -725,8 +726,11 @@ VOID Oa2dpTransfer(_In_ OA2DP_DEVICE_CONTEXT *dev, _In_ WDFREQUEST request,
     rc->Brb = (struct _BRB *)brb;
     rc->Channel = ch;
     rc->Bytes = len;
+    rc->SubmittedAt = 0;
 
     if (send && kind == Oa2dpChannelMedia) {
+        if (TraceLoggingProviderEnabled(g_Oa2dpTransportTrace, 5, 0))
+            rc->SubmittedAt = (ULONGLONG)KeQueryPerformanceCounter(NULL).QuadPart;
         InterlockedIncrement(&dev->TxQueuedPackets);
         InterlockedExchangeAdd(&dev->TxQueuedBytes, (LONG)len);
     }
@@ -764,6 +768,18 @@ static void TransferDone(_In_ WDFREQUEST Request, _In_ WDFIOTARGET Target,
             InterlockedIncrement64(&dev->TxSent);
         else
             InterlockedIncrement64(&dev->TxFailed);
+        if (rc->SubmittedAt) {
+            LARGE_INTEGER frequency;
+            ULONGLONG now = (ULONGLONG)KeQueryPerformanceCounter(&frequency).QuadPart;
+            ULONGLONG elapsed = now >= rc->SubmittedAt ? now - rc->SubmittedAt : 0;
+            ULONGLONG hz = (ULONGLONG)frequency.QuadPart;
+            TraceLoggingWrite(g_Oa2dpTransportTrace, "MediaSendComplete",
+                TraceLoggingLevel(5),
+                TraceLoggingUInt32(rc->Bytes, "Bytes"),
+                TraceLoggingUInt64(hz ? elapsed / hz * 1000000 + elapsed % hz * 1000000 / hz : 0,
+                                     "CompletionUs"),
+                TraceLoggingNTStatus(status, "Status"));
+        }
     }
     dev->Profile.BthFreeBrb((PBRB)brb);
     rc->Brb = NULL;

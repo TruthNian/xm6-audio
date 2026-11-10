@@ -42,7 +42,7 @@ generator, file saving, KMDF.
    a referenced kernel interface. Hardware-volume acceptance is recorded
    separately in the hardware bring-up log.
 2. **Formats** come from `IOCTL_OA2DP_AUDIO_SET_FORMATS`. The KS data
-   ranges are only an envelope (8–192 kHz, 1–2 channels, float32 or 16/24-bit
+   ranges are only an envelope (8–192 kHz, 1–2 channels, float32 or 16/24/32-bit
    PCM); `IsFormatSupported`, `DataRangeIntersection`,
    `PROPOSEDATAFORMAT` (get = preferred, set = check) and
    `PROPOSEDATAFORMAT2` answer from the list. Float32 is offered first. A
@@ -57,6 +57,10 @@ generator, file saving, KMDF.
    with the frames played since the last tick. Float32 is copied as is;
    16/24-bit PCM becomes 24-bit values in int32 (`OA2DP_RING_FMT_S32`).
    `OA2DP_RING_FLAG_RUNNING` follows `SetState(RUN)` / leaving RUN.
+   ABI 11's referenced data-ready event wakes the service at a complete
+   encoder-block threshold, including already-buffered data at registration.
+   Format/RUN changes also wake it; unmap/cleanup release the event reference.
+   The service has independent stop events and no Sleep(2) PCM polling loop.
 4. **Format change.** The ring is allocated once for 2 channels and never
    moves. Ring protocol v2 keeps the two-channel storage stride fixed, even
    for mono PCM. A format transaction updates rate/channels/representation,
