@@ -2,7 +2,7 @@
 
 The controlled developer trial targets WH-1000XM6 on Windows 10 x64, build 19045. It uses a local development signature under explicitly authorized test signing. This is separate from the production installer, which still requires Microsoft-signed catalogs.
 
-Latest source audit: [0.3.45 lifecycle review](LIFECYCLE-REVIEW.md), not deployed.
+Latest source audit: [0.3.46 lifecycle review](LIFECYCLE-REVIEW.md), not deployed.
 The current installed and observed runtime is 0.3.44. After its authorized
 deployment and a user restart, both actual loaded kernel images and the running
 service matched the verified local test-signed candidate. The service process
@@ -35,7 +35,7 @@ test-signed; they are not claimed to be the CI artifact or production-signed.
   and does not reproduce or resolve the Chrome fault.
 
 The user subsequently requested source-only investigation and has no time for
-further physical testing. No new package is deployed for the 0.3.45 source work.
+further physical testing. No new package is deployed for the 0.3.45–0.3.46 source work.
 
 Earlier activation history: versions
 0.3.23 through 0.3.30 were not deployed. A controlled 0.3.31 warm-binding trial

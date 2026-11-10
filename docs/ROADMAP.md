@@ -45,4 +45,6 @@ Source-only 0.3.44 serializes driver-handle lifetime changes with stop-thread ca
 
 The 0.3.44 batch was subsequently deployed with explicit authorization; see the updated hardware record. Source-only 0.3.45 makes initial automatic codec selection prefer current endpoint PCM and preserves supported current formats in proposals. This is not per-file shared-mix adaptation and does not establish a Chrome/UI fix or measured performance improvement.
 
+Source-only 0.3.46 fixes multi-frame RTP timestamp accounting. The actual service block and actual LDAC adapter reproduced a half-duration timestamp step at 96 kHz; regression checks cover all four supported LDAC rates, 16/24-bit input and MTUs 679/895/1024, plus portable batching, wrap and single-frame/fragment paths. This establishes packet-clock correctness for those paths, not actual headset jitter/stutter recovery.
+
 The inherited [SPEC.md](SPEC.md) is a protocol requirement catalogue, not proof of current hardware compatibility. The status table in the README and this acceptance list describe the current fork.

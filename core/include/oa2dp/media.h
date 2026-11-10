@@ -62,7 +62,8 @@ int oa2dp_rtp_add_frame(oa2dp_rtp *r, const uint8_t *frame, size_t len,
                         uint32_t samples);
 
 /* Same, for a chunk that already holds `count` codec frames (LDAC encoder
- * output). */
+ * output). `samples` is the TOTAL per-channel PCM duration of this chunk,
+ * not the duration of one frame or one encoder input call. */
 int oa2dp_rtp_add_frames(oa2dp_rtp *r, const uint8_t *data, size_t len,
                          uint8_t count, uint32_t samples);
 

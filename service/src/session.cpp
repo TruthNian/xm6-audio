@@ -1187,10 +1187,10 @@ void Session::stream_loop(const StreamContext &stream)
         if (len == 0 || frames == 0)
             continue;
 
-        int r = oa2dp_rtp_add_frames(&rtp, out.data(), len, frames, spf);
+        int r = oa2dp_rtp_add_frames(&rtp, out.data(), len, frames, spf * frames);
         if (r == 0) {
             send_packet(oa2dp_rtp_flush(&rtp));
-            r = oa2dp_rtp_add_frames(&rtp, out.data(), len, frames, spf);
+            r = oa2dp_rtp_add_frames(&rtp, out.data(), len, frames, spf * frames);
         }
         if (r == OA2DP_ERR_NOSPC) {  // larger than one packet: fragment
             send_packet(oa2dp_rtp_flush(&rtp));

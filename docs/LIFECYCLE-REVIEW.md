@@ -1,5 +1,48 @@
 # Native lifecycle review
 
+## 0.3.46: multi-frame RTP duration, source only
+
+The service passed samples_per_frame as the duration of an entire encoder
+output to rtp_add_frames. The RTP core accumulates the supplied total duration;
+it does not multiply it by the separate frame count. With multi-frame LDAC
+output, the following packet therefore received a timestamp that advanced by
+only one frame. The existing encoder tests checked bitrate/frame counts, and
+the core RTP tests appended one frame at a time, so neither covered this
+service integration.
+
+Before changing the production caller, the new fixture compiled its actual
+packetization block and fed the actual LDAC adapter. At 96 kHz, stereo HQ and
+MTU679, the adapter returned two 256-sample frames per packet. The second RTP
+timestamp was 256 rather than 512. A separate synthetic stream reproduced the
+same accounting error; the wire frame counts were correct while its clock was
+wrong. The actual adapter also reproduced the corresponding 128-versus-256
+step at 44.1 kHz. This is an established packet timing defect, not proof that
+this specific headset uses those timestamps to buffer/play out audio or that
+it caused the reported Chrome stutter.
+
+Both normal append and flush/retry now pass samples_per_frame * frame_count.
+The fragmentation path already used that total and is unchanged. The API
+comment explicitly defines samples as the whole chunk's per-channel PCM
+duration. No RTP-core API behavior, codec payload, negotiation, PCM precision,
+sample rate, HQ bitrate or ABR policy changes. Single-frame paths retain the
+same duration. The rule follows the audio sampling-clock basis in
+[RFC3550 section5.1](https://www.rfc-editor.org/rfc/rfc3550#section-5.1).
+
+The portable fixture covers mixed one/two/three-frame LDAC chunks, actual
+on-wire timestamps and sequence numbers, 32-bit clock wrap, buffered
+flush/retry, SBC batching and AAC fragmentation. Windows additionally uses
+the real LDAC adapter at 44.1/48/88.2/96 kHz, 16/24-bit input and MTUs
+679/895/1024, checking frame-count-derived duration rather than input-call
+count (encoder priming is retained). No Bluetooth or Windows audio I/O occurs.
+
+The full local kernel/service build and all eighteen CTest checks pass.
+ABI remains driver/service11, bus6, ring2. This is an uninstalled source
+candidate; the host remains44. The current audit found no new evidenced
+root cause for the Settings state/disconnect fault. WaveRT already uses a
+high-resolution timer, so no speculative timer replacement was made.
+Source-only work continues; actual sound/jitter/connection acceptance and
+measured performance remain incomplete.
+
 ## 0.3.45: follow current endpoint PCM in initial negotiation/proposals, source only
 
 The source codec selector defaults to 48 kHz when no rate is specified. The
