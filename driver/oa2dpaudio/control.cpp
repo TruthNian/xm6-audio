@@ -437,8 +437,8 @@ extern "C" VOID Oa2dpControlStop(_Inout_ OA2DP_AUDIO_DEVICE *dev)
 {
     PAGED_CODE();
     KIRQL irql;
-    // Same lock as WAIT_FORMAT's ready check and CSQ insertion: no waiter can
-    // be inserted after the final drain. Existing handles may still unmap.
+    // Close admission under WAIT_FORMAT's state-check lock. A late insertion
+    // after the drain fails its post-check. Existing handles may still unmap.
     KeAcquireSpinLock(&dev->Lock, &irql);
     dev->Started = FALSE;
     dev->Running = FALSE;
