@@ -376,7 +376,15 @@ bool Session::configure_as_initiator()
             if (c.caps.codec != want || !local)
                 continue;
             oa2dp_codec_caps cfg{};
-            if (oa2dp_codec_select(nullptr, &c.caps, &settings_, &cfg) != OA2DP_OK ||
+            oa2dp_settings selection = settings_;
+            // Auto means follow the actual endpoint PCM, including an already
+            // running stream. Do not wait for a second format event to undo
+            // the generic 48 kHz negotiation default. This is a preference:
+            // original explicit constraints still decide acceptance below.
+            if (settings_.follow_source_rate && !settings_.sample_rate &&
+                oa2dp_pcm_format_valid(&audio_format_))
+                selection.sample_rate = audio_format_.SampleRate;
+            if (oa2dp_codec_select(nullptr, &c.caps, &selection, &cfg) != OA2DP_OK ||
                 oa2dp_codec_check_settings(&cfg, &settings_) != 0)
                 continue;
             oa2dp_avdtp_caps avc = make_config_caps(cfg, c.delay_reporting);
@@ -475,6 +483,18 @@ bool Session::setup_audio_endpoint()
             f.SampleRate = rate;
             f.Channels = oa2dp_codec_channels(&config_);
             f.BitsPerSample = depth;
+        }
+    }
+    // Preserve a supported current endpoint format in auto mode. Otherwise a
+    // peer-selected codec rate could become Windows' preferred format and
+    // reverse the intended direction of rate following. Keep other supported
+    // rates/representations available for later Windows/exclusive clients.
+    if (settings_.follow_source_rate && !settings_.sample_rate) {
+        for (ULONG i = 0; i < list.Count; ++i) {
+            if (oa2dp_pcm_format_same(&list.Formats[i], &audio_format_)) {
+                list.Preferred = i;
+                break;
+            }
         }
     }
     if (!audio_.set_formats(list) || !audio_.set_latency(0, delay_report_us_)) {

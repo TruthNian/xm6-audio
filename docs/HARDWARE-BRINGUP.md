@@ -2,19 +2,45 @@
 
 The controlled developer trial targets WH-1000XM6 on Windows 10 x64, build 19045. It uses a local development signature under explicitly authorized test signing. This is separate from the production installer, which still requires Microsoft-signed catalogs.
 
-Latest source audit: [0.3.44 lifecycle review](LIFECYCLE-REVIEW.md). The candidate
-has build/check evidence and is ready for a controlled test, subject to headset
-availability and authorization to resume the deferred trial. It has not been
-installed. Following a user restart, 0.3.32 established native LDAC playback,
-but the user reconfirmed incorrect connection labels and per-device
-Disconnect/Connect. Headset testing was subsequently deferred; no additional
-connection cycle, driver installation or restart was performed for the
-source-only 0.3.33–0.3.44 changes.
+Latest source audit: [0.3.45 lifecycle review](LIFECYCLE-REVIEW.md), not deployed.
+The current installed and observed runtime is 0.3.44. After its authorized
+deployment and a user restart, both actual loaded kernel images and the running
+service matched the verified local test-signed candidate. The service process
+started approximately twelve seconds after boot without a manual start in the
+post-boot session. This establishes automatic service startup, not complete
+automatic audio/reconnect acceptance.
+
+## 0.3.44 post-restart user acceptance (2026-11-11)
+
+Runtime source: `f9e919799effe6d61d17ced0bbf74be8370a58a8`, with successful
+[CI](https://github.com/TruthNian/xm6-audio/actions/runs/42851798203).
+The deployed binaries were locally built from that source and locally
+test-signed; they are not claimed to be the CI artifact or production-signed.
+
+- The user confirmed QQ Music, PotPlayer, system notification sounds and
+  Bluetooth controls without observed problems in this round.
+- YouTube in Chrome exhibited intermittent audio stutter even with the video
+  buffered. This is unresolved; video buffering alone does not locate an
+  audio-track, decoder, Windows-render or Bluetooth scheduling fault.
+- Windows Settings still falsely displays Connected before a real connection
+  and reports a failed disconnect while the physical link has disconnected.
+  Per-device disconnect/reconnect remains failed acceptance.
+- A read-only snapshot while QQ Music was active found the native endpoint
+  default for all three render roles, with a 96 kHz stereo 32-bit float mix.
+  The service reported LDAC HQ, 24-bit encoder input and approximately
+  1.006 Mbit/s media transport including overhead. These are endpoint/transport
+  observations, not the song's original format or codec payload bitrate.
+- A later bounded timing trace contained no active PCM/media events while the
+  service reported suspended. It supplies no active-playback CPU/jitter result
+  and does not reproduce or resolve the Chrome fault.
+
+The user subsequently requested source-only investigation and has no time for
+further physical testing. No new package is deployed for the 0.3.45 source work.
 
 Earlier activation history: versions
 0.3.23 through 0.3.30 were not deployed. A controlled 0.3.31 warm-binding trial
 failed during initialization and was rolled back without a system reboot.
-The corrected 0.3.32 is now actually loaded without rebooting; the earlier
+The corrected 0.3.32 then activated without rebooting; the earlier
 0.3.21 staging state is historical.
 Do not treat source, staging, CI or backend commands as completed hardware/UI
 acceptance. The observations below retain their original tested versions.

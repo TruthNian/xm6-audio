@@ -1,5 +1,42 @@
 # Native lifecycle review
 
+## 0.3.45: follow current endpoint PCM in initial negotiation/proposals, source only
+
+The source codec selector defaults to 48 kHz when no rate is specified. The
+service previously passed that default directly during initial selection,
+even if it already knew that the endpoint PCM was 96 kHz. Later format events
+can reconfigure the codec, but another event is not guaranteed for an already
+running, unchanged format. Separately, setup_audio_endpoint preferred the
+current codec rate's representation, even when another supported endpoint
+format was current. A peer-selected 96 kHz configuration could therefore
+produce a 96 kHz proposal while endpoint PCM was 48 kHz. This establishes a
+proposal/selection mismatch, not proof that Windows changes every existing
+shared mix or that either path caused the user's Chrome stutter.
+
+An actual-production-block/method fixture reproduced both mismatches before
+the fix. Automatic initial selection now hints the valid current PCM rate;
+acceptance still uses the original user constraints, so an unsupported hint
+does not become a hard requirement. Proposals prefer the exact current PCM
+format when listed, including representation, container and valid bits. The
+remaining supported formats stay available. Fixed-rate settings and disabled
+rate following retain their behavior. No extra worker, polling, resampler or
+per-packet work is added. This does not force 48 kHz or 96 kHz globally.
+
+The production tests cover 44.1/48/88.2/96 kHz across float32, integer32,
+24-in-32, packed24 and integer16, preserving the preferred PCM against both
+48 and 96 kHz codec configurations. They also cover explicit rate/depth,
+disabled following, unsupported auto hints, accurate fixed-rate rejection
+and missing PCM state. Audio IOCTLs are fake; real Windows format negotiation,
+reconfigure rejection and audible switching remain unaccepted.
+
+The configuration name follow_source_rate is retained for compatibility, but
+its source means the Windows endpoint PCM. Original per-player file/quality
+metadata is not available at this boundary. Shared clients have already been
+mixed by Windows. No per-file auto-mix policy is implemented or claimed.
+Current hardware remains 0.3.44 with outstanding Settings/disconnect and
+Chrome audio-stutter reports. No candidate45 deployment or new headset test
+was performed. Driver/service ABI11, bus6 and ring2 remain unchanged.
+
 ## 0.3.44: driver-handle lifetime versus stop cancellation, source only
 
 Session::stop calls transport/audio cancel_all from the manager's thread,

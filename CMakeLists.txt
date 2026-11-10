@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(XM6Audio VERSION 0.3.44 LANGUAGES C CXX)
+project(XM6Audio VERSION 0.3.45 LANGUAGES C CXX)
 
 # The loaded binary's version must agree with the configured project and INF.
 # Generate resources in the build tree rather than keeping a stale copy.
@@ -162,6 +162,14 @@ if(OA2DP_BUILD_TESTS)
     target_link_libraries(test_handle_lifetime PRIVATE Threads::Threads)
     add_test(NAME handle_lifetime COMMAND test_handle_lifetime)
     set_tests_properties(handle_lifetime PROPERTIES TIMEOUT 15)
+    xm6_test_body(service/src/session.cpp "bool Session::setup_audio_endpoint("
+        "\nbool Session::start_stream(" endpoint-formats)
+    xm6_test_body(service/src/session.cpp "            oa2dp_codec_caps cfg{};"
+        "\n            oa2dp_avdtp_caps avc = make_config_caps(cfg, c.delay_reporting);" codec-initial-selection)
+    add_executable(test_endpoint_formats tools/test-endpoint-formats.cpp)
+    target_include_directories(test_endpoint_formats PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
+    target_link_libraries(test_endpoint_formats PRIVATE oa2dp_core)
+    add_test(NAME endpoint_formats COMMAND test_endpoint_formats)
 endif()
 
 if(NOT WIN32)
@@ -269,7 +277,7 @@ if(MSVC)
     # installer. Kernel targets keep the WDK's independent runtime settings.
     foreach(binary IN ITEMS oa2dp_core oa2dp_codecs oa2dp_manage oa2dpsvc oa2dpctl
                             oa2dpgui ldac sbc oa2dp_tests test_encoders verify_native_metadata test_ks_attributes
-                            test_ring_concurrency test_profile_retry test_handle_lifetime)
+                            test_ring_concurrency test_profile_retry test_handle_lifetime test_endpoint_formats)
         if(TARGET ${binary})
             set_property(TARGET ${binary} PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
         endif()

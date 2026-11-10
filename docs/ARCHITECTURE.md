@@ -23,6 +23,14 @@ Reference: Microsoft's [Win32 services interacting with devices](https://learn.m
 
 ## PCM and clock boundaries
 
+The service follows endpoint PCM, not file metadata. In automatic mode its
+initial codec selection uses the current PCM rate as a supported preference;
+endpoint format proposals preserve the exact current format when supported.
+Explicit fixed-rate settings retain precedence. Unsupported auto hints use
+normal codec selection and do not become new fixed-rate constraints. Shared
+mixing remains owned by Windows; the driver does not recover individual
+applications' original rates/precision from an already mixed stream.
+
 The format contract distinguishes sample rate, channels, container width, valid precision and integer/float representation. Integer32 remains integer32 in the shared ring; 24-in-32 follows WAVEFORMATEXTENSIBLE's left-aligned precision convention. Conversion to 16/24 useful bits occurs at the selected encoder boundary.
 
 Ring protocol v2 fixes the allocated frame stride, independent of the active channel count. A producer sequence and first-frame position separate format generations. The consumer copies only a complete bounded block for its encoder's snapshot, checks the generation after copying, and releases no block on a format race. Old-format backlog is skipped, not reinterpreted. Partial codec input blocks remain queued until complete. Driver and service must both use v2; a v1/v2 mismatch is rejected during mapping. These contracts have offline concurrent coverage, not hardware acceptance.
