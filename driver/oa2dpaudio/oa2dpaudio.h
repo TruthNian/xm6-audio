@@ -34,7 +34,7 @@ extern "C" {
 /* The ring is allocated once for this many channels and never moves, so a
  * format change only rewrites its header (the service's mapping stays). */
 #define OA2DP_RING_MAX_CHANNELS 2
-#define OA2DP_PUMP_CHUNK 256 /* frames converted per step */
+#define OA2DP_PUMP_CHUNK 256 /* maximum integer PCM frames per admission step */
 
 typedef struct _OA2DP_AUDIO_RING {
     KSPIN_LOCK Lock;        /* header changes vs. the producer */
@@ -45,7 +45,6 @@ typedef struct _OA2DP_AUDIO_RING {
     PEPROCESS UserProcess;  /* referenced while UserVa is set */
     PKEVENT DataEvent;      /* referenced, accessed only under Lock */
     ULONG MinimumFrames;
-    int32_t Scratch[OA2DP_PUMP_CHUNK * OA2DP_RING_MAX_CHANNELS];
 } OA2DP_AUDIO_RING;
 
 typedef struct _OA2DP_AUDIO_DEVICE {

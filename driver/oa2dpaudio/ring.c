@@ -194,21 +194,6 @@ VOID Oa2dpRingSetRunning(_Inout_ OA2DP_AUDIO_RING *r, _In_ BOOLEAN running)
     KeReleaseSpinLock(&r->Lock, irql);
 }
 
-static VOID ConvertToS24(_Out_writes_(samples) int32_t *dst, _In_ const UCHAR *src,
-                         _In_ ULONG samples, _In_ USHORT bits)
-{
-    ULONG i;
-
-    if (bits == 16) {
-        const SHORT *s = (const SHORT *)src;
-        for (i = 0; i < samples; i++)
-            dst[i] = (int32_t)s[i] * 256;
-    } else { /* 24-bit packed little endian */
-        for (i = 0; i < samples; i++, src += 3)
-            dst[i] = (int32_t)((ULONG)src[0] | ((ULONG)src[1] << 8) | ((ULONG)(CHAR)src[2] << 16));
-    }
-}
-
 /* DISPATCH_LEVEL (stream timer). Drops audio when the stream format does not
  * match the ring header, which only happens while a format change races a
  * closing stream. */
@@ -242,8 +227,7 @@ VOID Oa2dpRingPump(_Inout_ OA2DP_AUDIO_RING *r, _In_reads_bytes_(cyclicBytes) co
             } else {
                 if (n > OA2DP_PUMP_CHUNK)
                     n = OA2DP_PUMP_CHUNK;
-                ConvertToS24(r->Scratch, cyclic + pos, n * channels, bits);
-                (void)oa2dp_ring_write(r->Ring, r->Scratch, n);
+                (void)oa2dp_ring_write_pcm(r->Ring, cyclic + pos, n, bits);
             }
             pos += n * frameBytes;
             if (pos >= cyclicBytes)

@@ -35,4 +35,6 @@ Source-only 0.3.39 moves policy completion outside spin locks and reconciles can
 
 Source-only 0.3.40 unifies WaveRT position/count/notification progress, refreshes write-packet validation and locks buffer-mode/state checks. Delayed-timer, wrap, polled-mode and pause/resume fixtures do not replace actual Windows scheduling or audible playback tests.
 
+Source-only 0.3.41 removes integer-PCM scratch conversion/copy, skips rejected-frame source access and makes overrun diagnostics atomic. Acceptance of CPU, lock-duration and latency gains still requires real measurements; source-memory/concurrency checks establish narrower contracts.
+
 The inherited [SPEC.md](SPEC.md) is a protocol requirement catalogue, not proof of current hardware compatibility. The status table in the README and this acceptance list describe the current fork.

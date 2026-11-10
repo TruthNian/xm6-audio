@@ -41,6 +41,8 @@ Kernel bus ABI 6 transfers prepared policy-wait IRPs to the parent for completio
 
 WaveRT position advancement commits PCM, packet count and completion notification in one locked path shared by the timer and queries. A query before a delayed timer does not leave stale packet numbers or require duplicate notification accounting. Buffer-mode checks and state changes use the same position lock as buffer detach; external stream reports run after unlocking. The 1 ms software timer and existing PCM catch-up/EOS bounds remain.
 
+Integer PCM admission precedes conversion: 16/24-bit accepted samples are written directly into ring slots, with no scratch pass; rejected source frames are not accessed. Raw 32-bit containers remain unchanged. Overrun increments and observations use atomic core helpers. This removes work and intermediate storage without changing the mapped ring layout or codec precision policy; measured hardware performance is still pending.
+
 LDAC encode calls consume 128 samples per channel. At 88.2/96 kHz, a codec frame represents 256 samples; RTP uses the codec-frame duration, not the API-call block size. AVDTP headset delay reports affect the WaveRT presentation position. The virtual endpoint reports zero local hardware FIFO/chipset/codec delay; remote Bluetooth delay must not be compared against the local cyclic buffer's size. Hardware video synchronization is still unvalidated.
 
 ## Connection and service lifecycle

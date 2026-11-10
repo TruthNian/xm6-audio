@@ -1,5 +1,52 @@
 # Native lifecycle review
 
+## 0.3.41: admitted PCM conversion and atomic diagnostics, source only
+
+The 16/24-bit producer previously converted each chunk into a scratch array,
+then called ring_write to discover how many frames fit. Rejected frames had
+already been read/converted while the ring and position locks were held.
+The new producer core entry point checks capacity first and converts only the
+admitted prefix directly into ring slots. The driver scratch array and its
+intermediate copy are removed (2 KiB per ring object). The conversion handles
+little-endian signed values explicitly, including unaligned packed input,
+wraparound and mono in fixed stereo storage. Raw 32-bit containers retain
+their bit pattern; codec precision policy is unchanged.
+
+Admission uses the same snapshot as the raw write path. Capacity released by
+the consumer after that snapshot is available to a later write attempt; the
+producer remains nonblocking. The existing 256-frame integer attempt boundary,
+unread-audio protection, rejected-frame counting, format validation and
+commit-before-data-ready notification are retained. The point where capacity
+is sampled moves before conversion; this does not promise the identical drop
+pattern under concurrent scheduling. No bulk producer-side read-position
+advance, ring overwrite, format-layout change or relaxed barrier was added.
+
+Overruns also used to mix a plain producer increment with an atomic service
+read. Producer publication is now atomic, and service observations use the
+core's matching snapshot helper. MSVC x64/ARM64 uses
+[_InterlockedExchangeAdd64](https://learn.microsoft.com/en-us/cpp/intrinsics/interlockedexchangeadd-intrinsic-functions?view=msvc-170);
+the x86 fallback uses existing atomic load/store with the sole-writer contract.
+Other compilers use the same sequentially consistent atomic builtins as the
+position helpers. The mapped header remains 80 bytes/ring v2; driver/service
+ABI 11 and kernel bus ABI 6 are unchanged. This makes the diagnostic access
+contract consistent; it is not a claim that the old count caused audible faults.
+
+Core checks cover signed 16/24-bit boundaries, stereo/strided mono, destination
+wrap, no source access when full, an exactly-sized source prefix when only one
+frame fits, exact 32-bit payloads, invalid representations and unsigned counter
+wrap. A real memory-only observer thread reads concurrent overflow updates
+across the 32-bit carry boundary and checks the exact final total. Production
+RingPump fixtures additionally exercise 16/24/32-bit source wrap, full-ring
+drops, preserved unread samples and notification ordering. Full local
+kernel/service build and all thirteen CTest checks pass. Sanitizer checks cover
+source boundaries, not real Windows scheduling or a general race-freedom proof.
+
+The removed scratch/copy/discarded conversion work is a source-level reduction;
+no hardware CPU, spin-lock duration or acoustic latency gain has been measured.
+No driver/service/device/player/volume/boot change was made on the host.
+Settings reconnect and actual candidate audio/performance acceptance remain
+pending.
+
 ## 0.3.40: coherent WaveRT packet progress, source only
 
 GetPacketCount used to call UpdatePosition, advancing the play position and

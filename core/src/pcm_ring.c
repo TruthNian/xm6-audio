@@ -78,6 +78,23 @@ static void store64(volatile uint64_t *p, uint64_t value)
 #endif
 }
 
+static void add_overruns(oa2dp_pcm_ring *r, uint32_t frames)
+{
+#if defined(_MSC_VER) && !defined(_M_IX86)
+    (void)_InterlockedExchangeAdd64((volatile long long *)&r->overruns, (long long)frames);
+#elif defined(_MSC_VER)
+    /* The producer is the sole writer; preserve atomic publication on x86. */
+    store64(&r->overruns, load64(&r->overruns) + frames);
+#else
+    (void)__atomic_fetch_add(&r->overruns, (uint64_t)frames, __ATOMIC_SEQ_CST);
+#endif
+}
+
+uint64_t oa2dp_ring_overruns(const oa2dp_pcm_ring *r)
+{
+    return load64(&r->overruns);
+}
+
 size_t oa2dp_ring_bytes(uint32_t capacity, uint16_t channels)
 {
     return sizeof(oa2dp_pcm_ring) + (size_t)capacity * channels * 4;
@@ -228,19 +245,72 @@ static void copy_out(const oa2dp_pcm_ring *r, const oa2dp_ring_format *format,
         memcpy(dst + first * fb, ring_data(r), (frames - first) * fb);
 }
 
-uint32_t oa2dp_ring_write(oa2dp_pcm_ring *r, const void *data, uint32_t frames)
+static void convert_integer(int32_t *dst, const uint8_t *src, size_t samples, uint16_t bits)
+{
+    if (bits == 16) {
+        for (size_t i = 0; i < samples; ++i, src += 2) {
+            uint32_t value = (uint32_t)src[0] | ((uint32_t)src[1] << 8);
+            int32_t signed_value = value < 0x8000u ? (int32_t)value : (int32_t)value - 0x10000;
+            dst[i] = signed_value * 256;
+        }
+    } else {
+        for (size_t i = 0; i < samples; ++i, src += 3) {
+            uint32_t value = (uint32_t)src[0] | ((uint32_t)src[1] << 8) | ((uint32_t)src[2] << 16);
+            dst[i] = value < 0x800000u ? (int32_t)value : (int32_t)value - 0x1000000;
+        }
+    }
+}
+
+static void copy_in_integer(oa2dp_pcm_ring *r, uint64_t pos, const uint8_t *src,
+                             uint32_t frames, uint16_t bits)
+{
+    const size_t fb = (size_t)r->channels * 4;
+    const size_t stride = (size_t)r->storage_channels * 4;
+    const size_t input_fb = (size_t)r->channels * (bits / 8);
+    if (stride != fb) {
+        for (uint32_t i = 0; i < frames; ++i)
+            convert_integer((int32_t *)(ring_data(r) + ((pos + i) & (r->capacity - 1)) * stride),
+                src + i * input_fb, r->channels, bits);
+        return;
+    }
+    const uint32_t slot = (uint32_t)(pos & (r->capacity - 1));
+    const uint32_t first = frames < r->capacity - slot ? frames : r->capacity - slot;
+    convert_integer((int32_t *)(ring_data(r) + slot * stride), src, (size_t)first * r->channels, bits);
+    if (frames > first)
+        convert_integer((int32_t *)ring_data(r), src + first * input_fb,
+            (size_t)(frames - first) * r->channels, bits);
+}
+
+static uint32_t write_samples(oa2dp_pcm_ring *r, const void *data, uint32_t frames, uint16_t bits)
 {
     uint32_t room = oa2dp_ring_writable(r);
     uint32_t n = frames < room ? frames : room;
     if (n < frames)
-        r->overruns += frames - n;
+        add_overruns(r, frames - n);
     if (n) {
         uint64_t pos = load64(&r->write_pos);
-        copy_in(r, pos, (const uint8_t *)data, n);
+        if (bits == 32)
+            copy_in(r, pos, (const uint8_t *)data, n);
+        else
+            copy_in_integer(r, pos, (const uint8_t *)data, n, bits);
         OA2DP_FENCE(); /* data visible before the new position */
         store64(&r->write_pos, pos + n);
     }
     return n;
+}
+
+uint32_t oa2dp_ring_write(oa2dp_pcm_ring *r, const void *data, uint32_t frames)
+{
+    return write_samples(r, data, frames, 32);
+}
+
+uint32_t oa2dp_ring_write_pcm(oa2dp_pcm_ring *r, const void *data, uint32_t frames,
+                             uint16_t container_bits)
+{
+    if (container_bits != 32 && ((container_bits != 16 && container_bits != 24) ||
+        r->format != OA2DP_RING_FMT_S32))
+        return 0;
+    return write_samples(r, data, frames, container_bits);
 }
 
 int oa2dp_ring_read(oa2dp_pcm_ring *r, const oa2dp_ring_format *format,

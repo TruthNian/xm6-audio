@@ -85,13 +85,59 @@ struct OA2DP_AUDIO_RING {
     oa2dp_pcm_ring *Ring = nullptr;
     PKEVENT DataEvent = nullptr;
     ULONG MinimumFrames = 0;
-    int32_t Scratch[512]{};
 };
 #include "pcm-notification-under-test.inc"
 static bool wait(FakeEvent &e) {
     bool signalled = e.signalled;
     e.signalled = false;
     return signalled;
+}
+static void integer_pump() {
+    for (USHORT bits : {16, 24, 32}) {
+        for (USHORT channels : {1, 2}) {
+            std::vector<uint64_t> storage((oa2dp_ring_bytes(8, 2) + 7) / 8);
+            OA2DP_AUDIO_RING r;
+            r.Ring = reinterpret_cast<oa2dp_pcm_ring *>(storage.data());
+            const auto type = bits == 32 ? OA2DP_RING_FMT_S32_FULL : OA2DP_RING_FMT_S32;
+            REQUIRE(oa2dp_ring_init(r.Ring, 8, 48000, 2, type) == 0);
+            if (channels == 1)
+                REQUIRE(Oa2dpRingSetFormat(&r, 48000, 1, type));
+            OA2DP_FORMAT format{48000, channels, bits, bits, OA2DP_PCM_INTEGER};
+            const int32_t values[] = {-32768, 32767, -1, 0, 1, -1234, 1234, 42};
+            const size_t width = bits / 8, frame_bytes = channels * width;
+            std::vector<UCHAR> input(8 * frame_bytes);
+            for (size_t i = 0; i < 8u * channels; ++i) {
+                const auto value = static_cast<uint32_t>(values[i % 8]);
+                for (size_t b = 0; b < width; ++b)
+                    input[i * width + b] = static_cast<UCHAR>(value >> (8 * b));
+            }
+            FakeEvent event;
+            REQUIRE(Oa2dpRingSetDataEvent(&r, &event, 4, UserMode) == 0);
+            Oa2dpRingPump(&r, input.data(), static_cast<ULONG>(input.size()),
+                          static_cast<ULONG>(6 * frame_bytes), 4, &format);
+            REQUIRE(wait(event));
+            oa2dp_ring_format snapshot{};
+            int32_t output[16]{};
+            uint32_t count = 0;
+            REQUIRE(oa2dp_ring_snapshot(r.Ring, &snapshot) == 0);
+            REQUIRE(oa2dp_ring_read(r.Ring, &snapshot, output, sizeof(output), 4, &count) == 0 &&
+                    count == 4);
+            for (size_t i = 0; i < 4u * channels; ++i) {
+                const size_t source = ((6 + i / channels) % 8) * channels + i % channels;
+                REQUIRE(output[i] == values[source % 8] * (bits == 16 ? 256 : 1));
+            }
+            Oa2dpRingPump(&r, input.data(), static_cast<ULONG>(input.size()), 0, 8, &format);
+            REQUIRE(wait(event));
+            Oa2dpRingPump(&r, input.data(), static_cast<ULONG>(input.size()), 0, 4, &format);
+            REQUIRE(wait(event) && oa2dp_ring_overruns(r.Ring) == 4 &&
+                    oa2dp_ring_readable(r.Ring) == 8);
+            REQUIRE(oa2dp_ring_read(r.Ring, &snapshot, output, sizeof(output), 8, &count) == 0 &&
+                    count == 8);
+            for (size_t i = 0; i < 8u * channels; ++i)
+                REQUIRE(output[i] == values[i % 8] * (bits == 16 ? 256 : 1));
+            REQUIRE(Oa2dpRingSetDataEvent(&r, nullptr, 0, KernelMode) == 0 && !event.references);
+        }
+    }
 }
 int main() {
     std::vector<uint64_t> storage((oa2dp_ring_bytes(8, 2) + 7) / 8);
@@ -144,6 +190,8 @@ int main() {
     r.Ring = nullptr;
     REQUIRE(Oa2dpRingSetDataEvent(&r, &a, 4, UserMode) == STATUS_DEVICE_NOT_READY &&
             a.references == 0);
-    std::puts("production PCM notification ordering, thresholds and reference checks passed (OS "
+    integer_pump();
+    std::puts("production PCM conversion, notification ordering, thresholds and reference checks "
+              "passed (OS "
               "APIs fake)");
 }

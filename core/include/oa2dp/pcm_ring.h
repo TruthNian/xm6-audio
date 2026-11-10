@@ -82,9 +82,18 @@ int oa2dp_ring_snapshot(const oa2dp_pcm_ring *r, oa2dp_ring_format *format);
 
 uint32_t oa2dp_ring_readable(const oa2dp_pcm_ring *r);
 uint32_t oa2dp_ring_writable(const oa2dp_pcm_ring *r);
+/* Atomic diagnostic snapshot; use instead of reading a live counter directly. */
+uint64_t oa2dp_ring_overruns(const oa2dp_pcm_ring *r);
 
 /* Producer: copy up to `frames`; returns frames written. */
 uint32_t oa2dp_ring_write(oa2dp_pcm_ring *r, const void *data, uint32_t frames);
+/* Producer: admit once, then convert only the admitted prefix directly into
+ * ring storage. 16/24-bit little-endian integer input requires S32 ring format;
+ * 32-bit containers are copied unchanged (integer or float per ring format).
+ * Source bytes of rejected frames are never accessed. Producer serialization
+ * and unread-frame/drop semantics match oa2dp_ring_write. */
+uint32_t oa2dp_ring_write_pcm(oa2dp_pcm_ring *r, const void *data, uint32_t frames,
+                             uint16_t container_bits);
 /* Consumer: a complete block, or zero frames if insufficient data is available.
  * Never sizes a copy from a mutable format. ERR_STATE rejects an obsolete
  * snapshot (including changes during the copy); the copied block must then be

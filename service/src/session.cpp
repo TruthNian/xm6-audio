@@ -1062,8 +1062,7 @@ void Session::stream_loop(const StreamContext &stream)
     QueryPerformanceFrequency(&clock_rate);
     uint64_t wait_count = 0, max_wait_us = 0;
     uint32_t peak_frames = 0;
-    uint64_t previous_overruns = static_cast<uint64_t>(InterlockedCompareExchange64(
-        reinterpret_cast<volatile LONG64 *>(&ring->overruns), 0, 0));
+    uint64_t previous_overruns = oa2dp_ring_overruns(ring);
     LOGI("streaming %s: %u Hz, %u ch, %u samples/call", oa2dp_codec_name(cfg.codec),
          info.sample_rate, ch, spc);
 
@@ -1184,8 +1183,7 @@ void Session::stream_loop(const StreamContext &stream)
         }
         if (now - window_start >= 1000) {
             if (timing) {
-                const uint64_t overruns = static_cast<uint64_t>(
-                    InterlockedCompareExchange64(reinterpret_cast<volatile LONG64 *>(&ring->overruns), 0, 0));
+                const uint64_t overruns = oa2dp_ring_overruns(ring);
                 TraceLoggingWrite(g_Oa2dpStreamTrace, "PcmWindow",
                     TraceLoggingLevel(5),
                     TraceLoggingUInt32(generation, "StreamGeneration"),

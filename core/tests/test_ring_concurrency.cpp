@@ -12,8 +12,35 @@ static uint32_t sample(const oa2dp_ring_format &format, unsigned channel)
         (0x3E800000u | ((format.sequence & 0xFFFF) << 2) | channel) :
         format.sequence * 4 + channel + 1;
 }
+static bool overrun_observer()
+{
+    auto *r = static_cast<oa2dp_pcm_ring *>(std::calloc(1, oa2dp_ring_bytes(8, 2)));
+    if (!r || oa2dp_ring_init(r, 8, 48000, 2, OA2DP_RING_FMT_S32) != OA2DP_OK) return false;
+    int32_t input[16]{};
+    if (oa2dp_ring_write(r, input, 8) != 8) { std::free(r); return false; }
+    const uint64_t seed = UINT64_C(0xFFFFFFFF) - 16, expected = seed + 20000 * 7;
+    r->overruns = seed; /* before any concurrent access */
+    std::atomic<bool> ready{false}, done{false}, failed{false};
+    std::thread observer([&] {
+        uint64_t previous = seed;
+        ready = true;
+        do {
+            const auto current = oa2dp_ring_overruns(r);
+            if (current < previous || current > expected) failed = true;
+            previous = current;
+        } while (!done.load());
+    });
+    while (!ready.load()) std::this_thread::yield();
+    for (unsigned i = 0; i < 20000; ++i)
+        if (oa2dp_ring_write(r, input, 7) != 0) failed = true;
+    done = true; observer.join();
+    const bool ok = !failed.load() && oa2dp_ring_overruns(r) == expected;
+    std::free(r);
+    return ok;
+}
 int main()
 {
+    if (!overrun_observer()) { std::fputs("Concurrent overrun observation failed.\n", stderr); return 1; }
     static_assert(sizeof(oa2dp_pcm_ring) == 80, "Mapped header size changed");
     auto *ring = static_cast<oa2dp_pcm_ring *>(std::calloc(1, oa2dp_ring_bytes(64, 2)));
     if (!ring || oa2dp_ring_init(ring, 64, 48000, 2, OA2DP_RING_FMT_S32_FULL) != OA2DP_OK)
