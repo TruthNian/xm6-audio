@@ -1,5 +1,54 @@
 # Native lifecycle review
 
+## 0.3.42: channel mapping before final quantization, source only
+
+The service formerly quantized float/full-S32 channels independently, then
+averaged their already-quantized results for mono. With valid normal-range
+float inputs at 0.1 and 0.8 of one S16 LSB, this produced a final S16 value of
+1; averaging first yields 0.45 LSB and rounds to 0. Full-S32 values 127/383
+also exposed lost averaging precision at the S24 boundary. For finite float
+headroom 1.5/-0.5, channel-wise clipping reduced the intended mono 0.5 to
+approximately 0.25. This last example tests over-nominal headroom handling;
+it is not evidence that this host normally emits such levels.
+
+A consumer-only preparation helper now maps channels first, then clips and
+rounds to the codec's actual 16/24 useful bits in the existing signed-S24
+adapter representation. Float averaging uses double intermediates; integer
+averaging uses a wide sum and one combined quantization divisor. The mean's
+existing 1/2 weights are retained. Mono expansion is in reverse order when
+needed, so the same buffer can hold ring input and codec output. Float words
+are loaded with memcpy, preserving aliasing/alignment correctness when raw
+float bits reside in int32 storage. No floating-point work enters the kernel.
+
+The service's separate float vector and independent layout loop are removed.
+Equal-channel float/full-S32 processing has a flat path, and already-S24 data
+at 24-bit precision passes through unchanged. Channel, representation,
+precision and input/output bounds are checked before any write. Core scalar
+quantizers are shared with the existing conversion helpers. Rounding uses
+nearest with half ties away from zero, including S24-to-S16 preparation; this
+aligns that path with the existing float/full-S32 policy. The adapter's S16
+packing then sees values already aligned to its precision and is idempotent.
+Source container/valid-bit metadata, sample rates, codec choice and gain
+settings are unchanged. Full32 input remains supported; the codec's supported
+precision remains a separate boundary, not a forced source format.
+
+The production service block plus actual S16 adapter converter reproduced
+both the normal-range final-code error and the headroom example before the
+fix. Corrected bodies pass both. Core and integration checks additionally
+cover float/S24/full-S32, mono/stereo layouts, 16/24 target bits, same-address
+and disjoint storage, unaligned input, wide extrema/cancellation, NaN/Inf,
+signed rounding ties, input/output guards and empty/error cases. The full
+local kernel/service build and all fourteen CTest checks pass. These are
+numeric and source integration checks, not actual codec acoustics or Windows
+format-negotiation acceptance. The normally offered endpoint channel count
+matches the codec; this fix covers retained/mismatched channel layouts that
+the existing service already handles, without claiming a failure in all
+ordinary stereo playback.
+
+ABI remains driver/service 11, bus 6, mapped ring 2. No candidate was installed
+and no headset/device/player/volume/boot operation occurred. Real Settings
+reconnect, sound/controls/formats and CPU/latency acceptance remain pending.
+
 ## 0.3.41: admitted PCM conversion and atomic diagnostics, source only
 
 The 16/24-bit producer previously converted each chunk into a scratch array,

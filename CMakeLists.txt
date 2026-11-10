@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(XM6Audio VERSION 0.3.41 LANGUAGES C CXX)
+project(XM6Audio VERSION 0.3.42 LANGUAGES C CXX)
 
 # The loaded binary's version must agree with the configured project and INF.
 # Generate resources in the build tree rather than keeping a stale copy.
@@ -125,6 +125,14 @@ if(OA2DP_BUILD_TESTS)
     add_executable(test_wavert_clock tools/test-wavert-clock.cpp)
     target_include_directories(test_wavert_clock PRIVATE "${CMAKE_CURRENT_BINARY_DIR}" core/include)
     add_test(NAME wavert_clock COMMAND test_wavert_clock)
+    xm6_test_body(service/src/session.cpp "// Prepare codec PCM: channel layout before final precision."
+        "\n        size_t len = 0;" pcm-preparation)
+    xm6_test_body(codecs/src/encoder.c "void oa2dp_pcm_to_s16("
+        "\nvoid oa2dp_pcm_to_s24_packed(" pcm-adapter-s16)
+    add_executable(test_pcm_preparation tools/test-pcm-preparation.cpp)
+    target_include_directories(test_pcm_preparation PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
+    target_link_libraries(test_pcm_preparation PRIVATE oa2dp_core)
+    add_test(NAME pcm_preparation COMMAND test_pcm_preparation)
     xm6_test_body(driver/oa2dpaudio/ring.c "NTSTATUS Oa2dpRingSetDataEvent(" "" pcm-notification)
     add_executable(test_pcm_notification tools/test-pcm-notification.cpp)
     target_include_directories(test_pcm_notification PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")

@@ -21,7 +21,7 @@ extern "C" {
 #define OA2DP_RING_MAGIC 0x4D435041u /* "APCM" */
 #define OA2DP_RING_VERSION 2
 
-#define OA2DP_RING_FMT_FLOAT32 0 /* interleaved IEEE float, [-1, 1] */
+#define OA2DP_RING_FMT_FLOAT32 0 /* interleaved IEEE float, nominal [-1, 1] */
 #define OA2DP_RING_FMT_S32 1     /* interleaved int32, 24-bit values */
 #define OA2DP_RING_FMT_S32_FULL 2 /* signed full-scale int32, converted only at encoder boundary */
 
@@ -109,6 +109,17 @@ void oa2dp_pcm_float_to_s24(const float *in, int32_t *out, size_t n);
 /* Quantize once to encoder precision (16/24), in the adapters' 24-bit scale. */
 void oa2dp_pcm_float_to_quantized24(const float *in, int32_t *out, size_t n, uint8_t bits);
 void oa2dp_pcm_s32_to_quantized24(const int32_t *in, int32_t *out, size_t n, uint8_t bits);
+/* Consumer-only: map one/two channels before clipping/quantizing once to the
+ * encoder's 16/24 useful bits, returned in the adapters' signed 24-bit scale.
+ * Input contains ring-format 32-bit words (float bits/S24/full S32). Buffers
+ * may be identical int32_t word storage (including raw float bits) or disjoint;
+ * mono expansion in place is supported. Channel/representation/precision and
+ * buffer bounds are checked before writing. Partial overlap is unsupported.
+ * Nearest ties round away from zero; NaN channels are treated as silence. */
+int oa2dp_pcm_prepare_encoder(const oa2dp_ring_format *format,
+                              const void *input, size_t input_bytes,
+                              int32_t *output, size_t output_samples,
+                              uint32_t frames, uint16_t output_channels, uint8_t bits);
 /* Interleaved stereo -> mono average, in place allowed (out may == in). */
 void oa2dp_pcm_downmix_to_mono(const int32_t *in, int32_t *out, size_t frames);
 

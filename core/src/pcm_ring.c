@@ -354,6 +354,25 @@ int oa2dp_ring_read(oa2dp_pcm_ring *r, const oa2dp_ring_format *format,
 
 /* Consumer-only; kept out of oa2dpaudio.sys, which never touches floats. */
 #if !defined(_KERNEL_MODE)
+static int32_t quantize_float(double value, int32_t scale, int32_t expand)
+{
+    if (!(value == value)) value = 0.0; /* NaN, including opposite infinities after a mix */
+    if (value > 1.0) value = 1.0;
+    if (value < -1.0) value = -1.0;
+    const double scaled = value * scale;
+    int32_t rounded = (int32_t)(scaled >= 0 ? scaled + 0.5 : scaled - 0.5);
+    if (rounded >= scale) rounded = scale - 1;
+    return rounded * expand;
+}
+
+static int32_t quantize_integer(int64_t value, int64_t step, int32_t limit, int32_t expand)
+{
+    int64_t rounded = value < 0 ? -((-value + step / 2) / step) : (value + step / 2) / step;
+    if (rounded >= limit) rounded = limit - 1;
+    if (rounded < -limit) rounded = -limit;
+    return (int32_t)rounded * expand;
+}
+
 void oa2dp_pcm_float_to_s24(const float *in, int32_t *out, size_t n)
 {
     oa2dp_pcm_float_to_quantized24(in, out, n, 24);
@@ -363,20 +382,8 @@ void oa2dp_pcm_float_to_quantized24(const float *in, int32_t *out, size_t n, uin
 {
     const int32_t scale = bits == 16 ? 32768 : 8388608;
     const int32_t expand = bits == 16 ? 256 : 1;
-    for (size_t i = 0; i < n; i++) {
-        float v = in[i];
-        if (!(v == v))
-            v = 0.0f; /* NaN */
-        if (v > 1.0f)
-            v = 1.0f;
-        if (v < -1.0f)
-            v = -1.0f;
-        double s = (double)v * scale;
-        int32_t x = (int32_t)(s >= 0 ? s + 0.5f : s - 0.5f);
-        if (x >= scale)
-            x = scale - 1;
-        out[i] = x * expand;
-    }
+    for (size_t i = 0; i < n; i++)
+        out[i] = quantize_float((double)in[i], scale, expand);
 }
 
 void oa2dp_pcm_s32_to_quantized24(const int32_t *in, int32_t *out, size_t n, uint8_t bits)
@@ -384,13 +391,85 @@ void oa2dp_pcm_s32_to_quantized24(const int32_t *in, int32_t *out, size_t n, uin
     const int64_t step = bits == 16 ? 65536 : 256;
     const int32_t limit = bits == 16 ? 32768 : 8388608;
     const int32_t expand = bits == 16 ? 256 : 1;
-    for (size_t i = 0; i < n; i++) {
-        int64_t value = in[i];
-        int64_t rounded = value < 0 ? -((-value + step / 2) / step) : (value + step / 2) / step;
-        if (rounded >= limit)
-            rounded = limit - 1;
-        out[i] = (int32_t)rounded * expand;
+    for (size_t i = 0; i < n; i++)
+        out[i] = quantize_integer(in[i], step, limit, expand);
+}
+
+static double load_float_sample(const uint8_t *input, size_t sample)
+{
+    float value;
+    /* A ring read can place float bits in the same int32_t storage used for
+     * codec output. memcpy avoids aliasing/alignment assumptions on that input. */
+    memcpy(&value, input + sample * sizeof(value), sizeof(value));
+    return value == value ? (double)value : 0.0;
+}
+
+static int64_t load_integer_sample(const uint8_t *input, size_t sample)
+{
+    int32_t value;
+    memcpy(&value, input + sample * sizeof(value), sizeof(value));
+    return value;
+}
+
+int oa2dp_pcm_prepare_encoder(const oa2dp_ring_format *format,
+                              const void *input, size_t input_bytes,
+                              int32_t *output, size_t output_samples,
+                              uint32_t frames, uint16_t output_channels, uint8_t bits)
+{
+    if (!format || !format->channels || format->channels > 2 ||
+        !output_channels || output_channels > 2 || format->format > OA2DP_RING_FMT_S32_FULL ||
+        (bits != 16 && bits != 24) || (frames && (!input || !output)))
+        return OA2DP_ERR_INVAL;
+    if (frames > input_bytes / sizeof(int32_t) / format->channels)
+        return OA2DP_ERR_INVAL;
+    if (frames > output_samples / output_channels)
+        return OA2DP_ERR_NOSPC;
+    const uint8_t *source = (const uint8_t *)input;
+    const int32_t limit = bits == 16 ? 32768 : 8388608;
+    const int32_t expand = bits == 16 ? 256 : 1;
+    const uint16_t channels = format->channels;
+    if (channels == output_channels) {
+        const size_t samples = (size_t)frames * channels;
+        if (format->format == OA2DP_RING_FMT_FLOAT32) {
+            for (size_t i = 0; i < samples; ++i)
+                output[i] = quantize_float(load_float_sample(source, i), limit, expand);
+        } else if (format->format == OA2DP_RING_FMT_S32 && bits == 24) {
+            /* Already in the encoder's declared S24 representation. */
+            if (samples && input != output) memcpy(output, input, samples * sizeof(int32_t));
+        } else {
+            const int64_t step = format->format == OA2DP_RING_FMT_S32_FULL ?
+                (bits == 16 ? 65536 : 256) : 256;
+            for (size_t i = 0; i < samples; ++i)
+                output[i] = quantize_integer(load_integer_sample(source, i), step, limit, expand);
+        }
+        return OA2DP_OK;
     }
+    /* Only stereo-to-mono or mono-to-stereo remain after the equal-channel path. */
+    const int downmix = channels == 2 && output_channels == 1;
+    const int reverse = output_channels > channels; /* protect identical buffers on expansion */
+    if (format->format == OA2DP_RING_FMT_FLOAT32) {
+        for (size_t i = 0; i < frames; ++i) {
+            const size_t frame = reverse ? frames - 1 - i : i;
+            const size_t src = frame * channels, dst = frame * output_channels;
+            double value = load_float_sample(source, src);
+            if (downmix) value = (value + load_float_sample(source, src + 1)) * 0.5;
+            output[dst] = quantize_float(value, limit, expand);
+            if (output_channels == 2) output[dst + 1] = output[dst];
+        }
+    } else {
+        const int64_t base_step = format->format == OA2DP_RING_FMT_S32_FULL ?
+            (bits == 16 ? 65536 : 256) : (bits == 16 ? 256 : 1);
+        const int64_t step = downmix ? base_step * 2 : base_step;
+        for (size_t i = 0; i < frames; ++i) {
+            const size_t frame = reverse ? frames - 1 - i : i;
+            const size_t src = frame * channels, dst = frame * output_channels;
+            int64_t value = load_integer_sample(source, src);
+            if (downmix) value += load_integer_sample(source, src + 1);
+            output[dst] = quantize_integer(value, step, limit, expand);
+            if (output_channels == 2) output[dst + 1] = output[dst];
+        }
+    }
+    return OA2DP_OK;
 }
 #endif
 

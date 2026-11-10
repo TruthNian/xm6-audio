@@ -37,4 +37,6 @@ Source-only 0.3.40 unifies WaveRT position/count/notification progress, refreshe
 
 Source-only 0.3.41 removes integer-PCM scratch conversion/copy, skips rejected-frame source access and makes overrun diagnostics atomic. Acceptance of CPU, lock-duration and latency gains still requires real measurements; source-memory/concurrency checks establish narrower contracts.
 
+Source-only 0.3.42 fuses channel mapping and final quantization in the service, preserving mono averaging precision and float headroom and removing the separate float buffer. Pure numeric/integration regressions pass; actual Windows format negotiation, codec acoustics and performance remain acceptance work.
+
 The inherited [SPEC.md](SPEC.md) is a protocol requirement catalogue, not proof of current hardware compatibility. The status table in the README and this acceptance list describe the current fork.

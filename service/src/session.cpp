@@ -1042,7 +1042,6 @@ void Session::stream_loop(const StreamContext &stream)
     HANDLE pcm_waits[] = {stream_stop_event_, stop_event_, audio_.data_event()};
 
     std::vector<uint8_t> pkt(stream.mtu), out(info.max_output);
-    std::vector<float> fbuf(static_cast<size_t>(spc) * ring_ch);
     std::vector<int32_t> pcm(static_cast<size_t>(spc) * std::max<uint16_t>(ring_ch, 2));
     oa2dp_rtp rtp{};
     oa2dp_rtp_init(&rtp, cfg.codec, pkt.data(), pkt.size(), GetTickCount() ^ 0xA2D9u);
@@ -1089,10 +1088,8 @@ void Session::stream_loop(const StreamContext &stream)
             break;
         }
         uint32_t read_frames = 0;
-        const bool floating = ring_format.format == OA2DP_RING_FMT_FLOAT32;
-        void *input = floating ? static_cast<void *>(fbuf.data()) : static_cast<void *>(pcm.data());
-        const size_t input_bytes = floating ? fbuf.size() * sizeof(float) : pcm.size() * sizeof(int32_t);
-        const int read_status = oa2dp_ring_read(ring, &ring_format, input, input_bytes, spc, &read_frames);
+        const size_t input_bytes = pcm.size() * sizeof(int32_t);
+        const int read_status = oa2dp_ring_read(ring, &ring_format, pcm.data(), input_bytes, spc, &read_frames);
         if (read_status == OA2DP_ERR_STATE) {
             // Old format cannot become current again. The format waiter will
             // stop/reconfigure us; wait cancellably instead of polling it.
@@ -1122,19 +1119,12 @@ void Session::stream_loop(const StreamContext &stream)
             fail_stream();
             break;
         }
-        // Ring -> int32 24-bit -> codec channel layout.
-        if (floating) {
-            oa2dp_pcm_float_to_quantized24(fbuf.data(), pcm.data(), fbuf.size(), encoder_bits);
-        } else {
-            if (ring_format.format == OA2DP_RING_FMT_S32_FULL)
-                oa2dp_pcm_s32_to_quantized24(pcm.data(), pcm.data(), static_cast<size_t>(spc) * ring_ch,
-                                            encoder_bits);
-        }
-        if (ch == 1 && ring_ch == 2) {
-            oa2dp_pcm_downmix_to_mono(pcm.data(), pcm.data(), spc);
-        } else if (ch == 2 && ring_ch == 1) {
-            for (size_t i = spc; i-- > 0;)
-                pcm[2 * i] = pcm[2 * i + 1] = pcm[i];
+        // Prepare codec PCM: channel layout before final precision.
+        if (oa2dp_pcm_prepare_encoder(&ring_format, pcm.data(), input_bytes,
+                pcm.data(), pcm.size(), spc, ch, encoder_bits) != OA2DP_OK) {
+            LOGE("invalid PCM preparation metadata or buffer size");
+            fail_stream();
+            break;
         }
 
         size_t len = 0;

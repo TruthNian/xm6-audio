@@ -43,6 +43,8 @@ WaveRT position advancement commits PCM, packet count and completion notificatio
 
 Integer PCM admission precedes conversion: 16/24-bit accepted samples are written directly into ring slots, with no scratch pass; rejected source frames are not accessed. Raw 32-bit containers remain unchanged. Overrun increments and observations use atomic core helpers. This removes work and intermediate storage without changing the mapped ring layout or codec precision policy; measured hardware performance is still pending.
 
+Consumer preparation maps channels before final codec-precision clipping/quantization. The same int32 word buffer holds raw ring payloads (including float bits loaded via memcpy) and prepared S24 adapter values. Mono expansion proceeds backwards in place; equal-channel S24 at 24-bit precision needs no transform. Bounds and layout are checked before mutation. This replaces the separate float vector and layout pass without resampling or changing gain/codec policy.
+
 LDAC encode calls consume 128 samples per channel. At 88.2/96 kHz, a codec frame represents 256 samples; RTP uses the codec-frame duration, not the API-call block size. AVDTP headset delay reports affect the WaveRT presentation position. The virtual endpoint reports zero local hardware FIFO/chipset/codec delay; remote Bluetooth delay must not be compared against the local cyclic buffer's size. Hardware video synchronization is still unvalidated.
 
 ## Connection and service lifecycle
