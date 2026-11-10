@@ -1,5 +1,43 @@
 # Native lifecycle review
 
+## 0.3.34: transport-owned disconnect publication, source only
+
+Local channel close formerly relied on the encoder service subsequently
+calling SET_CONNECTED through the audio child. But AudioUnavailable closes
+that handle before transport teardown; its cleanup can unplug the jack while
+the channels are still open. Once the transport later closed, no child handle
+remained to clear the parent interface/MPM status or signal DisconnectedEvent.
+The separate peer-close worker published FALSE, but the normal local-close
+path did not. A pending Connect failure was also incorrectly a prerequisite
+for queuing publication after a failed OPEN.
+
+The common channel-close path now queues the parent's existing publication
+worker after releasing CloseLock, including an already-closed reconciliation.
+Current failed OPEN completions also queue it independently of manager-request
+type. The worker rechecks the actual pair of channels and connection generation
+under its existing publication serialization. Failed closes retain ownership;
+obsolete closes do not publish against a replacement. Local closes still emit
+no ChannelClosed echo to the service. The duplicate peer-worker publication
+and request-dependent queuing were removed.
+
+The new channel_close regression compiles the production CloseChannelGeneration
+body against fake OS calls, rather than testing a rewritten close model. Named
+source boundaries and configure dependencies prevent silently testing an old
+copy. The 0.3.33 body fails its local-close publication assertion; the corrected
+body passes. Checks also cover close failure/retry, stale generations,
+already-closed reconciliation, peer-only service events, allocation failure,
+power quiescence and pending-OPEN timeout. All seven local CTest checks and the
+complete kernel/service build pass. This does not exercise actual KMDF
+scheduling, radio behavior, Settings or audible recovery.
+
+Repeated enqueue is supported by the project's KMDF 1.15 minimum. The worker
+reads current state rather than assuming each enqueue represents a separate
+transition, and the publication lock serializes potentially overlapping
+callbacks. See Microsoft's [WdfWorkItemEnqueue contract](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/wdfworkitem/nf-wdfworkitem-wdfworkitemenqueue).
+
+This candidate has not been installed. The user's restriction on further
+headset tests remains in effect; Windows Settings acceptance is still pending.
+
 ## 0.3.33: request ownership corrections, source only
 
 The user confirmed that the Windows connection label and per-device

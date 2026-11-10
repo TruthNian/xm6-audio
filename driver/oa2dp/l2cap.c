@@ -289,9 +289,8 @@ static VOID CloseWorkItem(_In_ WDFWORKITEM WorkItem)
     WdfSpinLockAcquire(dev->Lock);
     generation = ch->Life.CloseRequested ? ch->Life.Generation : 0;
     WdfSpinLockRelease(dev->Lock);
-    if (generation && NT_SUCCESS(CloseChannelGeneration(dev, ch->Kind, generation, 0, NULL))) {
-        (void)Oa2dpPublishConnected(dev, FALSE, 0);
-    }
+    if (generation)
+        (void)CloseChannelGeneration(dev, ch->Kind, generation, 0, NULL);
 }
 
 /* ------------------------------------------------------------------------ */
@@ -456,11 +455,14 @@ VOID Oa2dpOpenChannel(_In_ OA2DP_DEVICE_CONTEXT *dev, _In_ WDFREQUEST request,
 
 fail:
     WdfSpinLockAcquire(dev->Lock);
-    (void)Oa2dpChannelFinishOpen(&ch->Life, generation, FALSE);
-    KeSetEvent(&ch->OpenFinished, IO_NO_INCREMENT, FALSE);
+    const BOOLEAN current = Oa2dpChannelFinishOpen(&ch->Life, generation, FALSE);
+    if (current) KeSetEvent(&ch->OpenFinished, IO_NO_INCREMENT, FALSE);
     WdfSpinLockRelease(dev->Lock);
-    if (ch->Kind == Oa2dpChannelSignaling)
-        Oa2dpMpmConnectFailed(dev, generation);
+    if (current) {
+        if (ch->Kind == Oa2dpChannelSignaling)
+            Oa2dpMpmConnectFailed(dev, generation);
+        WdfWorkItemEnqueue(dev->PublicationWork);
+    }
     WdfRequestComplete(request, status);
 }
 
@@ -496,8 +498,11 @@ static void OpenDone(_In_ WDFREQUEST Lower, _In_ WDFIOTARGET Target,
     }
     if (current) KeSetEvent(&ch->OpenFinished, IO_NO_INCREMENT, FALSE);
     WdfSpinLockRelease(dev->Lock);
-    if (current && !NT_SUCCESS(status) && ch->Kind == Oa2dpChannelSignaling)
-        Oa2dpMpmConnectFailed(dev, rc->Generation);
+    if (current && !NT_SUCCESS(status)) {
+        if (ch->Kind == Oa2dpChannelSignaling)
+            Oa2dpMpmConnectFailed(dev, rc->Generation);
+        WdfWorkItemEnqueue(dev->PublicationWork);
+    }
     if (!current) status = STATUS_CANCELLED;
     if (close) {
         WdfWorkItemEnqueue(ch->CloseWork);
@@ -527,6 +532,7 @@ static NTSTATUS CloseChannelGeneration(OA2DP_DEVICE_CONTEXT *dev,
     ULONG generation;
     BOOLEAN opening;
     BOOLEAN closed;
+    BOOLEAN publish = FALSE;
 
     // The remote-close worker and service can arrive concurrently. Exactly
     // one owns a CLOSE BRB, and a pending OPEN is never treated as closed.
@@ -570,6 +576,7 @@ static NTSTATUS CloseChannelGeneration(OA2DP_DEVICE_CONTEXT *dev,
         goto done;
     }
     if (ch->Life.State == ChannelClosed) {
+        publish = TRUE;
         WdfSpinLockRelease(dev->Lock);
         status = STATUS_SUCCESS;
         goto done;
@@ -603,6 +610,7 @@ static NTSTATUS CloseChannelGeneration(OA2DP_DEVICE_CONTEXT *dev,
              status == STATUS_INVALID_HANDLE;
     WdfSpinLockAcquire(dev->Lock);
     if (Oa2dpChannelFinishClose(&ch->Life, generation, closed)) {
+        publish = TRUE;
         ch->Handle = NULL;
         if (expectedGeneration)
             Oa2dpQueueEventLocked(dev, Oa2dpEventChannelClosed, ch, generation);
@@ -615,11 +623,17 @@ static NTSTATUS CloseChannelGeneration(OA2DP_DEVICE_CONTEXT *dev,
         Oa2dpMpmConnectFailed(dev, generation);
     if (closed && expectedGeneration) Oa2dpDeliverEvents(dev);
     if (closed) status = STATUS_SUCCESS;
-    /* The caller already knows a local close completed. Only the remote
-     * disconnect work item emits a notification; a local echo could tear
-     * down a new connection after the service reconnects. */
+    /* Only a peer-close emits the service's ChannelClosed event; a local
+     * echo could tear down its replacement connection. Windows profile
+     * publication below is independent of that service notification. */
 done:
     WdfWaitLockRelease(ch->CloseLock);
+    // The transport owns link truth even if the encoder/PortCls handle was
+    // lost before teardown. Do not depend on a later SET_CONNECTED through
+    // that handle to release Windows' disconnect wait or clear MPM state.
+    // Queue after releasing CloseLock; the worker validates both channels
+    // again, so a replacement OPEN cannot inherit an obsolete FALSE.
+    if (publish) WdfWorkItemEnqueue(dev->PublicationWork);
     return status;
 }
 

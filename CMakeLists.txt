@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(XM6Audio VERSION 0.3.33 LANGUAGES C CXX)
+project(XM6Audio VERSION 0.3.34 LANGUAGES C CXX)
 
 # The loaded binary's version must agree with the configured project and INF.
 # Generate resources in the build tree rather than keeping a stale copy.
@@ -50,6 +50,23 @@ if(OA2DP_BUILD_TESTS)
     set_tests_properties(ring_concurrency PROPERTIES TIMEOUT 15)
     add_executable(test_channel_lifecycle tools/test-channel-lifecycle.cpp)
     add_test(NAME channel_lifecycle COMMAND test_channel_lifecycle)
+    # Compile the real close routine against fake OS APIs, not a rewritten
+    # model. Named boundaries fail configuration if the routine moves.
+    set(close_source "${CMAKE_CURRENT_SOURCE_DIR}/driver/oa2dp/l2cap.c")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${close_source}")
+    file(READ "${close_source}" close_text)
+    string(REPLACE "\r\n" "\n" close_text "${close_text}")
+    string(FIND "${close_text}" "static NTSTATUS CloseChannelGeneration(OA2DP_DEVICE_CONTEXT *dev,\n                                       OA2DP_CHANNEL_KIND kind, ULONG expectedGeneration," close_begin)
+    string(FIND "${close_text}" "\nNTSTATUS Oa2dpCloseChannel(" close_end)
+    if(close_begin LESS 0 OR close_end LESS_EQUAL close_begin)
+        message(FATAL_ERROR "Cannot locate the real channel close routine for its regression check")
+    endif()
+    math(EXPR close_size "${close_end} - ${close_begin}")
+    string(SUBSTRING "${close_text}" ${close_begin} ${close_size} close_routine)
+    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/channel-close-under-test.inc" "${close_routine}")
+    add_executable(test_channel_close tools/test-channel-close.cpp)
+    target_include_directories(test_channel_close PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
+    add_test(NAME channel_close COMMAND test_channel_close)
 endif()
 
 if(NOT WIN32)

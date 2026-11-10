@@ -226,13 +226,12 @@ NTSTATUS Oa2dpMpmConnected(OA2DP_DEVICE_CONTEXT *dev, BOOLEAN connected, ULONG c
 
 VOID Oa2dpMpmConnectFailed(OA2DP_DEVICE_CONTEXT *dev, ULONG generation)
 {
-    BOOLEAN publish;
     WdfSpinLockAcquire(dev->Lock);
-    publish = (BOOLEAN)Oa2dpMpmFailConnect(&dev->MpmRequest, generation);
+    (void)Oa2dpMpmFailConnect(&dev->MpmRequest, generation);
     WdfSpinLockRelease(dev->Lock);
-    // A requested connect that fails must also finish its MPM operation.
-    // The worker still validates actual closed channels before publishing.
-    if (publish) WdfWorkItemEnqueue(dev->PublicationWork);
+    // The owning channel transition always queues publication, including
+    // disconnect/no-request cases. A pending connect is not a prerequisite
+    // for clearing the Windows interface state and disconnect event.
 }
 
 VOID Oa2dpMpmPlaying(PVOID context, BOOLEAN playing)
