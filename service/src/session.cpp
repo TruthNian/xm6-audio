@@ -506,6 +506,12 @@ bool Session::setup_audio_endpoint()
     // A newer HFP request can arrive while configuring. Its policy update
     // follows through WAIT_FORMAT; preserve this valid AVDTP configuration.
     update_suspend_state();
+    // Signalling can deliver an accepted START before the event thread posts
+    // media readiness. Reconcile that existing request after setup succeeds;
+    // an unchanged, already-running PCM stream need not send another event.
+    oa2dp_avdtp_sep *sep = oa2dp_avdtp_sep_get(&av_, local_seid_);
+    if (sep && sep->state == OA2DP_SEP_STREAMING)
+        begin_streaming();
     return true;
 }
 
@@ -963,7 +969,7 @@ void Session::main_loop()
 void Session::begin_streaming()
 {
     stream_start_pending_ = false;
-    if (!connection_enabled_ || transport_suspended_ || suspend_requested_ || teardown_pending_ || streaming_ || !media_open_ || !audio_ready_)
+    if (stopping_ || !connection_enabled_ || transport_suspended_ || suspend_requested_ || teardown_pending_ || streaming_ || !media_open_ || !audio_ready_)
         return;
     if (audio_format_.SampleRate &&
         audio_format_.SampleRate != oa2dp_codec_sample_rate(&config_)) {
@@ -999,6 +1005,8 @@ void Session::begin_streaming()
         publish("profile-policy-pending");
         return;
     }
+    if (stopping_) // stop may have arrived during the synchronous publication
+        return;
     streaming_ = true;
     ResetEvent(stream_stop_event_);
     if (++stream_generation_ == 0) ++stream_generation_;

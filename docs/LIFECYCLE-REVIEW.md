@@ -1,5 +1,43 @@
 # Native lifecycle review
 
+## 0.3.47: reconcile accepted START after endpoint readiness, source only
+
+The service drains signalling before consuming queued transport commands.
+The peer can have completed its media channel and sent START while the
+service's event thread has not yet delivered MediaOpenedByPeer to main.
+The AVDTP core accepts START from its OPEN state independently of that local
+notification. begin_streaming then returns because media_open is still false.
+The later media handler sets readiness and configures the endpoint, but did
+not revisit the accepted START. With an already-running, unchanged PCM stream,
+neither a new format event nor another START is guaranteed. This leaves a
+valid streaming SEP without a local encoder.
+
+Before changing the source, a fixture with the actual admission methods and
+actual successful-setup tail reproduced that silent path: START admission
+before local media readiness was rejected, and later successful setup left
+streaming false. Successful endpoint setup now checks the current SEP and
+calls normal local admission when it is already STREAMING. No remote START,
+new state machine, polling, worker or player operation is introduced. Failed
+setup returns before this check. Normal rate/epoch/drain/policy checks still
+apply. begin_streaming also checks stopping, preventing an asynchronous stop
+during setup/protocol work from admitting a new encoder thread afterward.
+
+The extended profile fixture compiles the production setup tail and actual
+begin/end/start/retry functions. It covers START-before-readiness and the
+opposite order, duplicate setup without a second worker, pending publication
+failure/recovery, disconnect/HFP/power/teardown/media/child/stop/missing-SEP
+gates and no additional outgoing START. The full production setup method is
+also compiled with the real codec/PCM core: format, latency or connected-state
+publication failure cannot call its fake admission hook, and success calls
+it only after those steps. External OS/profile APIs and the notification order
+are controlled fixtures; a real thread runs no encoding or audio I/O.
+
+The full local kernel/service build and all eighteen CTest checks pass.
+Driver/service11, bus6 and ring2 remain unchanged. This is source-only work;
+the installed host remains44. This audit does not establish a new root cause
+for the Windows Settings state/disconnect error or the Chrome audio-stutter
+report. Those acceptance failures and measured performance remain unresolved.
+
 ## 0.3.46: multi-frame RTP duration, source only
 
 The service passed samples_per_frame as the duration of an entire encoder

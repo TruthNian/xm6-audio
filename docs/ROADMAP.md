@@ -47,4 +47,6 @@ The 0.3.44 batch was subsequently deployed with explicit authorization; see the 
 
 Source-only 0.3.46 fixes multi-frame RTP timestamp accounting. The actual service block and actual LDAC adapter reproduced a half-duration timestamp step at 96 kHz; regression checks cover all four supported LDAC rates, 16/24-bit input and MTUs 679/895/1024, plus portable batching, wrap and single-frame/fragment paths. This establishes packet-clock correctness for those paths, not actual headset jitter/stutter recovery.
 
+Source-only 0.3.47 reconciles accepted peer START after endpoint readiness and prevents new local admission after stop. Production setup/admission fixtures cover reversed notification order, duplicate readiness, failed setup/publication and policy/state gates. Real Windows reconnect/UI and existing-client recovery remain unaccepted.
+
 The inherited [SPEC.md](SPEC.md) is a protocol requirement catalogue, not proof of current hardware compatibility. The status table in the README and this acceptance list describe the current fork.

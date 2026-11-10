@@ -2,6 +2,7 @@
 /* Actual initial-selection block and endpoint-setup method, with real core
  * codec/PCM policy and fake audio IOCTLs. No Windows engine or headset implied. */
 #include "oa2dp/a2dp_codecs.h"
+#include "oa2dp/avdtp.h"
 #include "oa2dp/pcm_format.h"
 #include "oa2dp/settings.h"
 #include <cstdint>
@@ -29,12 +30,21 @@ struct OA2DP_FORMAT_LIST {
 struct Session {
     struct Audio {
         OA2DP_FORMAT_LIST formats;
+        bool formats_ok = true, latency_ok = true, connected_ok = true;
+        bool formats_set = false, latency_set = false, connected = false;
         bool set_formats(const OA2DP_FORMAT_LIST &list) {
             formats = list;
-            return true;
+            formats_set = formats_ok;
+            return formats_ok;
         }
-        bool set_latency(unsigned, unsigned) { return true; }
-        bool set_connected(bool connected, ULONG) { return connected; }
+        bool set_latency(unsigned, unsigned) {
+            latency_set = latency_ok;
+            return latency_ok;
+        }
+        bool set_connected(bool value, ULONG) {
+            connected = value && connected_ok;
+            return connected;
+        }
     } audio_;
     oa2dp_settings settings_{};
     oa2dp_codec_caps config_{}, remote_caps_{};
@@ -42,6 +52,13 @@ struct Session {
     bool connection_enabled_ = true, have_remote_caps_ = true, publication_pending_ = false;
     uint32_t delay_report_us_ = 0;
     ULONG sig_generation_ = 1;
+    oa2dp_avdtp av_{};
+    uint8_t local_seid_ = 0;
+    unsigned begin_calls = 0;
+    void begin_streaming() {
+        CHECK(audio_.formats_set && audio_.latency_set && audio_.connected);
+        ++begin_calls;
+    }
     Session() {
         oa2dp_settings_default(&settings_);
         oa2dp_codec_local_caps(OA2DP_CODEC_LDAC, &remote_caps_);
@@ -137,6 +154,21 @@ int main() {
         CHECK(s.preferred().SampleRate == 48000);
         s.audio_format_ = {}; // no endpoint state yet: keep established default
         CHECK(s.select(cfg) && oa2dp_codec_sample_rate(&cfg) == 48000);
+    }
+    for (int failure = 0; failure < 4; ++failure) {
+        Session s;
+        s.av_.sep_count = 1;
+        s.av_.seps[0].seid = 1;
+        s.av_.seps[0].state = OA2DP_SEP_STREAMING;
+        s.local_seid_ = 1;
+        if (failure == 1)
+            s.audio_.formats_ok = false;
+        if (failure == 2)
+            s.audio_.latency_ok = false;
+        if (failure == 3)
+            s.audio_.connected_ok = false;
+        CHECK(s.setup_audio_endpoint() == (failure == 0));
+        CHECK(s.begin_calls == (failure == 0 ? 1u : 0u));
     }
     std::puts("production endpoint-format preference checks passed (audio IOCTLs fake)");
     return failures ? 1 : 0;

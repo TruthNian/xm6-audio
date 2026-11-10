@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(XM6Audio VERSION 0.3.46 LANGUAGES C CXX)
+project(XM6Audio VERSION 0.3.47 LANGUAGES C CXX)
 
 # The loaded binary's version must agree with the configured project and INF.
 # Generate resources in the build tree rather than keeping a stale copy.
@@ -151,6 +151,8 @@ if(OA2DP_BUILD_TESTS)
         "\nvoid Session::suspend_stream(" stream-start)
     xm6_test_body(service/src/session.cpp "void Session::begin_streaming("
         "\nvoid Session::stream_loop(" stream-admission)
+    xm6_test_body(service/src/session.cpp "    publication_pending_ = false; // an old FALSE must not follow this new link"
+        "\n    return true;\n}\n\nbool Session::start_stream(" endpoint-ready)
     add_executable(test_profile_retry tools/test-profile-retry.cpp)
     target_include_directories(test_profile_retry PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
     target_link_libraries(test_profile_retry PRIVATE oa2dp_core Threads::Threads)
