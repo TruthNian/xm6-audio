@@ -14,7 +14,7 @@ Class       = Bluetooth
 ClassGuid   = {e0cbf06c-cd8b-4647-bb8a-263b43f0f974}
 Provider    = %ProviderName%
 CatalogFile = oa2dp.cat
-DriverVer   = 11/10/2026,0.3.36.0
+DriverVer   = 11/10/2026,0.3.37.0
 PnpLockdown = 1
 
 [DestinationDirs]

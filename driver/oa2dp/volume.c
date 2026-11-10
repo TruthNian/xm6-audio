@@ -77,15 +77,15 @@ static NTSTATUS PublishState(OA2DP_DEVICE_CONTEXT *dev, BOOLEAN connected, ULONG
     return result;
 }
 
-_IRQL_requires_(PASSIVE_LEVEL)
-NTSTATUS Oa2dpPublishConnected(OA2DP_DEVICE_CONTEXT *dev, BOOLEAN connected, ULONG connection)
+/* Caller owns PublicationLock, including selection of the connection epoch. */
+static NTSTATUS PublishConnectedLocked(OA2DP_DEVICE_CONTEXT *dev, BOOLEAN connected,
+                                       ULONG connection)
 {
     NTSTATUS status;
     BOOLEAN valid;
     BOOLEAN closed;
     ULONG signalState, mediaState;
     NT_ASSERT(KeGetCurrentIrql() == PASSIVE_LEVEL);
-    WdfWaitLockAcquire(dev->PublicationLock, NULL);
     WdfSpinLockAcquire(dev->Lock);
     valid = connected ? ConnectionReady(dev, connection) : ConnectionClosed(dev);
     signalState = dev->Channels[Oa2dpChannelSignaling].Life.State;
@@ -93,7 +93,6 @@ NTSTATUS Oa2dpPublishConnected(OA2DP_DEVICE_CONTEXT *dev, BOOLEAN connected, ULO
     WdfSpinLockRelease(dev->Lock);
     if (!valid) {
         status = connected ? STATUS_DEVICE_NOT_READY : STATUS_DEVICE_BUSY;
-        WdfWaitLockRelease(dev->PublicationLock);
         TraceLoggingWrite(g_Oa2dpTransportTrace, "ConnectionPublicationRejected",
             TraceLoggingUInt32(connection, "ConnectionGeneration"),
             TraceLoggingBool(connected, "Connected"),
@@ -137,6 +136,15 @@ NTSTATUS Oa2dpPublishConnected(OA2DP_DEVICE_CONTEXT *dev, BOOLEAN connected, ULO
         TraceLoggingUInt32(mediaState, "MediaState"),
         TraceLoggingBool(closed, "DisconnectSignalled"),
         TraceLoggingNTStatus(status, "Status"));
+    return status;
+}
+
+_IRQL_requires_(PASSIVE_LEVEL)
+NTSTATUS Oa2dpPublishConnected(OA2DP_DEVICE_CONTEXT *dev, BOOLEAN connected, ULONG connection)
+{
+    NT_ASSERT(KeGetCurrentIrql() == PASSIVE_LEVEL);
+    WdfWaitLockAcquire(dev->PublicationLock, NULL);
+    NTSTATUS status = PublishConnectedLocked(dev, connected, connection);
     WdfWaitLockRelease(dev->PublicationLock);
     return status;
 }
@@ -146,11 +154,15 @@ static VOID PublishWorkItem(WDFWORKITEM work)
 {
     OA2DP_DEVICE_CONTEXT *dev = Oa2dpGetDevice((WDFDEVICE)WdfWorkItemGetParentObject(work));
     ULONG connection;
+    // A preceding publisher can still be committing PublishedConnection when
+    // it queues us. Select the epoch only after joining its serialization.
+    WdfWaitLockAcquire(dev->PublicationLock, NULL);
     WdfSpinLockAcquire(dev->Lock);
     connection = dev->PublishedConnection;
     WdfSpinLockRelease(dev->Lock);
-    if (!NT_SUCCESS(Oa2dpPublishConnected(dev, TRUE, connection)))
-        (void)Oa2dpPublishConnected(dev, FALSE, 0);
+    if (!NT_SUCCESS(PublishConnectedLocked(dev, TRUE, connection)))
+        (void)PublishConnectedLocked(dev, FALSE, 0);
+    WdfWaitLockRelease(dev->PublicationLock);
     Oa2dpMpmAcknowledgeSuspend(dev);
 }
 

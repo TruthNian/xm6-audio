@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(XM6Audio VERSION 0.3.36 LANGUAGES C CXX)
+project(XM6Audio VERSION 0.3.37 LANGUAGES C CXX)
 
 # The loaded binary's version must agree with the configured project and INF.
 # Generate resources in the build tree rather than keeping a stale copy.
@@ -81,6 +81,20 @@ if(OA2DP_BUILD_TESTS)
     add_executable(test_channel_open tools/test-channel-open.cpp)
     target_include_directories(test_channel_open PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
     add_test(NAME channel_open COMMAND test_channel_open)
+    xm6_test_body(driver/oa2dp/mpm.c "static BOOLEAN AcquireManager("
+        "\nstatic NTSTATUS NTAPI SuspendStatus(" mpm-callbacks)
+    xm6_test_body(driver/oa2dp/mpm.c "static BOOLEAN ConnectionStatusCurrent("
+        "\nVOID Oa2dpMpmConnectFailed(" mpm-connection)
+    xm6_test_body(driver/oa2dp/mpm.c "static BOOLEAN SuspendStatusCurrent("
+        "\nNTSTATUS Oa2dpMpmSuspended(" mpm-suspend)
+    xm6_test_body(driver/oa2dp/mpm.c "VOID Oa2dpMpmAcknowledgeSuspend(" "" mpm-ack-suspend)
+    xm6_test_body(driver/oa2dp/volume.c "static BOOLEAN ConnectionReady("
+        "\n/* PublicationLock serializes" publication-validation)
+    xm6_test_body(driver/oa2dp/volume.c "static NTSTATUS PublishConnectedLocked("
+        "\nNTSTATUS Oa2dpInitializePublication(" publication-work)
+    add_executable(test_mpm_publication tools/test-mpm-publication.cpp)
+    target_include_directories(test_mpm_publication PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
+    add_test(NAME mpm_publication COMMAND test_mpm_publication)
     xm6_test_body(driver/oa2dpaudio/ring.c "NTSTATUS Oa2dpRingSetDataEvent(" "" pcm-notification)
     add_executable(test_pcm_notification tools/test-pcm-notification.cpp)
     target_include_directories(test_pcm_notification PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")

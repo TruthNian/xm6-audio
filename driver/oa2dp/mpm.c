@@ -30,7 +30,7 @@ static BOOLEAN AcquireManager(OA2DP_DEVICE_CONTEXT *dev)
 
 static NTSTATUS NTAPI ConnectionRequest(PVOID context, ULONG connect)
 {
-    OA2DP_DEVICE_CONTEXT *dev = context;
+    OA2DP_DEVICE_CONTEXT *dev = (OA2DP_DEVICE_CONTEXT *)context;
     NTSTATUS status = STATUS_SUCCESS;
     BOOLEAN acknowledge = FALSE;
     ULONG serial = 0;
@@ -71,7 +71,7 @@ static NTSTATUS NTAPI ConnectionRequest(PVOID context, ULONG connect)
 
 static NTSTATUS NTAPI SuspendRequest(PVOID context, ULONG suspend)
 {
-    OA2DP_DEVICE_CONTEXT *dev = context;
+    OA2DP_DEVICE_CONTEXT *dev = (OA2DP_DEVICE_CONTEXT *)context;
     NTSTATUS status = STATUS_SUCCESS;
     BOOLEAN acknowledge = FALSE;
     const BOOLEAN suspended = suspend != 0;
@@ -188,6 +188,19 @@ NTSTATUS Oa2dpMpmRequestConnection(PVOID context, BOOLEAN enabled)
     return NT_SUCCESS(status) ? STATUS_SUCCESS : status;
 }
 
+/* Caller holds dev->Lock. Recheck after an external call as well: policy and
+ * channel generations can change while MPM calls back into this driver. */
+static BOOLEAN ConnectionStatusCurrent(OA2DP_DEVICE_CONTEXT *dev, BOOLEAN connected,
+                                       ULONG connection)
+{
+    if (dev->MpmStopping) return FALSE;
+    return connected ? (BOOLEAN)Oa2dpConnectionReady(
+        &dev->Channels[Oa2dpChannelSignaling].Life, &dev->Channels[Oa2dpChannelMedia].Life,
+        connection, dev->PolicyConnected, dev->TransportStopping)
+        : (BOOLEAN)Oa2dpConnectionClosed(&dev->Channels[Oa2dpChannelSignaling].Life,
+                                       &dev->Channels[Oa2dpChannelMedia].Life);
+}
+
 NTSTATUS Oa2dpMpmConnected(OA2DP_DEVICE_CONTEXT *dev, BOOLEAN connected, ULONG connection)
 {
     NTSTATUS status;
@@ -195,11 +208,7 @@ NTSTATUS Oa2dpMpmConnected(OA2DP_DEVICE_CONTEXT *dev, BOOLEAN connected, ULONG c
     if (!AcquireManager(dev))
         return !connected && !dev->MpmHandle ? STATUS_SUCCESS : STATUS_DEVICE_NOT_READY;
     WdfSpinLockAcquire(dev->Lock);
-    const BOOLEAN settled = connected ? (BOOLEAN)Oa2dpConnectionReady(
-        &dev->Channels[Oa2dpChannelSignaling].Life, &dev->Channels[Oa2dpChannelMedia].Life,
-        connection, dev->PolicyConnected, dev->TransportStopping || dev->MpmStopping)
-        : (BOOLEAN)Oa2dpConnectionClosed(&dev->Channels[Oa2dpChannelSignaling].Life,
-                                       &dev->Channels[Oa2dpChannelMedia].Life);
+    const BOOLEAN settled = ConnectionStatusCurrent(dev, connected, connection);
     serial = Oa2dpMpmConnectionCompletion(&dev->MpmRequest, connected, settled);
     WdfSpinLockRelease(dev->Lock);
     if (connected && !settled) {
@@ -209,18 +218,25 @@ NTSTATUS Oa2dpMpmConnected(OA2DP_DEVICE_CONTEXT *dev, BOOLEAN connected, ULONG c
     // Observed inbox distinction: peer indications pass 0, requested
     // confirmations pass 1. The last argument is not a generic "notify" flag.
     status = BtaMpmUpdateConnectionStatus(dev->MpmHandle, connected, serial != 0);
-    ExReleaseRundownProtection(&dev->MpmCalls);
     TraceLoggingWrite(g_Oa2dpTransportTrace, "ConnectionStatusResult",
         TraceLoggingUInt32(serial, "RequestSerial"),
         TraceLoggingBool(settled, "StateSettled"),
         TraceLoggingBool(connected, "Connected"),
         TraceLoggingNTStatus(status, "Status"));
-    if (!NT_SUCCESS(status)) return status;
-    WdfSpinLockAcquire(dev->Lock);
-    dev->MpmConnected = connected;
-    // The external call may reenter policy. Never retire a replacement request.
-    (void)Oa2dpMpmFinishRequest(&dev->MpmRequest, serial);
-    WdfSpinLockRelease(dev->Lock);
+    if (NT_SUCCESS(status)) {
+        WdfSpinLockAcquire(dev->Lock);
+        dev->MpmConnected = connected;
+        // Never retire a replacement request. Its callback may have seen the
+        // old cache and omitted its acknowledgement; recheck after committing.
+        (void)Oa2dpMpmFinishRequest(&dev->MpmRequest, serial);
+        const BOOLEAN acknowledge = Oa2dpMpmConnectionCompletion(&dev->MpmRequest, connected,
+            ConnectionStatusCurrent(dev, connected, connection)) != 0;
+        WdfSpinLockRelease(dev->Lock);
+        if (acknowledge) WdfWorkItemEnqueue(dev->PublicationWork);
+    }
+    // Stop must also wait for local bookkeeping and its final work enqueue,
+    // before unregistering the manager and flushing PublicationWork.
+    ExReleaseRundownProtection(&dev->MpmCalls);
     return status;
 }
 
@@ -242,6 +258,19 @@ VOID Oa2dpMpmPlaying(PVOID context, BOOLEAN playing)
     ExReleaseRundownProtection(&dev->MpmCalls);
 }
 
+/* Caller holds dev->Lock. */
+static BOOLEAN SuspendStatusCurrent(OA2DP_DEVICE_CONTEXT *dev, BOOLEAN suspended,
+                                    ULONG connection)
+{
+    OA2DP_CHANNEL *signal = &dev->Channels[Oa2dpChannelSignaling];
+    if (dev->MpmStopping ||
+        (connection && connection != signal->Life.ConnectionGeneration) ||
+        (!connection && signal->Life.State != ChannelClosed))
+        return FALSE;
+    return suspended || (!dev->PolicySuspended &&
+        ConnectionStatusCurrent(dev, TRUE, connection));
+}
+
 /* Caller owns PublicationLock at PASSIVE_LEVEL. Cache only accepted updates,
  * and never complete a policy request that this service reply did not handle. */
 static NTSTATUS PublishSuspended(OA2DP_DEVICE_CONTEXT *dev, BOOLEAN suspended,
@@ -250,29 +279,26 @@ static NTSTATUS PublishSuspended(OA2DP_DEVICE_CONTEXT *dev, BOOLEAN suspended,
     ULONG serial;
     NTSTATUS status = STATUS_SUCCESS;
     WdfSpinLockAcquire(dev->Lock);
-    OA2DP_CHANNEL *signal = &dev->Channels[Oa2dpChannelSignaling];
-    if ((connection && connection != signal->Life.ConnectionGeneration) ||
-        (!connection && signal->Life.State != ChannelClosed))
-        status = STATUS_DEVICE_NOT_READY;
-    if (!suspended && (dev->PolicySuspended ||
-        !Oa2dpConnectionReady(&signal->Life, &dev->Channels[Oa2dpChannelMedia].Life,
-            connection, dev->PolicyConnected, dev->TransportStopping || dev->MpmStopping)))
-        status = STATUS_DEVICE_NOT_READY;
+    if (!SuspendStatusCurrent(dev, suspended, connection)) status = STATUS_DEVICE_NOT_READY;
     serial = Oa2dpMpmOwnedReply(&dev->MpmSuspendRequest, requestSerial);
     WdfSpinLockRelease(dev->Lock);
     if (!NT_SUCCESS(status)) return status;
     if (!AcquireManager(dev)) return STATUS_DEVICE_NOT_READY;
     status = BtaMpmUpdateSuspendStatus(dev->MpmHandle, suspended, serial != 0);
-    ExReleaseRundownProtection(&dev->MpmCalls);
     if (NT_SUCCESS(status)) {
         WdfSpinLockAcquire(dev->Lock);
         dev->MpmIsSuspended = suspended;
         (void)Oa2dpMpmFinishRequest(&dev->MpmSuspendRequest, serial);
+        const BOOLEAN acknowledge = dev->MpmSuspendRequest.Pending &&
+            dev->MpmSuspendRequest.Target == suspended &&
+            SuspendStatusCurrent(dev, suspended, connection);
         WdfSpinLockRelease(dev->Lock);
+        if (acknowledge) WdfWorkItemEnqueue(dev->PublicationWork);
     } else {
         KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_WARNING_LEVEL,
             "oa2dp: MPM suspend notification failed 0x%08X\n", status));
     }
+    ExReleaseRundownProtection(&dev->MpmCalls);
     return status;
 }
 

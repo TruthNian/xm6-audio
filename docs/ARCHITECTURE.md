@@ -33,6 +33,8 @@ Driver/service ABI 11 registers a referenced PCM data-ready event at the actual 
 
 Media completion waits preserve pending OVERLAPPED/buffer ownership on cancellation, and retirement has one shared realtime drain budget. Outgoing OPEN forwards the caller's original request, removing a separate request allocation and cancellation bridge. Final destruction still waits for the kernel to release outstanding I/O. Registry status publication runs on the existing session thread, outside the encoder's lock and realtime work. Optional ETW probes and their measurement limits are described in the [lifecycle review](LIFECYCLE-REVIEW.md).
 
+Manager status publishers reconcile requests arriving during an external call after committing their cache, using the existing publication work item. That worker chooses its connection epoch inside PublicationLock, and rundown covers the final enqueue before unregister/flush. This preserves follow-up acknowledgement work; it does not make private MPM calls atomic with asynchronous policy changes.
+
 LDAC encode calls consume 128 samples per channel. At 88.2/96 kHz, a codec frame represents 256 samples; RTP uses the codec-frame duration, not the API-call block size. AVDTP headset delay reports affect the WaveRT presentation position. The virtual endpoint reports zero local hardware FIFO/chipset/codec delay; remote Bluetooth delay must not be compared against the local cyclic buffer's size. Hardware video synchronization is still unvalidated.
 
 ## Connection and service lifecycle

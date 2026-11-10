@@ -1,5 +1,56 @@
 # Native lifecycle review
 
+## 0.3.37: policy reentry handoff and worker epoch selection, source only
+
+A status update can call back into ConnectionRequest or SuspendRequest before
+the publisher commits its new cache. A new same-target request then sees the
+old cache and omits its already-at-target acknowledgement. The old publisher
+correctly refuses to retire the replacement serial, but formerly left that
+request pending without scheduling the acknowledgement it now needs.
+
+After a successful update, both publishers commit their cache, retire only
+their captured serial, and check whether a still-pending request matches the
+new cache and current connection. If so they queue the existing PublicationWork.
+The worker revalidates and confirms the newer serial. Failed updates do not
+advance the cache; opposite-target, unsettled-disconnect, obsolete-generation
+and stopping cases do not gain a new confirmation from this reconciliation.
+The MPM call's rundown reference now covers cache bookkeeping and the last
+work enqueue, before stop can unregister and finish its final work-item flush.
+
+There was a second handoff gap: PublicationWork read PublishedConnection before
+acquiring PublicationLock. It could sample zero while the preceding publisher
+was still committing a successful TRUE, then acquire the lock and reject its
+own obsolete snapshot. The worker now acquires PublicationLock before choosing
+the epoch and holds it through the common locked publication helper. The
+public entry point uses that same helper; suspend acknowledgement retains its
+existing separate acquisition. There is no additional thread or periodic poll.
+
+The framework permits [requeueing a running work item](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/wdfworkitem/nf-wdfworkitem-wdfworkitemenqueue)
+on the project's KMDF version; PublicationLock serializes overlapping callbacks.
+The rundown ordering follows [access rundown](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/wdm/nf-wdm-exwaitforrundownprotectionrelease)
+and [work-item flush](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/wdfworkitem/nf-wdfworkitem-wdfworkitemflush)
+contracts. No spin lock is held across an external MPM call.
+
+The new production-body fixture compiles the actual manager callbacks,
+connection/suspend publishers, suspend acknowledgement and connection worker
+against fake OS/manager APIs. It deliberately injects same/opposite requests,
+generation changes and stopping during calls, and a preceding commit while the
+worker acquires its lock. It checks confirmation flags, pending-serial ownership,
+failure handling, no premature Disconnect confirmation, no unnecessary requeue,
+balanced rundown and enqueue-before-rundown-release. Substituting each original
+0.3.36 connection publisher, suspend publisher and publication worker into the
+build-only fixture produced the expected independent regression failures;
+restoring the corrected production bodies passed. The local full driver/service
+build and all twelve CTest checks pass.
+
+These checks prove the selected local ordering rules under injected timing,
+not the private MPM implementation or actual Windows Settings behavior. An
+external update is still not atomic with an asynchronous policy callback;
+this batch repairs missed follow-up work, not that cross-component atomicity.
+No installed package, device, player or boot policy was changed. ABI remains
+driver/service 11, bus 5, ring 2. Actual sound, Settings disconnect/reconnect,
+existing-player recovery and performance remain unaccepted for this candidate.
+
 ## 0.3.36: original-request outgoing OPEN, source only
 
 Outgoing OPEN previously allocated a separate WDF request and kept the caller
