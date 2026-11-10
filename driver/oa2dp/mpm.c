@@ -60,6 +60,7 @@ static NTSTATUS NTAPI ConnectionRequest(PVOID context, ULONG connect)
     NTSTATUS status = STATUS_SUCCESS;
     BOOLEAN acknowledge = FALSE;
     ULONG serial = 0;
+    PIRP completion = NULL;
     const BOOLEAN enabled = connect != 0;
     if (!ExAcquireRundownProtection(&dev->MpmCallbacks)) return STATUS_DELETE_PENDING;
     WdfSpinLockAcquire(dev->Lock);
@@ -77,12 +78,13 @@ static NTSTATUS NTAPI ConnectionRequest(PVOID context, ULONG connect)
         if (!enabled) KeClearEvent(&dev->DisconnectedEvent);
         if (dev->AudioPolicyRequest)
             status = dev->AudioPolicyRequest(dev->AudioContext, enabled, dev->PolicySuspended,
-                                             dev->MpmSuspendRequest.Serial);
+                                             dev->MpmSuspendRequest.Serial, &completion);
         acknowledge = NT_SUCCESS(status) && dev->MpmConnected == enabled &&
             (enabled || (dev->Channels[Oa2dpChannelSignaling].Life.State == ChannelClosed &&
                          dev->Channels[Oa2dpChannelMedia].Life.State == ChannelClosed));
     }
     WdfSpinLockRelease(dev->Lock);
+    if (completion) IoCompleteRequest(completion, IO_NO_INCREMENT);
     TraceLoggingWrite(g_Oa2dpTransportTrace, "ConnectionPolicy",
         TraceLoggingUInt32(serial, "RequestSerial"),
         TraceLoggingBool(enabled, "Connect"),
@@ -101,6 +103,7 @@ static NTSTATUS NTAPI SuspendRequest(PVOID context, ULONG suspend)
     NTSTATUS status = STATUS_SUCCESS;
     BOOLEAN acknowledge = FALSE;
     const BOOLEAN suspended = suspend != 0;
+    PIRP completion = NULL;
     if (!ExAcquireRundownProtection(&dev->MpmCallbacks)) return STATUS_DELETE_PENDING;
     WdfSpinLockAcquire(dev->Lock);
     if (dev->MpmStopping) {
@@ -110,11 +113,12 @@ static NTSTATUS NTAPI SuspendRequest(PVOID context, ULONG suspend)
         (void)Oa2dpMpmBeginRequest(&dev->MpmSuspendRequest, suspended);
         if (dev->AudioPolicyRequest)
             status = dev->AudioPolicyRequest(dev->AudioContext, dev->PolicyConnected, suspended,
-                                             dev->MpmSuspendRequest.Serial);
+                                             dev->MpmSuspendRequest.Serial, &completion);
         acknowledge = NT_SUCCESS(status) && dev->MpmIsSuspended == suspended &&
             SuspendStatusCurrent(dev, suspended, dev->MpmSuspendConnection);
     }
     WdfSpinLockRelease(dev->Lock);
+    if (completion) IoCompleteRequest(completion, IO_NO_INCREMENT);
     if (acknowledge) WdfWorkItemEnqueue(dev->PublicationWork);
     ExReleaseRundownProtection(&dev->MpmCallbacks);
     return status;
@@ -181,8 +185,9 @@ VOID Oa2dpMpmStop(OA2DP_DEVICE_CONTEXT *dev)
 
 NTSTATUS Oa2dpMpmRequestConnection(PVOID context, BOOLEAN enabled)
 {
-    OA2DP_DEVICE_CONTEXT *dev = context;
+    OA2DP_DEVICE_CONTEXT *dev = (OA2DP_DEVICE_CONTEXT *)context;
     NTSTATUS status;
+    PIRP completion = NULL;
     if (!AcquireManager(dev)) return STATUS_DEVICE_NOT_READY;
     ULONG revision;
     WdfSpinLockAcquire(dev->Lock);
@@ -204,10 +209,11 @@ NTSTATUS Oa2dpMpmRequestConnection(PVOID context, BOOLEAN enabled)
                 KeClearEvent(&dev->DisconnectedEvent);
             if (dev->AudioPolicyRequest)
                 status = dev->AudioPolicyRequest(dev->AudioContext, enabled,
-                    dev->PolicySuspended, dev->MpmSuspendRequest.Serial);
+                    dev->PolicySuspended, dev->MpmSuspendRequest.Serial, &completion);
         }
         WdfSpinLockRelease(dev->Lock);
     }
+    if (completion) IoCompleteRequest(completion, IO_NO_INCREMENT);
     ExReleaseRundownProtection(&dev->MpmCalls);
     TraceLoggingWrite(g_Oa2dpTransportTrace, "ConnectionRequestResult",
         TraceLoggingBool(enabled, "Connect"),

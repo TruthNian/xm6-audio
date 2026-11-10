@@ -290,11 +290,16 @@ static VOID SnapshotStateLocked(_In_ const OA2DP_AUDIO_DEVICE *dev,
     ev->SuspendSerial = dev->SuspendSerial;
 }
 
-static VOID CompleteWait(_Inout_ PIRP irp, _In_ const OA2DP_FORMAT_CHANGE *ev)
+static VOID PrepareWait(_Inout_ PIRP irp, _In_ const OA2DP_FORMAT_CHANGE *ev)
 {
     RtlCopyMemory(irp->AssociatedIrp.SystemBuffer, ev, sizeof(*ev));
     irp->IoStatus.Status = STATUS_SUCCESS;
     irp->IoStatus.Information = sizeof(*ev);
+}
+
+static VOID CompleteWait(_Inout_ PIRP irp, _In_ const OA2DP_FORMAT_CHANGE *ev)
+{
+    PrepareWait(irp, ev);
     IoCompleteRequest(irp, IO_NO_INCREMENT);
 }
 
@@ -334,7 +339,8 @@ extern "C" VOID Oa2dpReportStream(_Inout_ OA2DP_AUDIO_DEVICE *dev, _In_ const OA
     dev->Current = *format;
     dev->Running = running;
     SnapshotStateLocked(dev, &ev);
-    irp = dev->Started ? IoCsqRemoveNextIrp(&dev->WaitCsq, NULL) : NULL;
+    irp = dev->Started && dev->ControlFile
+        ? IoCsqRemoveNextIrp(&dev->WaitCsq, dev->ControlFile) : NULL;
     if (!irp) {
         dev->Event = ev;
         dev->EventPending = TRUE;
@@ -350,11 +356,12 @@ extern "C" VOID Oa2dpReportStream(_Inout_ OA2DP_AUDIO_DEVICE *dev, _In_ const OA
 
 extern "C" NTSTATUS Oa2dpApplyPolicy(_Inout_ OA2DP_AUDIO_DEVICE *dev,
                                     _In_ BOOLEAN enabled, _In_ BOOLEAN suspended,
-                                    ULONG suspendSerial)
+                                    ULONG suspendSerial, _Out_ PIRP *completion)
 {
     KIRQL irql;
     PIRP irp;
     OA2DP_FORMAT_CHANGE ev;
+    *completion = NULL;
     KeAcquireSpinLock(&dev->Lock, &irql);
     // Registration can precede ControlStart. Retain the manager's policy so
     // the first service GET_STATE cannot override an explicit disconnect.
@@ -368,16 +375,20 @@ extern "C" NTSTATUS Oa2dpApplyPolicy(_Inout_ OA2DP_AUDIO_DEVICE *dev,
     dev->SuspendSerial = suspendSerial;
     ++dev->ConnectionSerial;
     SnapshotStateLocked(dev, &ev);
-    irp = dev->Started ? IoCsqRemoveNextIrp(&dev->WaitCsq, NULL) : NULL;
+    irp = dev->Started && dev->ControlFile
+        ? IoCsqRemoveNextIrp(&dev->WaitCsq, dev->ControlFile) : NULL;
     if (!irp) {
         dev->Event = ev;
         dev->EventPending = TRUE;
     }
     KeReleaseSpinLock(&dev->Lock, irql);
-    if (irp)
-        CompleteWait(irp, &ev);
+    if (irp) {
+        PrepareWait(irp, &ev);
+        *completion = irp;
+    }
     // The service publishes the jack state when the channel teardown completes.
-    // This notification path is also callable under the parent's spin lock.
+    // Parent registration protection still holds. Transfer the prepared IRP;
+    // the caller completes it after unlocking, without another child access.
     return STATUS_SUCCESS;
 }
 
@@ -543,14 +554,19 @@ static NTSTATUS ControlCreate(_Inout_ OA2DP_AUDIO_DEVICE *dev, _In_ PIRP irp, _I
 static VOID ControlCleanup(_Inout_ OA2DP_AUDIO_DEVICE *dev, _In_ PFILE_OBJECT fo)
 {
     BOOLEAN closed = FALSE;
-    FailWaits(dev, fo, STATUS_CANCELLED);
+    KIRQL irql;
     Oa2dpLock(&dev->ControlLock);
+    // Close admission before draining. A WAIT_FORMAT dispatch can be between
+    // its state check and cancel-safe insertion when cleanup arrives.
+    KeAcquireSpinLock(&dev->Lock, &irql);
     if (dev->ControlFile == fo) {
-        Oa2dpRingUnmapUser(&dev->Ring); /* we are in the service's context */
         dev->ControlFile = NULL;
         closed = TRUE;
     }
+    KeReleaseSpinLock(&dev->Lock, irql);
+    if (closed) Oa2dpRingUnmapUser(&dev->Ring); /* service's process context */
     Oa2dpUnlock(&dev->ControlLock);
+    FailWaits(dev, fo, STATUS_CANCELLED);
     if (closed)
         Oa2dpSetConnected(dev, FALSE, 0);
 }
@@ -614,6 +630,7 @@ static NTSTATUS WaitFormat(_Inout_ OA2DP_AUDIO_DEVICE *dev, _Inout_ PIRP irp, _I
     OA2DP_FORMAT_CHANGE ev;
     KIRQL irql;
     NTSTATUS status;
+    PFILE_OBJECT fo = IoGetCurrentIrpStackLocation(irp)->FileObject;
 
     if (outLen < sizeof(ev)) {
         irp->IoStatus.Status = STATUS_BUFFER_TOO_SMALL;
@@ -623,6 +640,7 @@ static NTSTATUS WaitFormat(_Inout_ OA2DP_AUDIO_DEVICE *dev, _Inout_ PIRP irp, _I
     }
     KeAcquireSpinLock(&dev->Lock, &irql);
     status = Oa2dpControlStatusLocked(dev, FALSE);
+    if (NT_SUCCESS(status) && (!fo || dev->ControlFile != fo)) status = STATUS_CANCELLED;
     if (!NT_SUCCESS(status)) {
         KeReleaseSpinLock(&dev->Lock, irql);
         irp->IoStatus.Status = status;
@@ -637,9 +655,37 @@ static NTSTATUS WaitFormat(_Inout_ OA2DP_AUDIO_DEVICE *dev, _Inout_ PIRP irp, _I
         CompleteWait(irp, &ev);
         return STATUS_SUCCESS;
     }
-    /* Marks the IRP pending (or completes it at once if already cancelled). */
-    IoCsqInsertIrp(&dev->WaitCsq, irp, NULL);
+    // Keep the file identity alive across insertion, which may itself complete
+    // the original IRP. The post-check only uses this saved reference.
+    ObReferenceObject(fo);
     KeReleaseSpinLock(&dev->Lock, irql);
+    /* Insertion can synchronously complete an already-cancelled IRP. Hold no
+     * outer spin lock, and never access the original IRP after this call. */
+    IoCsqInsertIrp(&dev->WaitCsq, irp, NULL);
+    // A producer or stop can run between the first check and insertion. Join
+    // its state lock again and take a fresh owned waiter, not the original IRP
+    // which cancellation or another producer may already have completed.
+    PIRP ready = NULL;
+    KeAcquireSpinLock(&dev->Lock, &irql);
+    status = Oa2dpControlStatusLocked(dev, FALSE);
+    if (NT_SUCCESS(status) && dev->ControlFile != fo) status = STATUS_CANCELLED;
+    if (!NT_SUCCESS(status) || dev->EventPending) {
+        ready = IoCsqRemoveNextIrp(&dev->WaitCsq, fo);
+        if (ready && NT_SUCCESS(status)) {
+            ev = dev->Event;
+            dev->EventPending = FALSE;
+        }
+    }
+    KeReleaseSpinLock(&dev->Lock, irql);
+    if (ready) {
+        if (NT_SUCCESS(status)) CompleteWait(ready, &ev);
+        else {
+            ready->IoStatus.Status = status;
+            ready->IoStatus.Information = 0;
+            IoCompleteRequest(ready, IO_NO_INCREMENT);
+        }
+    }
+    ObDereferenceObject(fo);
     return STATUS_PENDING;
 }
 

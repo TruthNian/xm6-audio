@@ -1,5 +1,57 @@
 # Native lifecycle review
 
+## 0.3.39: completion after unlocking and waiter admission, source only
+
+Policy callbacks were invoked under the parent's registration spin lock to
+protect the child callback/context lifetime. Oa2dpApplyPolicy released its own
+child lock, but then completed WAIT_FORMAT while the *parent* lock was still
+held. The policy contract now transfers a removed, prepared IRP to the parent.
+Connection, suspend, explicit-request fallback and audio registration callers
+release their spin lock before completing that IRP. They do not access the
+child context after releasing its registration protection. This changes the
+kernel bus ABI from 5 to 6; both drivers must be updated together. Service ABI
+11 and ring v2 are unchanged. No work thread, allocation or periodic poll was
+added for policy delivery.
+
+WAIT_FORMAT also used to insert into the cancel-safe queue under the device
+spin lock. An already-cancelled insertion can synchronously invoke cancellation
+completion. Insertion now occurs without an outer spin lock, followed by a
+locked state/queue reconciliation. If a producer ran in that interval, a fresh
+owned waiter receives its retained event; if stop or cleanup ran, a matching
+waiter is failed. The code never accesses the original IRP after insertion,
+because cancellation or a producer may already have completed it.
+
+ControlCleanup closes admission by clearing the matching ControlFile under
+the state lock before draining that file's waiters. Producers and post-insert
+checks select waiters by file identity, so an old insertion cannot remain after
+cleanup or consume a replacement service's event. A temporary file-object
+reference preserves that identity through insertion, completion and the final
+check. Cancellation with no owned waiter leaves a retained event available to
+the next request. Completion stays outside state and registration spin locks.
+
+These ownership rules follow Microsoft's [completion restriction](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/wdm/nf-wdm-iocompleterequest),
+[cancel-safe insertion](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/wdm/nf-wdm-iocsqinsertirp)
+and [removal contract](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/wdm/nf-wdm-iocsqremovenextirp).
+The production-body fixture now executes actual parent callbacks/fallback and
+registration, child policy application, waiter snapshots/status, WAIT_FORMAT,
+cancellation and cleanup against fake external APIs. It checks all four policy
+delivery paths, unregister reentry on completion, immediate and queued cancel,
+production before/after insertion, stop/cleanup in the gap, a replacement
+control handle, current-file selection, preserved events and balanced file
+references. Substituting the old child policy body (with only its signature
+adapted to the new out parameter) or old WAIT_FORMAT independently reproduced
+completion under a spin lock. Removing the post-insert check reproduced a
+lost notification. Removing cleanup admission reconciliation or the producer's
+file filter independently failed the respective regression. Corrected
+production bodies pass.
+
+The full local driver/service build and all twelve CTest checks pass. The
+fixtures do not implement real Windows CSQ cancellation, OS scheduling or the
+private profile manager, and do not prove the observed Settings failure's root
+cause. No candidate was installed, no device/player/volume was changed, and no
+reboot occurred. Actual audio, controls, reconnect and performance acceptance
+remain pending.
+
 ## 0.3.38: connection-owned suspend cache, source only
 
 The suspend cache stored only MpmIsSuspended. If the signalling link changed

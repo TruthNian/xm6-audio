@@ -3,14 +3,17 @@
 #pragma once
 #include "oa2dp_ioctl.h"
 
-#define OA2DP_BUS_VERSION 5
+#define OA2DP_BUS_VERSION 6
 #define OA2DP_VOLUME_MIN_DB (-127L * 32768L)
 #define OA2DP_VOLUME_MAX_DB 0L
 #define OA2DP_VOLUME_STEP_DB 32768L
 
 typedef VOID (*OA2DP_VOLUME_NOTIFY)(PVOID Context);
+/* Called under the parent's registration spin lock. Prepare/remove at most
+ * one waiter and transfer it via Completion (NULL if none). The caller must
+ * complete that IRP after releasing all spin locks, without reusing Context. */
 typedef NTSTATUS (*OA2DP_POLICY_REQUEST)(PVOID Context, BOOLEAN Enabled, BOOLEAN Suspended,
-                                       ULONG SuspendSerial);
+                                       ULONG SuspendSerial, PIRP *Completion);
 typedef struct _OA2DP_BUS_INTERFACE {
     INTERFACE Header;
     VOID (*GetVolume)(PVOID Context, PLONG Db, PBOOLEAN Muted);

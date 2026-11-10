@@ -45,7 +45,7 @@ public:
     BOOLEAN Attached = FALSE;
     static VOID VolumeChanged(PVOID context);
     static NTSTATUS PolicyRequested(PVOID context, BOOLEAN enabled, BOOLEAN suspended,
-                                    ULONG suspendSerial);
+                                    ULONG suspendSerial, PIRP *completion);
 
     IMP_IMiniportTopology;
 };
@@ -63,10 +63,10 @@ VOID CMiniportTopology::VolumeChanged(PVOID context)
 }
 
 NTSTATUS CMiniportTopology::PolicyRequested(PVOID context, BOOLEAN enabled, BOOLEAN suspended,
-                                            ULONG suspendSerial)
+                                            ULONG suspendSerial, PIRP *completion)
 {
     return Oa2dpApplyPolicy(static_cast<CMiniportTopology *>(context)->Device, enabled, suspended,
-                            suspendSerial);
+                            suspendSerial, completion);
 }
 
 #pragma code_seg("PAGE")

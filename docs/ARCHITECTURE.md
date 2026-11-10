@@ -37,6 +37,8 @@ Manager status publishers reconcile requests arriving during an external call af
 
 The accepted suspend/resume cache retains its original connection epoch. Already-at-target callbacks and worker acknowledgements validate that cached epoch; a new link needs its own service reply. Epoch zero represents the disconnected startup baseline and cannot acknowledge an active link.
 
+Kernel bus ABI 6 transfers prepared policy-wait IRPs to the parent for completion after unlocking; child callback lifetime remains protected during preparation. WAIT_FORMAT inserts without an outer spin lock and reconciles state afterwards. File-bound admission, cleanup and producer selection prevent old control handles from retaining waits or consuming a new service's events. These paths add no notification thread or periodic poll.
+
 LDAC encode calls consume 128 samples per channel. At 88.2/96 kHz, a codec frame represents 256 samples; RTP uses the codec-frame duration, not the API-call block size. AVDTP headset delay reports affect the WaveRT presentation position. The virtual endpoint reports zero local hardware FIFO/chipset/codec delay; remote Bluetooth delay must not be compared against the local cyclic buffer's size. Hardware video synchronization is still unvalidated.
 
 ## Connection and service lifecycle

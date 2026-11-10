@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(XM6Audio VERSION 0.3.38 LANGUAGES C CXX)
+project(XM6Audio VERSION 0.3.39 LANGUAGES C CXX)
 
 # The loaded binary's version must agree with the configured project and INF.
 # Generate resources in the build tree rather than keeping a stale copy.
@@ -83,6 +83,8 @@ if(OA2DP_BUILD_TESTS)
     add_test(NAME channel_open COMMAND test_channel_open)
     xm6_test_body(driver/oa2dp/mpm.c "static BOOLEAN AcquireManager("
         "\nstatic NTSTATUS NTAPI SuspendStatus(" mpm-callbacks)
+    xm6_test_body(driver/oa2dp/mpm.c "NTSTATUS Oa2dpMpmRequestConnection("
+        "\nNTSTATUS Oa2dpMpmConnected(" mpm-request)
     xm6_test_body(driver/oa2dp/mpm.c "NTSTATUS Oa2dpMpmConnected("
         "\nVOID Oa2dpMpmConnectFailed(" mpm-connection)
     xm6_test_body(driver/oa2dp/mpm.c "static NTSTATUS PublishSuspended("
@@ -92,6 +94,22 @@ if(OA2DP_BUILD_TESTS)
         "\n/* PublicationLock serializes" publication-validation)
     xm6_test_body(driver/oa2dp/volume.c "static NTSTATUS PublishConnectedLocked("
         "\nNTSTATUS Oa2dpInitializePublication(" publication-work)
+    xm6_test_body(driver/oa2dp/volume.c "static NTSTATUS BusRegisterAudio("
+        "\nNTSTATUS Oa2dpRegisterBusInterface(" policy-registration)
+    xm6_test_body(driver/oa2dpaudio/control.cpp "static VOID CsqCompleteCanceled("
+        "\nstatic VOID SnapshotStateLocked(" wait-cancel)
+    xm6_test_body(driver/oa2dpaudio/control.cpp "static VOID SnapshotStateLocked("
+        "\nstatic VOID FailWaits(" wait-snapshot)
+    xm6_test_body(driver/oa2dpaudio/control.cpp "static VOID FailWaits("
+        "\n/* Called by the WaveRT stream" wait-fail)
+    xm6_test_body(driver/oa2dpaudio/control.cpp "extern \"C\" NTSTATUS Oa2dpControlStatusLocked("
+        "\nextern \"C\" NTSTATUS Oa2dpControlStatus(" wait-status)
+    xm6_test_body(driver/oa2dpaudio/control.cpp "extern \"C\" NTSTATUS Oa2dpApplyPolicy("
+        "\nextern \"C\" VOID Oa2dpControlInit(" policy-apply)
+    xm6_test_body(driver/oa2dpaudio/control.cpp "static NTSTATUS WaitFormat("
+        "\nstatic NTSTATUS ControlIoctl(" wait-format)
+    xm6_test_body(driver/oa2dpaudio/control.cpp "static VOID ControlCleanup("
+        "\nstatic NTSTATUS SetFormats(" wait-cleanup)
     add_executable(test_mpm_publication tools/test-mpm-publication.cpp)
     target_include_directories(test_mpm_publication PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
     add_test(NAME mpm_publication COMMAND test_mpm_publication)

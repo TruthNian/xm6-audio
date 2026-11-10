@@ -145,7 +145,7 @@ VOID Oa2dpWaveFormatsChanged(_Inout_ OA2DP_AUDIO_DEVICE *dev);
 NTSTATUS Oa2dpSetConnected(_Inout_ OA2DP_AUDIO_DEVICE *dev, _In_ BOOLEAN connected,
                           ULONG connection);
 NTSTATUS Oa2dpApplyPolicy(_Inout_ OA2DP_AUDIO_DEVICE *dev, _In_ BOOLEAN enabled,
-                         _In_ BOOLEAN suspended, ULONG suspendSerial);
+                         _In_ BOOLEAN suspended, ULONG suspendSerial, _Out_ PIRP *completion);
 
 #ifdef __cplusplus
 }

@@ -226,8 +226,9 @@ static VOID BusSetVolume(PVOID context, LONG db, BOOLEAN muted, BOOLEAN hostWrit
 static NTSTATUS BusRegisterAudio(PVOID context, PVOID audioContext,
                                 OA2DP_VOLUME_NOTIFY notify, OA2DP_POLICY_REQUEST request)
 {
-    OA2DP_DEVICE_CONTEXT *dev = context;
+    OA2DP_DEVICE_CONTEXT *dev = (OA2DP_DEVICE_CONTEXT *)context;
     NTSTATUS status = STATUS_SUCCESS;
+    PIRP completion = NULL;
     WdfSpinLockAcquire(dev->Lock);
     if (dev->AudioContext && dev->AudioContext != audioContext) {
         status = STATUS_SHARING_VIOLATION;
@@ -236,7 +237,7 @@ static NTSTATUS BusRegisterAudio(PVOID context, PVOID audioContext,
         dev->AudioVolumeNotify = notify;
         dev->AudioPolicyRequest = request;
         status = request(audioContext, dev->PolicyConnected, dev->PolicySuspended,
-                          dev->MpmSuspendRequest.Serial);
+                          dev->MpmSuspendRequest.Serial, &completion);
         if (!NT_SUCCESS(status)) {
             dev->AudioContext = NULL;
             dev->AudioVolumeNotify = NULL;
@@ -244,12 +245,13 @@ static NTSTATUS BusRegisterAudio(PVOID context, PVOID audioContext,
         }
     }
     WdfSpinLockRelease(dev->Lock);
+    if (completion) IoCompleteRequest(completion, IO_NO_INCREMENT);
     return status;
 }
 
 static VOID BusUnregisterAudio(PVOID context, PVOID audioContext)
 {
-    OA2DP_DEVICE_CONTEXT *dev = context;
+    OA2DP_DEVICE_CONTEXT *dev = (OA2DP_DEVICE_CONTEXT *)context;
     WdfSpinLockAcquire(dev->Lock);
     if (dev->AudioContext == audioContext) {
         dev->AudioContext = NULL;
