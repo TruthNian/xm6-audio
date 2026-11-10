@@ -35,6 +35,8 @@ Media completion waits preserve pending OVERLAPPED/buffer ownership on cancellat
 
 Manager status publishers reconcile requests arriving during an external call after committing their cache, using the existing publication work item. That worker chooses its connection epoch inside PublicationLock, and rundown covers the final enqueue before unregister/flush. This preserves follow-up acknowledgement work; it does not make private MPM calls atomic with asynchronous policy changes.
 
+The accepted suspend/resume cache retains its original connection epoch. Already-at-target callbacks and worker acknowledgements validate that cached epoch; a new link needs its own service reply. Epoch zero represents the disconnected startup baseline and cannot acknowledge an active link.
+
 LDAC encode calls consume 128 samples per channel. At 88.2/96 kHz, a codec frame represents 256 samples; RTP uses the codec-frame duration, not the API-call block size. AVDTP headset delay reports affect the WaveRT presentation position. The virtual endpoint reports zero local hardware FIFO/chipset/codec delay; remote Bluetooth delay must not be compared against the local cyclic buffer's size. Hardware video synchronization is still unvalidated.
 
 ## Connection and service lifecycle

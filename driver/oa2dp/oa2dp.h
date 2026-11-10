@@ -106,6 +106,7 @@ struct _OA2DP_DEVICE_CONTEXT {
     OA2DP_MPM_REQUEST MpmRequest;
     OA2DP_MPM_REQUEST MpmSuspendRequest;
     BOOLEAN MpmIsSuspended;
+    ULONG MpmSuspendConnection; /* link owning the accepted suspend/resume cache; 0 = closed */
 };
 
 WDF_DECLARE_CONTEXT_TYPE_WITH_NAME(OA2DP_DEVICE_CONTEXT, Oa2dpGetDevice)

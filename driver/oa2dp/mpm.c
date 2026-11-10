@@ -28,6 +28,32 @@ static BOOLEAN AcquireManager(OA2DP_DEVICE_CONTEXT *dev)
     return TRUE;
 }
 
+/* Caller holds dev->Lock. Recheck after an external call as well: policy and
+ * channel generations can change while MPM calls back into this driver. */
+static BOOLEAN ConnectionStatusCurrent(OA2DP_DEVICE_CONTEXT *dev, BOOLEAN connected,
+                                       ULONG connection)
+{
+    if (dev->MpmStopping) return FALSE;
+    return connected ? (BOOLEAN)Oa2dpConnectionReady(
+        &dev->Channels[Oa2dpChannelSignaling].Life, &dev->Channels[Oa2dpChannelMedia].Life,
+        connection, dev->PolicyConnected, dev->TransportStopping)
+        : (BOOLEAN)Oa2dpConnectionClosed(&dev->Channels[Oa2dpChannelSignaling].Life,
+                                       &dev->Channels[Oa2dpChannelMedia].Life);
+}
+
+/* Caller holds dev->Lock. A cached state is usable only for its original link. */
+static BOOLEAN SuspendStatusCurrent(OA2DP_DEVICE_CONTEXT *dev, BOOLEAN suspended,
+                                    ULONG connection)
+{
+    OA2DP_CHANNEL *signal = &dev->Channels[Oa2dpChannelSignaling];
+    if (dev->MpmStopping ||
+        (connection && connection != signal->Life.ConnectionGeneration) ||
+        (!connection && signal->Life.State != ChannelClosed))
+        return FALSE;
+    return suspended || (!dev->PolicySuspended &&
+        ConnectionStatusCurrent(dev, TRUE, connection));
+}
+
 static NTSTATUS NTAPI ConnectionRequest(PVOID context, ULONG connect)
 {
     OA2DP_DEVICE_CONTEXT *dev = (OA2DP_DEVICE_CONTEXT *)context;
@@ -85,7 +111,8 @@ static NTSTATUS NTAPI SuspendRequest(PVOID context, ULONG suspend)
         if (dev->AudioPolicyRequest)
             status = dev->AudioPolicyRequest(dev->AudioContext, dev->PolicyConnected, suspended,
                                              dev->MpmSuspendRequest.Serial);
-        acknowledge = NT_SUCCESS(status) && dev->MpmIsSuspended == suspended;
+        acknowledge = NT_SUCCESS(status) && dev->MpmIsSuspended == suspended &&
+            SuspendStatusCurrent(dev, suspended, dev->MpmSuspendConnection);
     }
     WdfSpinLockRelease(dev->Lock);
     if (acknowledge) WdfWorkItemEnqueue(dev->PublicationWork);
@@ -117,6 +144,7 @@ NTSTATUS Oa2dpMpmStart(OA2DP_DEVICE_CONTEXT *dev)
     RtlZeroMemory(&dev->MpmRequest, sizeof(dev->MpmRequest));
     RtlZeroMemory(&dev->MpmSuspendRequest, sizeof(dev->MpmSuspendRequest));
     dev->MpmIsSuspended = TRUE;
+    dev->MpmSuspendConnection = 0;
     WdfObjectReference(dev->Device);
     // Profile 1 is A2DP on the tested Windows 10 build. Context is retained
     // until unregister and callback rundown both finish.
@@ -188,19 +216,6 @@ NTSTATUS Oa2dpMpmRequestConnection(PVOID context, BOOLEAN enabled)
     return NT_SUCCESS(status) ? STATUS_SUCCESS : status;
 }
 
-/* Caller holds dev->Lock. Recheck after an external call as well: policy and
- * channel generations can change while MPM calls back into this driver. */
-static BOOLEAN ConnectionStatusCurrent(OA2DP_DEVICE_CONTEXT *dev, BOOLEAN connected,
-                                       ULONG connection)
-{
-    if (dev->MpmStopping) return FALSE;
-    return connected ? (BOOLEAN)Oa2dpConnectionReady(
-        &dev->Channels[Oa2dpChannelSignaling].Life, &dev->Channels[Oa2dpChannelMedia].Life,
-        connection, dev->PolicyConnected, dev->TransportStopping)
-        : (BOOLEAN)Oa2dpConnectionClosed(&dev->Channels[Oa2dpChannelSignaling].Life,
-                                       &dev->Channels[Oa2dpChannelMedia].Life);
-}
-
 NTSTATUS Oa2dpMpmConnected(OA2DP_DEVICE_CONTEXT *dev, BOOLEAN connected, ULONG connection)
 {
     NTSTATUS status;
@@ -258,19 +273,6 @@ VOID Oa2dpMpmPlaying(PVOID context, BOOLEAN playing)
     ExReleaseRundownProtection(&dev->MpmCalls);
 }
 
-/* Caller holds dev->Lock. */
-static BOOLEAN SuspendStatusCurrent(OA2DP_DEVICE_CONTEXT *dev, BOOLEAN suspended,
-                                    ULONG connection)
-{
-    OA2DP_CHANNEL *signal = &dev->Channels[Oa2dpChannelSignaling];
-    if (dev->MpmStopping ||
-        (connection && connection != signal->Life.ConnectionGeneration) ||
-        (!connection && signal->Life.State != ChannelClosed))
-        return FALSE;
-    return suspended || (!dev->PolicySuspended &&
-        ConnectionStatusCurrent(dev, TRUE, connection));
-}
-
 /* Caller owns PublicationLock at PASSIVE_LEVEL. Cache only accepted updates,
  * and never complete a policy request that this service reply did not handle. */
 static NTSTATUS PublishSuspended(OA2DP_DEVICE_CONTEXT *dev, BOOLEAN suspended,
@@ -288,6 +290,7 @@ static NTSTATUS PublishSuspended(OA2DP_DEVICE_CONTEXT *dev, BOOLEAN suspended,
     if (NT_SUCCESS(status)) {
         WdfSpinLockAcquire(dev->Lock);
         dev->MpmIsSuspended = suspended;
+        dev->MpmSuspendConnection = connection;
         (void)Oa2dpMpmFinishRequest(&dev->MpmSuspendRequest, serial);
         const BOOLEAN acknowledge = dev->MpmSuspendRequest.Pending &&
             dev->MpmSuspendRequest.Target == suspended &&
@@ -320,9 +323,10 @@ VOID Oa2dpMpmAcknowledgeSuspend(OA2DP_DEVICE_CONTEXT *dev)
     WdfWaitLockAcquire(dev->PublicationLock, NULL);
     WdfSpinLockAcquire(dev->Lock);
     suspended = dev->MpmIsSuspended;
-    serial = dev->MpmSuspendRequest.Pending && dev->MpmSuspendRequest.Target == suspended
+    connection = dev->MpmSuspendConnection;
+    serial = dev->MpmSuspendRequest.Pending && dev->MpmSuspendRequest.Target == suspended &&
+        SuspendStatusCurrent(dev, suspended, connection)
         ? dev->MpmSuspendRequest.Serial : 0;
-    connection = dev->Channels[Oa2dpChannelSignaling].Life.ConnectionGeneration;
     WdfSpinLockRelease(dev->Lock);
     if (serial) (void)PublishSuspended(dev, suspended, serial, connection);
     WdfWaitLockRelease(dev->PublicationLock);

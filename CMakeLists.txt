@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(XM6Audio VERSION 0.3.37 LANGUAGES C CXX)
+project(XM6Audio VERSION 0.3.38 LANGUAGES C CXX)
 
 # The loaded binary's version must agree with the configured project and INF.
 # Generate resources in the build tree rather than keeping a stale copy.
@@ -83,9 +83,9 @@ if(OA2DP_BUILD_TESTS)
     add_test(NAME channel_open COMMAND test_channel_open)
     xm6_test_body(driver/oa2dp/mpm.c "static BOOLEAN AcquireManager("
         "\nstatic NTSTATUS NTAPI SuspendStatus(" mpm-callbacks)
-    xm6_test_body(driver/oa2dp/mpm.c "static BOOLEAN ConnectionStatusCurrent("
+    xm6_test_body(driver/oa2dp/mpm.c "NTSTATUS Oa2dpMpmConnected("
         "\nVOID Oa2dpMpmConnectFailed(" mpm-connection)
-    xm6_test_body(driver/oa2dp/mpm.c "static BOOLEAN SuspendStatusCurrent("
+    xm6_test_body(driver/oa2dp/mpm.c "static NTSTATUS PublishSuspended("
         "\nNTSTATUS Oa2dpMpmSuspended(" mpm-suspend)
     xm6_test_body(driver/oa2dp/mpm.c "VOID Oa2dpMpmAcknowledgeSuspend(" "" mpm-ack-suspend)
     xm6_test_body(driver/oa2dp/volume.c "static BOOLEAN ConnectionReady("

@@ -58,6 +58,7 @@ struct OA2DP_DEVICE_CONTEXT {
     bool MpmStopping = false, TransportStopping = false;
     bool PolicyConnected = true, PolicySuspended = false;
     bool MpmConnected = false, MpmIsSuspended = false;
+    ULONG MpmSuspendConnection = 0;
     OA2DP_MPM_REQUEST MpmRequest{}, MpmSuspendRequest{};
     ULONG PublishedConnection = 0;
     FakeEvent DisconnectedEvent;
@@ -314,7 +315,8 @@ int main() {
     reentry = Reentry::Same;
     external_status = STATUS_UNSUCCESSFUL;
     REQUIRE(suspended(d, true, d.MpmSuspendRequest.Serial) == STATUS_UNSUCCESSFUL);
-    REQUIRE(!d.MpmIsSuspended && !enqueues && d.MpmSuspendRequest.Pending);
+    REQUIRE(!d.MpmIsSuspended && d.MpmSuspendConnection == 0 && !enqueues &&
+            d.MpmSuspendRequest.Pending);
     reset(d);
     reentry = Reentry::Stop;
     REQUIRE(suspended(d, true, 0) == STATUS_SUCCESS && !enqueues);
@@ -327,6 +329,34 @@ int main() {
     reset(d);
     d.MpmCalls.Allowed = false;
     REQUIRE(suspended(d, true, 0) == STATUS_DEVICE_NOT_READY && confirmations.empty());
+
+    for (bool target : {false, true}) {
+        reset(d);
+        d.MpmIsSuspended = !target;
+        d.PolicySuspended = !target;
+        REQUIRE(SuspendRequest(&d, target) == STATUS_SUCCESS);
+        reentry = Reentry::Generation;
+        REQUIRE(suspended(d, target, d.MpmSuspendRequest.Serial) == STATUS_SUCCESS);
+        REQUIRE(d.MpmSuspendRequest.Pending && !enqueues);
+        const auto sent = confirmations.size();
+        Oa2dpMpmAcknowledgeSuspend(&d);
+        REQUIRE(d.MpmSuspendRequest.Pending && confirmations.size() == sent);
+        // A later request also cannot adopt an accepted state from link 7
+        // merely because the new link 8 has the same suspend/resume target.
+        REQUIRE(SuspendRequest(&d, target) == STATUS_SUCCESS && !enqueues);
+        REQUIRE(suspended(d, target, d.MpmSuspendRequest.Serial, 8) == STATUS_SUCCESS);
+        REQUIRE(!d.MpmSuspendRequest.Pending && d.MpmSuspendConnection == 8);
+    }
+    reset(d);
+    d.MpmIsSuspended = true; // disconnected startup baseline, not link 7's state
+    REQUIRE(SuspendRequest(&d, true) == STATUS_SUCCESS && !enqueues);
+    Oa2dpMpmAcknowledgeSuspend(&d);
+    REQUIRE(d.MpmSuspendRequest.Pending && confirmations.empty());
+    reset(d, false);
+    d.MpmIsSuspended = true;
+    REQUIRE(SuspendRequest(&d, true) == STATUS_SUCCESS && enqueues == 1);
+    Oa2dpMpmAcknowledgeSuspend(&d);
+    REQUIRE(!d.MpmSuspendRequest.Pending && d.MpmSuspendConnection == 0);
 
     reset(d);
     REQUIRE(ConnectionRequest(&d, true) == STATUS_SUCCESS && !enqueues);

@@ -1,5 +1,35 @@
 # Native lifecycle review
 
+## 0.3.38: connection-owned suspend cache, source only
+
+The suspend cache stored only MpmIsSuspended. If the signalling link changed
+during an external status update, the update's accepted boolean still came
+from the old link. A later acknowledgement worker combined that old boolean
+with the *new* signalling generation, allowing it to confirm the replacement
+link's pending suspend/resume request before the service handled that link.
+A later same-target callback could also schedule this premature confirmation.
+
+The cache now stores MpmSuspendConnection together with MpmIsSuspended under
+the transport lock, only after a successful external update. Both the policy
+callback's already-at-target check and the acknowledgement worker validate
+that cached epoch. The worker passes the cached epoch to PublishSuspended;
+it never relabels cached state with the current link. A replacement request
+stays pending until its own current service reply arrives. The disconnected
+startup baseline uses epoch zero, which remains reusable while signalling is
+closed and cannot satisfy an active link's request. Manager registration
+explicitly resets this epoch. This is internal device-context state; the
+driver/service, bus and mapped-ring contracts remain 11/5/2.
+
+The existing production-body MPM fixture was extended first. Against the
+unchanged 0.3.37 publishers it reproduced the incorrect replacement-request
+completion. The corrected production bodies pass for both suspend and resume,
+for later same-target callbacks, for a fresh current-epoch service reply and
+for active-link versus disconnected startup baselines. The full local
+driver/service build and all twelve CTest checks pass. No device operations,
+deployment, playback or reboot occurred; Windows Settings and actual audio
+remain hardware acceptance requirements. This does not make external manager
+calls atomic or establish a measured performance improvement.
+
 ## 0.3.37: policy reentry handoff and worker epoch selection, source only
 
 A status update can call back into ConnectionRequest or SuspendRequest before
