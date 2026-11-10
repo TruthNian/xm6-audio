@@ -1,5 +1,46 @@
 # Native lifecycle review
 
+## 0.3.40: coherent WaveRT packet progress, source only
+
+GetPacketCount used to call UpdatePosition, advancing the play position and
+pumping PCM, then return m_llPacketCounter that only TimerNotifyRT updated.
+A query during timer delay therefore returned stale packet progress despite
+already having copied the played samples. SetWritePacket also validated its
+packet number against that old counter, rather than refreshing RUN progress.
+
+UpdatePosition now commits frames, packet count and completion notifications
+through one locked NotifyPackets helper. Position/presentation/count queries,
+SetWritePacket and the timer use that path. The timer's duplicate count/event
+logic was deleted. A query can signal progress before the delayed timer; the
+later callback at the same position neither copies PCM again nor duplicates
+the notification. SetWritePacket refreshes progress before classifying late
+or overrun packets and rejects unknown flags and partial PCM-frame EOS lengths.
+
+Event-mode checks in SetWritePacket, GetPacketCount and presentation-position
+queries now share the position lock with FreeAudioBuffer. In particular, a
+buffer release between SetWritePacket's former mode check and lock acquisition
+could zero the notification count before its division. Stream state is also
+read/committed under that lock; timer control and control-IRP reporting remain
+outside it. The implementation retains Microsoft's [ordered SetState transitions](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/portcls/nf-portcls-iminiportwavertstream-setstate).
+
+The progress rules follow the [packet-count contract](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/portcls/nf-portcls-iminiportwavertoutputstream-getpacketcount)
+and [write-packet contract](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/portcls/nf-portcls-iminiportwavertoutputstream-setwritepacket).
+The existing cyclic-buffer catch-up bound, EOS sample limit and locked buffer
+detach before unmap were inspected and retained. No timer-frequency, buffer
+latency, codec, sample-rate or precision policy was tuned by this batch.
+
+A new fixture compiles the actual clock/pump, position/packet/state methods,
+timer callback and buffer-release bodies against fake OS/port APIs. Before
+the fix it reproduced a 30 ms position advance with a stale zero packet count.
+Corrected bodies pass delayed timer/query interleavings, one notification per
+progress update, packet validation, release between check/acquisition, polled
+mode, 44.1 kHz fractional frame accounting, 32-bit packet-number wrap, EOS pump
+clipping, and ordered pause/resume/stop reset. The full local kernel/service
+build and all thirteen CTest checks pass. Fake QPC/timer/port calls are not
+real scheduling or audible playback evidence, and no performance measurement
+or optimality claim follows. ABI remains service 11, kernel bus 6, ring 2.
+No candidate was installed and no device/player/volume/boot setting changed.
+
 ## 0.3.39: completion after unlocking and waiter admission, source only
 
 Policy callbacks were invoked under the parent's registration spin lock to

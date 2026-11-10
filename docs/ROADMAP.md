@@ -33,4 +33,6 @@ The source-only 0.3.35 batch implements PCM data-ready notification, media-wait 
 
 Source-only 0.3.39 moves policy completion outside spin locks and reconciles cancel-safe waiter insertion with production, stop and control-handle cleanup. Kernel bus ABI 6 requires both drivers together. Source fixtures validate the selected ownership rules, not Windows CSQ internals or real reconnect behavior.
 
+Source-only 0.3.40 unifies WaveRT position/count/notification progress, refreshes write-packet validation and locks buffer-mode/state checks. Delayed-timer, wrap, polled-mode and pause/resume fixtures do not replace actual Windows scheduling or audible playback tests.
+
 The inherited [SPEC.md](SPEC.md) is a protocol requirement catalogue, not proof of current hardware compatibility. The status table in the README and this acceptance list describe the current fork.

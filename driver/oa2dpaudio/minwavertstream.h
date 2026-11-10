@@ -60,6 +60,7 @@ private:
     ULONGLONG RunningHns(_In_ LARGE_INTEGER Qpc);
     VOID UpdatePosition(_In_ LARGE_INTEGER Qpc);
     VOID Pump(_In_ ULONGLONG ToFrame);
+    VOID NotifyPackets();
 
     PCMiniportWaveRT            m_pMiniport;
     OA2DP_AUDIO_DEVICE         *m_Device;

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(XM6Audio VERSION 0.3.39 LANGUAGES C CXX)
+project(XM6Audio VERSION 0.3.40 LANGUAGES C CXX)
 
 # The loaded binary's version must agree with the configured project and INF.
 # Generate resources in the build tree rather than keeping a stale copy.
@@ -113,6 +113,18 @@ if(OA2DP_BUILD_TESTS)
     add_executable(test_mpm_publication tools/test-mpm-publication.cpp)
     target_include_directories(test_mpm_publication PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
     add_test(NAME mpm_publication COMMAND test_mpm_publication)
+    xm6_test_body(driver/oa2dpaudio/minwavertstream.cpp "static ULONGLONG HnsToFrames("
+        "\n//=============================================================================\n#pragma code_seg(\"PAGE\")\nCMiniportWaveRTStream::~" wavert-time)
+    xm6_test_body(driver/oa2dpaudio/minwavertstream.cpp "ULONGLONG CMiniportWaveRTStream::RunningHns("
+        "\n//=============================================================================\n#pragma code_seg()\nSTDMETHODIMP_(NTSTATUS)\nCMiniportWaveRTStream::GetPosition\n(" wavert-clock)
+    xm6_test_body(driver/oa2dpaudio/minwavertstream.cpp "STDMETHODIMP_(NTSTATUS)\nCMiniportWaveRTStream::GetPosition\n("
+        "\n//=============================================================================\n#pragma code_seg(\"PAGE\")\nSTDMETHODIMP_(NTSTATUS)\nCMiniportWaveRTStream::SetFormat" wavert-methods)
+    xm6_test_body(driver/oa2dpaudio/minwavertstream.cpp "STDMETHODIMP_(VOID)\nCMiniportWaveRTStream::FreeAudioBuffer"
+        "\n//=============================================================================\n#pragma code_seg()\nSTDMETHODIMP_(NTSTATUS)\nCMiniportWaveRTStream::AllocateAudioBuffer" wavert-free)
+    xm6_test_body(driver/oa2dpaudio/minwavertstream.cpp "void\nTimerNotifyRT\n(" "" wavert-timer)
+    add_executable(test_wavert_clock tools/test-wavert-clock.cpp)
+    target_include_directories(test_wavert_clock PRIVATE "${CMAKE_CURRENT_BINARY_DIR}" core/include)
+    add_test(NAME wavert_clock COMMAND test_wavert_clock)
     xm6_test_body(driver/oa2dpaudio/ring.c "NTSTATUS Oa2dpRingSetDataEvent(" "" pcm-notification)
     add_executable(test_pcm_notification tools/test-pcm-notification.cpp)
     target_include_directories(test_pcm_notification PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")

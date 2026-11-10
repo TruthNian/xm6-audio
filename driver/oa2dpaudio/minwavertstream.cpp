@@ -520,6 +520,28 @@ VOID CMiniportWaveRTStream::Pump(_In_ ULONGLONG ToFrame)
 }
 
 #pragma code_seg()
+VOID CMiniportWaveRTStream::NotifyPackets()
+{
+    if (!m_ulNotificationsPerBuffer || !m_ulBlockAlign)
+        return;
+    const ULONGLONG packetFrames =
+        (m_ulDmaBufferSize / m_ulNotificationsPerBuffer) / m_ulBlockAlign;
+    if (!packetFrames)
+        return;
+    const LONGLONG packets = (LONGLONG)(m_ullLinearFrames / packetFrames);
+    if (packets <= m_llPacketCounter)
+        return;
+    m_llPacketCounter = packets;
+    // Position queries and the timer share this commit. A query can advance
+    // progress before a delayed timer; it must not leave count/events stale.
+    for (PLIST_ENTRY le = m_NotificationList.Flink; le != &m_NotificationList; le = le->Flink)
+    {
+        NotificationListEntry *entry = CONTAINING_RECORD(le, NotificationListEntry, ListEntry);
+        KeSetEvent(entry->NotificationEvent, 0, FALSE);
+    }
+}
+
+#pragma code_seg()
 VOID CMiniportWaveRTStream::UpdatePosition(_In_ LARGE_INTEGER Qpc)
 {
     ULONGLONG frames = HnsToFrames(RunningHns(Qpc), m_Format.SampleRate);
@@ -532,6 +554,7 @@ VOID CMiniportWaveRTStream::UpdatePosition(_In_ LARGE_INTEGER Qpc)
     // are "played", i.e. handed to the service.
     Pump(frames);
     m_ullLinearFrames = frames;
+    NotifyPackets();
 }
 
 //=============================================================================
@@ -576,13 +599,19 @@ CMiniportWaveRTStream::SetWritePacket
     KIRQL oldIrql;
     NTSTATUS ntStatus = STATUS_SUCCESS;
 
-    // The call must be from event driven mode
+    KeAcquireSpinLock(&m_PositionSpinLock, &oldIrql);
+    // Check mode and buffer lifetime under the same lock as FreeAudioBuffer.
     if (m_ulNotificationsPerBuffer == 0)
     {
-        return STATUS_NOT_SUPPORTED;
+        ntStatus = STATUS_NOT_SUPPORTED;
+        goto Done;
     }
-
-    KeAcquireSpinLock(&m_PositionSpinLock, &oldIrql);
+    if (!m_ulBlockAlign || !m_pDmaBuffer ||
+        m_ulDmaBufferSize / m_ulNotificationsPerBuffer < m_ulBlockAlign)
+    {
+        ntStatus = STATUS_INVALID_DEVICE_STATE;
+        goto Done;
+    }
 
     // This function should not be called once EoS has been set.
     if (m_bEoSReceived)
@@ -590,6 +619,13 @@ CMiniportWaveRTStream::SetWritePacket
         ntStatus = STATUS_INVALID_DEVICE_STATE;
         goto Done;
     }
+    if (Flags & ~KSSTREAM_HEADER_OPTIONSF_ENDOFSTREAM)
+    {
+        ntStatus = STATUS_INVALID_PARAMETER;
+        goto Done;
+    }
+    if (m_KsState == KSSTATE_RUN)
+        UpdatePosition(KeQueryPerformanceCounter(NULL));
 
     {
         // 1-based count of completed packets, 0-based packet number of
@@ -612,7 +648,7 @@ CMiniportWaveRTStream::SetWritePacket
 
         if (Flags & KSSTREAM_HEADER_OPTIONSF_ENDOFSTREAM)
         {
-            if (EosPacketLength > packetSize)
+            if (EosPacketLength > packetSize || EosPacketLength % m_ulBlockAlign)
             {
                 ntStatus = STATUS_INVALID_PARAMETER;
                 goto Done;
@@ -645,13 +681,14 @@ CMiniportWaveRTStream::GetOutputStreamPresentationPosition
 
     ASSERT (pPresentationPosition);
 
-    // The call must be from event driven mode
+    KeAcquireSpinLock(&m_PositionSpinLock, &oldIrql);
+    // The call must be from event driven mode. Buffer release uses this lock.
     if (m_ulNotificationsPerBuffer == 0)
     {
+        KeReleaseSpinLock(&m_PositionSpinLock, oldIrql);
         return STATUS_NOT_SUPPORTED;
     }
 
-    KeAcquireSpinLock(&m_PositionSpinLock, &oldIrql);
     qpc = KeQueryPerformanceCounter(NULL);
     if (m_KsState == KSSTATE_RUN)
     {
@@ -682,13 +719,14 @@ CMiniportWaveRTStream::GetPacketCount
 
     ASSERT(pPacketCount);
 
-    // The call must be from event driven mode
+    KeAcquireSpinLock(&m_PositionSpinLock, &oldIrql);
+    // The call must be from event driven mode. Buffer release uses this lock.
     if (m_ulNotificationsPerBuffer == 0)
     {
+        KeReleaseSpinLock(&m_PositionSpinLock, oldIrql);
         return STATUS_NOT_SUPPORTED;
     }
 
-    KeAcquireSpinLock(&m_PositionSpinLock, &oldIrql);
     if (m_KsState == KSSTATE_RUN)
     {
         UpdatePosition(KeQueryPerformanceCounter(NULL));
@@ -709,12 +747,12 @@ CMiniportWaveRTStream::SetState
 {
     KIRQL oldIrql;
     LARGE_INTEGER qpc;
-    BOOLEAN wasRunning = (m_KsState == KSSTATE_RUN);
+    KeAcquireSpinLock(&m_PositionSpinLock, &oldIrql);
+    const BOOLEAN wasRunning = (m_KsState == KSSTATE_RUN);
 
     switch (State_)
     {
         case KSSTATE_STOP:
-            KeAcquireSpinLock(&m_PositionSpinLock, &oldIrql);
             // Reset DMA
             m_llPacketCounter = 0;
             m_ullLinearFrames = 0;
@@ -724,8 +762,6 @@ CMiniportWaveRTStream::SetState
             m_ulLastOsWritePacket = ULONG_MAX;
             m_bEoSReceived = FALSE;
             m_ullEosFrame = 0;
-            m_KsState = KSSTATE_STOP;
-            KeReleaseSpinLock(&m_PositionSpinLock, oldIrql);
             break;
 
         case KSSTATE_ACQUIRE:
@@ -735,18 +771,10 @@ CMiniportWaveRTStream::SetState
             if (wasRunning)
             {
                 // Run -> Pause: account the frames played so far, then stop
-                // the timer (its callback sees the new state and returns).
-                KeAcquireSpinLock(&m_PositionSpinLock, &oldIrql);
+                // the timer after committing the new state below.
                 qpc = KeQueryPerformanceCounter(NULL);
                 UpdatePosition(qpc);
                 m_hnsRunBase = RunningHns(qpc);
-                m_KsState = KSSTATE_PAUSE;
-                KeReleaseSpinLock(&m_PositionSpinLock, oldIrql);
-
-                ExCancelTimer(m_pNotificationTimer, NULL);
-
-                Oa2dpRingSetRunning(&m_Device->Ring, FALSE);
-                Oa2dpReportStream(m_Device, &m_Format, FALSE);
             }
             break;
 
@@ -754,28 +782,32 @@ CMiniportWaveRTStream::SetState
             if (!wasRunning)
             {
                 // Start DMA
-                KeAcquireSpinLock(&m_PositionSpinLock, &oldIrql);
                 m_RunStartQpc = KeQueryPerformanceCounter(&m_PerfFrequency);
-                m_KsState = KSSTATE_RUN;
-                KeReleaseSpinLock(&m_PositionSpinLock, oldIrql);
-
-                // 1 ms timer, like SYSVAD's hardware emulation: it pumps the
-                // ring and sends the buffer-completion events.
-                ExSetTimer
-                (
-                    m_pNotificationTimer,
-                    (-1) * OA2DP_HNS_PER_MS,
-                    OA2DP_HNS_PER_MS,
-                    NULL
-                );
-
-                Oa2dpRingSetRunning(&m_Device->Ring, TRUE);
-                Oa2dpReportStream(m_Device, &m_Format, TRUE);
             }
             break;
+        default:
+            KeReleaseSpinLock(&m_PositionSpinLock, oldIrql);
+            return STATUS_INVALID_PARAMETER;
     }
 
     m_KsState = State_;
+    KeReleaseSpinLock(&m_PositionSpinLock, oldIrql);
+    // PortCls calls ordered transitions at PASSIVE_LEVEL. Keep state under
+    // the timer's lock, but publish/complete control IRPs only after unlocking.
+    if (wasRunning && State_ != KSSTATE_RUN)
+    {
+        ExCancelTimer(m_pNotificationTimer, NULL);
+        Oa2dpRingSetRunning(&m_Device->Ring, FALSE);
+        Oa2dpReportStream(m_Device, &m_Format, FALSE);
+    }
+    else if (!wasRunning && State_ == KSSTATE_RUN)
+    {
+        // 1 ms software hardware-emulation timer; notification cadence comes
+        // from actual packet progress, including intervening position queries.
+        ExSetTimer(m_pNotificationTimer, -(LONGLONG)OA2DP_HNS_PER_MS, OA2DP_HNS_PER_MS, NULL);
+        Oa2dpRingSetRunning(&m_Device->Ring, TRUE);
+        Oa2dpReportStream(m_Device, &m_Format, TRUE);
+    }
     return STATUS_SUCCESS;
 }
 
@@ -802,8 +834,6 @@ TimerNotifyRT
     _In_opt_  PVOID        DeferredContext
 )
 {
-    BOOLEAN bufferCompleted = FALSE;
-
     UNREFERENCED_PARAMETER(Timer);
 
     _IRQL_limited_to_(DISPATCH_LEVEL);
@@ -818,39 +848,8 @@ TimerNotifyRT
     KIRQL oldIrql;
     KeAcquireSpinLock(&_this->m_PositionSpinLock, &oldIrql);
 
-    if (_this->m_KsState != KSSTATE_RUN)
-    {
-        goto End;
-    }
-
-    _this->UpdatePosition(KeQueryPerformanceCounter(NULL));
-
-    // Send a buffer completion event each time a whole packet was played.
-    if (_this->m_ulNotificationsPerBuffer != 0)
-    {
-        ULONGLONG packetFrames =
-            (_this->m_ulDmaBufferSize / _this->m_ulNotificationsPerBuffer) / _this->m_ulBlockAlign;
-        if (packetFrames != 0)
-        {
-            LONGLONG packets = (LONGLONG)(_this->m_ullLinearFrames / packetFrames);
-            if (packets > _this->m_llPacketCounter)
-            {
-                _this->m_llPacketCounter = packets;
-                bufferCompleted = TRUE;
-            }
-        }
-    }
-
-    if (bufferCompleted)
-    {
-        for (PLIST_ENTRY le = _this->m_NotificationList.Flink; le != &_this->m_NotificationList; le = le->Flink)
-        {
-            NotificationListEntry* nleCurrent = CONTAINING_RECORD(le, NotificationListEntry, ListEntry);
-            KeSetEvent(nleCurrent->NotificationEvent, 0, 0);
-        }
-    }
-
-End:
+    if (_this->m_KsState == KSSTATE_RUN)
+        _this->UpdatePosition(KeQueryPerformanceCounter(NULL));
     KeReleaseSpinLock(&_this->m_PositionSpinLock, oldIrql);
     return;
 }
