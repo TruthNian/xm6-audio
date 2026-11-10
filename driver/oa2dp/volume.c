@@ -43,7 +43,7 @@ static BOOLEAN ConnectionClosed(OA2DP_DEVICE_CONTEXT *dev)
 
 /* PublicationLock serializes external calls; never hold the channel spin lock
  * across registry/MPM calls, which may block or call profile policy back. */
-static NTSTATUS PublishState(OA2DP_DEVICE_CONTEXT *dev, BOOLEAN connected)
+static NTSTATUS PublishState(OA2DP_DEVICE_CONTEXT *dev, BOOLEAN connected, ULONG connection)
 {
     NTSTATUS result = STATUS_SUCCESS;
     const DEVPROP_BOOLEAN value = connected ? DEVPROP_TRUE : DEVPROP_FALSE;
@@ -68,7 +68,7 @@ static NTSTATUS PublishState(OA2DP_DEVICE_CONTEXT *dev, BOOLEAN connected)
     // devnode-only value; the native contract belongs to the audio interface.
     (void)IoSetDevicePropertyData(WdfDeviceWdmGetPhysicalDevice(dev->Device),
         &AvdtpConnectedKey, LOCALE_NEUTRAL, 0, DEVPROP_TYPE_EMPTY, 0, NULL);
-    NTSTATUS status = Oa2dpMpmConnected(dev, connected);
+    NTSTATUS status = Oa2dpMpmConnected(dev, connected, connection);
     if (!NT_SUCCESS(status)) {
         if (NT_SUCCESS(result)) result = status;
         KdPrintEx((DPFLTR_IHVDRIVER_ID, DPFLTR_WARNING_LEVEL,
@@ -103,7 +103,7 @@ NTSTATUS Oa2dpPublishConnected(OA2DP_DEVICE_CONTEXT *dev, BOOLEAN connected, ULO
         return status;
     }
 
-    status = PublishState(dev, connected);
+    status = PublishState(dev, connected, connection);
     WdfSpinLockAcquire(dev->Lock);
     valid = connected ? ConnectionReady(dev, connection) : ConnectionClosed(dev);
     if (connected && (!valid || !NT_SUCCESS(status))) {
@@ -111,7 +111,7 @@ NTSTATUS Oa2dpPublishConnected(OA2DP_DEVICE_CONTEXT *dev, BOOLEAN connected, ULO
         // a replacement TRUE publisher through this passive serialization.
         dev->PublishedConnection = 0;
         WdfSpinLockRelease(dev->Lock);
-        NTSTATUS repair = PublishState(dev, FALSE);
+        NTSTATUS repair = PublishState(dev, FALSE, 0);
         if (!NT_SUCCESS(repair)) status = repair;
         else if (NT_SUCCESS(status)) status = STATUS_DEVICE_NOT_READY;
         WdfSpinLockAcquire(dev->Lock);

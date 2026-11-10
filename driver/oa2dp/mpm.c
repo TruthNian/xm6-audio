@@ -42,6 +42,12 @@ static NTSTATUS NTAPI ConnectionRequest(PVOID context, ULONG connect)
     } else {
         dev->PolicyConnected = enabled;
         serial = Oa2dpMpmBeginRequest(&dev->MpmRequest, enabled);
+        OA2DP_CHANNEL_LIFECYCLE *signal = &dev->Channels[Oa2dpChannelSignaling].Life;
+        // A manager request can adopt an automatic OPEN already in flight.
+        // A closing old connection cannot satisfy a later reconnect request.
+        if (enabled && !signal->CloseRequested &&
+            (signal->State == ChannelOpening || signal->State == ChannelOpen))
+            Oa2dpMpmBindAttempt(&dev->MpmRequest, signal->Generation);
         if (!enabled) KeClearEvent(&dev->DisconnectedEvent);
         if (dev->AudioPolicyRequest)
             status = dev->AudioPolicyRequest(dev->AudioContext, enabled, dev->PolicySuspended,
@@ -150,17 +156,30 @@ NTSTATUS Oa2dpMpmRequestConnection(PVOID context, BOOLEAN enabled)
     OA2DP_DEVICE_CONTEXT *dev = context;
     NTSTATUS status;
     if (!AcquireManager(dev)) return STATUS_DEVICE_NOT_READY;
-    // A pending automatic OPEN may precede MPM's connected state. Explicit
-    // user disconnect must latch local policy even if MPM has no live profile
-    // transition to call back for yet. Coordination still goes through MPM.
-    if (!enabled) {
-        status = ConnectionRequest(dev, FALSE);
-        if (!NT_SUCCESS(status)) {
-            ExReleaseRundownProtection(&dev->MpmCalls);
-            return status;
-        }
-    }
+    ULONG revision;
+    WdfSpinLockAcquire(dev->Lock);
+    revision = Oa2dpMpmAdvancePolicy(&dev->MpmRequest);
+    WdfSpinLockRelease(dev->Lock);
     status = BtaMpmConnectionRequest(dev->MpmHandle, enabled, 0);
+    if (NT_SUCCESS(status)) {
+        WdfSpinLockAcquire(dev->Lock);
+        if (dev->MpmStopping) {
+            status = STATUS_DELETE_PENDING;
+        } else if (Oa2dpMpmFallbackPolicy(&dev->MpmRequest, revision, enabled)) {
+            // MPM can accept an already-at-target request without a callback.
+            // Apply either direction, but never synthesize a requested reply
+            // before MPM has actually issued its operation.
+            dev->PolicyConnected = enabled;
+            if (!enabled && !Oa2dpConnectionClosed(
+                &dev->Channels[Oa2dpChannelSignaling].Life,
+                &dev->Channels[Oa2dpChannelMedia].Life))
+                KeClearEvent(&dev->DisconnectedEvent);
+            if (dev->AudioPolicyRequest)
+                status = dev->AudioPolicyRequest(dev->AudioContext, enabled,
+                    dev->PolicySuspended, dev->MpmSuspendRequest.Serial);
+        }
+        WdfSpinLockRelease(dev->Lock);
+    }
     ExReleaseRundownProtection(&dev->MpmCalls);
     TraceLoggingWrite(g_Oa2dpTransportTrace, "ConnectionRequestResult",
         TraceLoggingBool(enabled, "Connect"),
@@ -169,21 +188,31 @@ NTSTATUS Oa2dpMpmRequestConnection(PVOID context, BOOLEAN enabled)
     return NT_SUCCESS(status) ? STATUS_SUCCESS : status;
 }
 
-NTSTATUS Oa2dpMpmConnected(OA2DP_DEVICE_CONTEXT *dev, BOOLEAN connected)
+NTSTATUS Oa2dpMpmConnected(OA2DP_DEVICE_CONTEXT *dev, BOOLEAN connected, ULONG connection)
 {
     NTSTATUS status;
     ULONG serial;
     if (!AcquireManager(dev))
         return !connected && !dev->MpmHandle ? STATUS_SUCCESS : STATUS_DEVICE_NOT_READY;
     WdfSpinLockAcquire(dev->Lock);
-    serial = Oa2dpMpmCompletion(&dev->MpmRequest, connected);
+    const BOOLEAN settled = connected ? (BOOLEAN)Oa2dpConnectionReady(
+        &dev->Channels[Oa2dpChannelSignaling].Life, &dev->Channels[Oa2dpChannelMedia].Life,
+        connection, dev->PolicyConnected, dev->TransportStopping || dev->MpmStopping)
+        : (BOOLEAN)Oa2dpConnectionClosed(&dev->Channels[Oa2dpChannelSignaling].Life,
+                                       &dev->Channels[Oa2dpChannelMedia].Life);
+    serial = Oa2dpMpmConnectionCompletion(&dev->MpmRequest, connected, settled);
     WdfSpinLockRelease(dev->Lock);
+    if (connected && !settled) {
+        ExReleaseRundownProtection(&dev->MpmCalls);
+        return STATUS_DEVICE_NOT_READY;
+    }
     // Observed inbox distinction: peer indications pass 0, requested
     // confirmations pass 1. The last argument is not a generic "notify" flag.
     status = BtaMpmUpdateConnectionStatus(dev->MpmHandle, connected, serial != 0);
     ExReleaseRundownProtection(&dev->MpmCalls);
     TraceLoggingWrite(g_Oa2dpTransportTrace, "ConnectionStatusResult",
         TraceLoggingUInt32(serial, "RequestSerial"),
+        TraceLoggingBool(settled, "StateSettled"),
         TraceLoggingBool(connected, "Connected"),
         TraceLoggingNTStatus(status, "Status"));
     if (!NT_SUCCESS(status)) return status;
@@ -195,11 +224,11 @@ NTSTATUS Oa2dpMpmConnected(OA2DP_DEVICE_CONTEXT *dev, BOOLEAN connected)
     return status;
 }
 
-VOID Oa2dpMpmOpenFailed(OA2DP_DEVICE_CONTEXT *dev, ULONG policySerial)
+VOID Oa2dpMpmConnectFailed(OA2DP_DEVICE_CONTEXT *dev, ULONG generation)
 {
     BOOLEAN publish;
     WdfSpinLockAcquire(dev->Lock);
-    publish = (BOOLEAN)Oa2dpMpmFailConnect(&dev->MpmRequest, policySerial);
+    publish = (BOOLEAN)Oa2dpMpmFailConnect(&dev->MpmRequest, generation);
     WdfSpinLockRelease(dev->Lock);
     // A requested connect that fails must also finish its MPM operation.
     // The worker still validates actual closed channels before publishing.

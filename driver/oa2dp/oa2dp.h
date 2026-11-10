@@ -126,7 +126,6 @@ typedef struct _OA2DP_REQUEST_CONTEXT {
     OA2DP_CHANNEL *Channel;
     ULONG Bytes;
     ULONG Generation;
-    ULONG PolicySerial;      /* owning Windows connect request, if any */
     WDFREQUEST UserRequest;   /* exact outgoing caller; never a replacement channel's request */
 } OA2DP_REQUEST_CONTEXT;
 
@@ -189,8 +188,8 @@ NTSTATUS Oa2dpPublishConnected(_In_ OA2DP_DEVICE_CONTEXT *dev, _In_ BOOLEAN conn
 NTSTATUS Oa2dpMpmStart(OA2DP_DEVICE_CONTEXT *dev);
 VOID Oa2dpMpmStop(OA2DP_DEVICE_CONTEXT *dev);
 NTSTATUS Oa2dpMpmRequestConnection(PVOID context, BOOLEAN enabled);
-NTSTATUS Oa2dpMpmConnected(OA2DP_DEVICE_CONTEXT *dev, BOOLEAN connected);
-VOID Oa2dpMpmOpenFailed(OA2DP_DEVICE_CONTEXT *dev, ULONG policySerial);
+NTSTATUS Oa2dpMpmConnected(OA2DP_DEVICE_CONTEXT *dev, BOOLEAN connected, ULONG connection);
+VOID Oa2dpMpmConnectFailed(OA2DP_DEVICE_CONTEXT *dev, ULONG generation);
 VOID Oa2dpMpmPlaying(PVOID context, BOOLEAN playing);
 NTSTATUS Oa2dpMpmSuspended(PVOID context, BOOLEAN suspended, ULONG requestSerial,
                           ULONG connection);

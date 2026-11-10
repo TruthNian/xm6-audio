@@ -396,7 +396,6 @@ VOID Oa2dpOpenChannel(_In_ OA2DP_DEVICE_CONTEXT *dev, _In_ WDFREQUEST request,
     WDF_OBJECT_ATTRIBUTES attrs;
     NTSTATUS status;
     ULONG generation;
-    ULONG policySerial = 0;
     USHORT mtu = in->InMtu ? in->InMtu
                            : (in->Kind == Oa2dpChannelMedia ? OA2DP_DEFAULT_MEDIA_MTU
                                                             : OA2DP_DEFAULT_SIGNALING_MTU);
@@ -421,8 +420,8 @@ VOID Oa2dpOpenChannel(_In_ OA2DP_DEVICE_CONTEXT *dev, _In_ WDFREQUEST request,
     KeClearEvent(&dev->DisconnectedEvent);
     ch->Life.ConnectionGeneration = ch->Kind == Oa2dpChannelSignaling
         ? generation : dev->Channels[Oa2dpChannelSignaling].Life.Generation;
-    if (ch->Kind == Oa2dpChannelSignaling && dev->MpmRequest.Pending && dev->MpmRequest.Target)
-        policySerial = dev->MpmRequest.Serial;
+    if (ch->Kind == Oa2dpChannelSignaling)
+        Oa2dpMpmBindAttempt(&dev->MpmRequest, generation);
     WdfSpinLockRelease(dev->Lock);
 
     brb = (struct _BRB_L2CA_OPEN_CHANNEL *)dev->Profile.BthAllocateBrb(BRB_L2CA_OPEN_CHANNEL,
@@ -446,7 +445,6 @@ VOID Oa2dpOpenChannel(_In_ OA2DP_DEVICE_CONTEXT *dev, _In_ WDFREQUEST request,
     Oa2dpGetRequest(lower)->Brb = (struct _BRB *)brb;
     Oa2dpGetRequest(lower)->Channel = ch;
     Oa2dpGetRequest(lower)->Generation = generation;
-    Oa2dpGetRequest(lower)->PolicySerial = policySerial;
     Oa2dpGetRequest(lower)->UserRequest = request;
     status = SubmitBrbAsync(dev, lower, (struct _BRB *)brb, sizeof(*brb), OpenDone, dev, 8000);
     if (status != STATUS_PENDING) {
@@ -461,7 +459,8 @@ fail:
     (void)Oa2dpChannelFinishOpen(&ch->Life, generation, FALSE);
     KeSetEvent(&ch->OpenFinished, IO_NO_INCREMENT, FALSE);
     WdfSpinLockRelease(dev->Lock);
-    Oa2dpMpmOpenFailed(dev, policySerial);
+    if (ch->Kind == Oa2dpChannelSignaling)
+        Oa2dpMpmConnectFailed(dev, generation);
     WdfRequestComplete(request, status);
 }
 
@@ -498,7 +497,7 @@ static void OpenDone(_In_ WDFREQUEST Lower, _In_ WDFIOTARGET Target,
     if (current) KeSetEvent(&ch->OpenFinished, IO_NO_INCREMENT, FALSE);
     WdfSpinLockRelease(dev->Lock);
     if (current && !NT_SUCCESS(status) && ch->Kind == Oa2dpChannelSignaling)
-        Oa2dpMpmOpenFailed(dev, rc->PolicySerial);
+        Oa2dpMpmConnectFailed(dev, rc->Generation);
     if (!current) status = STATUS_CANCELLED;
     if (close) {
         WdfWorkItemEnqueue(ch->CloseWork);
@@ -609,6 +608,11 @@ static NTSTATUS CloseChannelGeneration(OA2DP_DEVICE_CONTEXT *dev,
             Oa2dpQueueEventLocked(dev, Oa2dpEventChannelClosed, ch, generation);
     }
     WdfSpinLockRelease(dev->Lock);
+    // Failure can occur after signalling OPEN (for example SEP negotiation).
+    // Closing that exact, still-unaccepted attempt must finish its connect
+    // operation too. A replacement request cannot own this old generation.
+    if (closed && kind == Oa2dpChannelSignaling)
+        Oa2dpMpmConnectFailed(dev, generation);
     if (closed && expectedGeneration) Oa2dpDeliverEvents(dev);
     if (closed) status = STATUS_SUCCESS;
     /* The caller already knows a local close completed. Only the remote

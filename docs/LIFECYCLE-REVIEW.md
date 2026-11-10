@@ -1,4 +1,43 @@
-# Native lifecycle review, 0.3.32
+# Native lifecycle review
+
+## 0.3.33: request ownership corrections, source only
+
+The user confirmed that the Windows connection label and per-device
+Disconnect/Connect are still incorrect on 0.3.32 after restarting Windows.
+That build did establish native LDAC playback again. Further headset testing
+is unavailable; this batch has not been installed or hardware-accepted.
+
+The source review found three incorrect request boundaries:
+
+- The KS handler called the MPM connection callback itself before asking
+  Windows to start a disconnect. This could create a requested-operation
+  confirmation before Windows had issued that operation. Connect also lacked
+  the local fallback when Windows elides an already-at-target callback.
+  The handler now asks MPM first and applies fallback intent only if no
+  callback or newer caller superseded its policy revision. Fallback does not
+  fabricate a pending manager operation.
+- An automatic signalling OPEN could precede the Windows connect callback.
+  Its completion retained the old callback serial, so failure could leave
+  the adopted request pending. Ownership now follows the exact signalling
+  generation. Closing an adopted connection before readiness, including a
+  failed SEP negotiation, also reports failure. A closing old generation is
+  not adopted by a later reconnect.
+- Repair of a stale TRUE publication called the FALSE publisher while
+  channels could still be draining. FALSE may withdraw readiness, but it
+  cannot complete Disconnect until both channels are closed. Confirmation
+  now checks that boundary. TRUE is also revalidated against its generation
+  and policy immediately before the external MPM update.
+
+The shared lifecycle checks exercise callback omission, callback/API-return
+ordering, adoption of an in-flight OPEN, replaced generations, negotiation
+failure, readiness withdrawal during close, and revision wrap. Both drivers
+and the service build locally; all six CTest checks pass, including linked
+descriptor verification. These checks do not execute Windows' private MPM
+implementation or establish that Settings' label/button problem is fixed.
+There is still a gap between the checked snapshot and an external MPM call;
+the code does not claim that call is atomic with an asynchronous callback.
+
+## 0.3.32 activation and earlier review
 
 This source batch is not a declaration of hardware acceptance. Versions 0.3.23
 through 0.3.30 were not installed. A controlled 0.3.31 hot-binding trial returned

@@ -65,6 +65,60 @@ static void data_and_publication_boundaries()
     REQUIRE(!Oa2dpConnectionReady(&signal, &media, replacement, 1, 0)); // mismatched pair
 }
 
+static void connection_request_handoffs()
+{
+    OA2DP_MPM_REQUEST r{};
+    // A locally issued KS Disconnect is not itself an MPM callback. There is
+    // nothing to acknowledge before, or in the absence of, the real callback.
+    auto local = Oa2dpMpmAdvancePolicy(&r);
+    REQUIRE(Oa2dpMpmFallbackPolicy(&r, local, 0));
+    REQUIRE(!r.Pending && !Oa2dpMpmCompletion(&r, 0));
+    auto next = Oa2dpMpmAdvancePolicy(&r);
+    REQUIRE(!Oa2dpMpmFallbackPolicy(&r, local, 0)); // delayed old API return
+    REQUIRE(Oa2dpMpmFallbackPolicy(&r, next, 1)); // Connect also needs fallback
+    auto connect = Oa2dpMpmBeginRequest(&r, 1);
+    REQUIRE(!Oa2dpMpmFallbackPolicy(&r, next, 0)); // synchronous callback wins
+
+    // Automatic OPEN 17 preceded Windows' connect callback. The callback
+    // adopts that exact attempt; its failure must finish the current request.
+    Oa2dpMpmBindAttempt(&r, 17);
+    REQUIRE(!Oa2dpMpmFailConnect(&r, 16));
+    REQUIRE(Oa2dpMpmFailConnect(&r, 17));
+    REQUIRE(!Oa2dpMpmConnectionCompletion(&r, 0, 0)); // still draining media
+    REQUIRE(Oa2dpMpmConnectionCompletion(&r, 0, 1) == connect);
+
+    // A later request can adopt the same in-flight attempt. Ownership follows
+    // the real attempt, not the obsolete serial captured when OPEN was sent.
+    connect = Oa2dpMpmBeginRequest(&r, 1);
+    Oa2dpMpmBindAttempt(&r, 17);
+    REQUIRE(Oa2dpMpmFailConnect(&r, 17));
+    REQUIRE(Oa2dpMpmConnectionCompletion(&r, 0, 1) == connect);
+    auto disconnect = Oa2dpMpmBeginRequest(&r, 0);
+    REQUIRE(!Oa2dpMpmFailConnect(&r, 17));
+    // A stale TRUE publication is withdrawn while Disconnect is still closing.
+    // FALSE is an indication until the last physical channel is closed.
+    REQUIRE(!Oa2dpMpmConnectionCompletion(&r, 0, 0));
+    REQUIRE(r.Pending);
+    REQUIRE(Oa2dpMpmConnectionCompletion(&r, 0, 1) == disconnect);
+    REQUIRE(Oa2dpMpmFinishRequest(&r, disconnect));
+
+    connect = Oa2dpMpmBeginRequest(&r, 1);
+    REQUIRE(!Oa2dpMpmFailConnect(&r, 17)); // closing old link was not adopted
+    Oa2dpMpmBindAttempt(&r, 18);
+    REQUIRE(!Oa2dpMpmFailConnect(&r, 17)); // late failure of replaced epoch
+    REQUIRE(!Oa2dpMpmConnectionCompletion(&r, 1, 0)); // stale readiness
+    REQUIRE(Oa2dpMpmConnectionCompletion(&r, 1, 1) == connect);
+    // Signalling opened, but SEP negotiation then failed. Closing attempt 18
+    // is also a failed connect, rather than an indefinitely pending request.
+    REQUIRE(Oa2dpMpmFailConnect(&r, 18));
+    REQUIRE(Oa2dpMpmConnectionCompletion(&r, 0, 1) == connect);
+    local = Oa2dpMpmAdvancePolicy(&r);
+    REQUIRE(Oa2dpMpmFallbackPolicy(&r, local, 0));
+    REQUIRE(!r.Pending && !Oa2dpMpmCompletion(&r, 0));
+    r.PolicyRevision = UINT32_MAX;
+    REQUIRE(Oa2dpMpmAdvancePolicy(&r) == 1);
+}
+
 struct FakeServer {
     int32_t register_server = 0, register_psm = 0, unregister_server = 0, unregister_psm = 0;
     std::vector<int> calls;
@@ -154,16 +208,18 @@ int main()
     radio_event[10] = 0;
     REQUIRE(!Oa2dpAclConnectHint(radio_event + 1, 10, peer)); // old disconnect never tears down a new epoch
     server_ownership_failures();
+    connection_request_handoffs();
     OA2DP_MPM_REQUEST request{};
     REQUIRE(!Oa2dpMpmCompletion(&request, 1)); // unsolicited peer connection
     auto connect = Oa2dpMpmBeginRequest(&request, 1);
     REQUIRE(!Oa2dpMpmCompletion(&request, 0)); // baseline FALSE is not connect failure
     REQUIRE(Oa2dpMpmCompletion(&request, 1) == connect);
-    REQUIRE(!Oa2dpMpmFailConnect(&request, connect + 1));
-    REQUIRE(Oa2dpMpmFailConnect(&request, connect));
+    Oa2dpMpmBindAttempt(&request, 41);
+    REQUIRE(!Oa2dpMpmFailConnect(&request, 42));
+    REQUIRE(Oa2dpMpmFailConnect(&request, 41));
     REQUIRE(Oa2dpMpmCompletion(&request, 0) == connect); // actual failed requested OPEN
     auto disconnect = Oa2dpMpmBeginRequest(&request, 0);
-    REQUIRE(!Oa2dpMpmFailConnect(&request, connect)); // late OPEN failure
+    REQUIRE(!Oa2dpMpmFailConnect(&request, 41)); // late OPEN failure
     REQUIRE(Oa2dpMpmCompletion(&request, 0) == disconnect);
     connect = Oa2dpMpmBeginRequest(&request, 1); // reentrant policy during external call
     REQUIRE(!Oa2dpMpmFinishRequest(&request, disconnect));
