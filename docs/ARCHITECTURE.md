@@ -56,5 +56,6 @@ LDAC encode calls consume 128 samples per channel. At 88.2/96 kHz, a codec frame
 - Failed profile-availability publications retry from the existing service loop at one-second intervals, using current policy/link state. A locally blocked start retains its intent; stopping clears it and retries cannot originate a new peer START. No additional worker or steady-state PCM polling is introduced.
 - KS jack properties and jack-change events expose the negotiated endpoint's connection state. Link teardown and service-handle cleanup mark it disconnected.
 - Transport file cleanup releases orphaned channels after service exit. Removed-device cleanup is joined before SCM reports the service stopped.
+- Driver-handle open/close and cross-thread stop cancellation share one lifetime lock. Raw send/I/O access keeps its existing ownership rules and adds no per-packet lock; pending I/O must still retire before close. Failed-open Win32 errors are preserved across lock release for recovery classification.
 
 These mechanisms have build/protocol evidence. Their combined behavior with the actual headset, Windows audio policy and Bluetooth radio remains a hardware acceptance item.

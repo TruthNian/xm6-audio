@@ -45,13 +45,26 @@ std::vector<std::wstring> enumerate_interfaces(const GUID &guid)
 
 bool DriverHandle::open(const std::wstring &path)
 {
-    close();
+    std::unique_lock lock(handle_mu_);
+    close_locked();
     h_ = CreateFileW(path.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING,
                      FILE_FLAG_OVERLAPPED, nullptr);
-    return h_ != INVALID_HANDLE_VALUE;
+    const bool opened = h_ != INVALID_HANDLE_VALUE;
+    const DWORD error = opened ? ERROR_SUCCESS : GetLastError();
+    lock.unlock();
+    // The caller classifies startup/reopen errors. A C++ mutex operation has
+    // no contract to preserve the thread's Win32 last-error value.
+    if (!opened) SetLastError(error);
+    return opened;
 }
 
 void DriverHandle::close()
+{
+    std::lock_guard lock(handle_mu_);
+    close_locked();
+}
+
+void DriverHandle::close_locked()
 {
     if (h_ != INVALID_HANDLE_VALUE) {
         CancelIoEx(h_, nullptr);
@@ -62,6 +75,9 @@ void DriverHandle::close()
 
 void DriverHandle::cancel_all()
 {
+    // Hold through CancelIoEx, not merely the h_ load: CloseHandle may retire
+    // and Windows may reuse the numeric value before that cancel is issued.
+    std::lock_guard lock(handle_mu_);
     if (h_ != INVALID_HANDLE_VALUE)
         CancelIoEx(h_, nullptr);
 }

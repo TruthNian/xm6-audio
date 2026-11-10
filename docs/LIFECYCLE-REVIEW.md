@@ -1,5 +1,45 @@
 # Native lifecycle review
 
+## 0.3.44: driver-handle lifetime versus stop cancellation, source only
+
+Session::stop calls transport/audio cancel_all from the manager's thread,
+while the session's main thread can be closing/reopening the audio child or
+opening/closing the transport. DriverHandle formerly read/wrote its plain
+HANDLE without lifetime serialization. A cancel could read the old value
+while close was retiring it, then pass that value to CancelIoEx after another
+object had reused it. The unsynchronized read/write is also a C++ data race.
+
+A production-body regression uses real threads and a fake handle table to
+pause closure after the numeric value becomes reusable, before the owner
+clears h_. The old cancel_all deterministically targets the replacement object.
+The fixture orders h_ reads before its final write, so that particular failure
+does not depend on triggering C++ undefined behavior. This demonstrates the
+source lifetime gap; it is not proof of the historical Settings/silence cause.
+
+Open, close and cancel_all now share one mutex, held through CreateFile,
+CancelIoEx and CloseHandle. Open calls a private locked cleanup helper to
+avoid recursive locking; failed-open errors are saved/restored across unlock
+because recovery classifies GetLastError. Other I/O/get users retain their
+session lifetime and completion obligations. No mutex is added to per-packet
+send, ring, encoding or ordinary IOCTL completion; this is not a general lease
+for arbitrary concurrent close/I/O. Cancel during CreateFile waits for handle
+publication. A blocked synchronous create/close can therefore delay it, and
+no hard shutdown bound is claimed.
+
+The new fixture covers close/reuse/cancel ordering, cancellation concurrent
+with open publication, replacement open, idempotent close, invalid-handle
+no-op cancellation and exact failed-open error preservation even when the
+observable test mutex changes last-error. It records lock contention while
+using real mutex/thread synchronization; OS APIs and the handle table are fake.
+The full local kernel/service build and all sixteen CTest checks pass.
+
+Cancellation remains a request, with pending buffers retained until I/O
+completion; see Microsoft's [CancelIoEx contract](https://learn.microsoft.com/en-us/windows/win32/api/ioapiset/nf-ioapiset-cancelioex)
+and [handle closure contract](https://learn.microsoft.com/en-us/windows/win32/api/handleapi/nf-handleapi-closehandle).
+ABI remains driver/service 11, bus 6, mapped ring 2. No device operation,
+deployment, signature or reboot occurred. Real connection UI, reconnect,
+sound/controls/formats and measured performance remain unaccepted.
+
 ## 0.3.43: retry profile publication and blocked local start, source only
 
 The production START procedure previously returned success after the peer

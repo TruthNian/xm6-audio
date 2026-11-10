@@ -1,6 +1,6 @@
 # Roadmap and acceptance
 
-The repository contains a buildable native prototype. The initial hardware target is WH-1000XM6 on Windows 10 x64. Updated 2026-11-10.
+The repository contains a buildable native prototype. The initial hardware target is WH-1000XM6 on Windows 10 x64. Updated 2026-11-11.
 
 ## Implemented and covered by build / focused checks
 
@@ -40,5 +40,7 @@ Source-only 0.3.41 removes integer-PCM scratch conversion/copy, skips rejected-f
 Source-only 0.3.42 fuses channel mapping and final quantization in the service, preserving mono averaging precision and float headroom and removing the separate float buffer. Pure numeric/integration regressions pass; actual Windows format negotiation, codec acoustics and performance remain acceptance work.
 
 Source-only 0.3.43 retains failed suspend/resume publication and local-start intent, retrying from the existing main loop with the current policy serial/link. A remote START response no longer implies local admission succeeded. Production-body checks cover transient failure recovery, idle publication, cancellation, peer state and deadline wrap; they do not establish actual Windows reconnect or scheduling behavior.
+
+Source-only 0.3.44 serializes driver-handle lifetime changes with stop-thread cancellation and preserves failed-open error codes across lock release. Real-thread/fake-handle-table regressions cover close/reuse/cancel ordering, opening publication and idempotent cleanup. Requests still require completion before their owner releases memory or closes the device; no universal shutdown deadline or actual Windows recovery behavior is established by these fixtures.
 
 The inherited [SPEC.md](SPEC.md) is a protocol requirement catalogue, not proof of current hardware compatibility. The status table in the README and this acceptance list describe the current fork.

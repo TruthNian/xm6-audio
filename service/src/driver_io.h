@@ -7,6 +7,7 @@
 
 #include <array>
 #include <cstdint>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -29,6 +30,8 @@ public:
     void close();
     bool is_open() const { return h_ != INVALID_HANDLE_VALUE; }
     HANDLE get() const { return h_; }
+    // May race open/close from Session::stop(). Other I/O users still have
+    // to retire their requests before the owner closes/replaces the handle.
     void cancel_all();
 
     // Returns ERROR_SUCCESS, WAIT_TIMEOUT, ERROR_CANCELLED or a Win32 error.
@@ -36,6 +39,8 @@ public:
                 DWORD *bytes, DWORD timeout_ms = INFINITE, HANDLE cancel = nullptr);
 
 private:
+    void close_locked();
+    std::mutex handle_mu_; // lifetime/cancel only; no lock on the PCM send path
     HANDLE h_ = INVALID_HANDLE_VALUE;
 };
 

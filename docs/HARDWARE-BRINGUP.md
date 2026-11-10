@@ -2,12 +2,14 @@
 
 The controlled developer trial targets WH-1000XM6 on Windows 10 x64, build 19045. It uses a local development signature under explicitly authorized test signing. This is separate from the production installer, which still requires Microsoft-signed catalogs.
 
-Latest source audit: [0.3.35 lifecycle review](LIFECYCLE-REVIEW.md). This is a
-source-only candidate with local build/check evidence. It has not been
+Latest source audit: [0.3.44 lifecycle review](LIFECYCLE-REVIEW.md). The candidate
+has build/check evidence and is ready for a controlled test, subject to headset
+availability and authorization to resume the deferred trial. It has not been
 installed. Following a user restart, 0.3.32 established native LDAC playback,
 but the user reconfirmed incorrect connection labels and per-device
-Disconnect/Connect. Further headset testing is unavailable; no additional
-connection cycle, driver installation or restart was performed for this batch.
+Disconnect/Connect. Headset testing was subsequently deferred; no additional
+connection cycle, driver installation or restart was performed for the
+source-only 0.3.33–0.3.44 changes.
 
 Earlier activation history: versions
 0.3.23 through 0.3.30 were not deployed. A controlled 0.3.31 warm-binding trial
