@@ -39,4 +39,6 @@ Source-only 0.3.41 removes integer-PCM scratch conversion/copy, skips rejected-f
 
 Source-only 0.3.42 fuses channel mapping and final quantization in the service, preserving mono averaging precision and float headroom and removing the separate float buffer. Pure numeric/integration regressions pass; actual Windows format negotiation, codec acoustics and performance remain acceptance work.
 
+Source-only 0.3.43 retains failed suspend/resume publication and local-start intent, retrying from the existing main loop with the current policy serial/link. A remote START response no longer implies local admission succeeded. Production-body checks cover transient failure recovery, idle publication, cancellation, peer state and deadline wrap; they do not establish actual Windows reconnect or scheduling behavior.
+
 The inherited [SPEC.md](SPEC.md) is a protocol requirement catalogue, not proof of current hardware compatibility. The status table in the README and this acceptance list describe the current fork.

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(XM6Audio VERSION 0.3.42 LANGUAGES C CXX)
+project(XM6Audio VERSION 0.3.43 LANGUAGES C CXX)
 
 # The loaded binary's version must agree with the configured project and INF.
 # Generate resources in the build tree rather than keeping a stale copy.
@@ -147,6 +147,14 @@ if(OA2DP_BUILD_TESTS)
     add_executable(test_disconnect_status tools/test-disconnect-status.cpp)
     target_include_directories(test_disconnect_status PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
     add_test(NAME disconnect_status COMMAND test_disconnect_status)
+    xm6_test_body(service/src/session.cpp "bool Session::start_stream("
+        "\nvoid Session::suspend_stream(" stream-start)
+    xm6_test_body(service/src/session.cpp "void Session::begin_streaming("
+        "\nvoid Session::stream_loop(" stream-admission)
+    add_executable(test_profile_retry tools/test-profile-retry.cpp)
+    target_include_directories(test_profile_retry PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
+    target_link_libraries(test_profile_retry PRIVATE oa2dp_core Threads::Threads)
+    add_test(NAME profile_retry COMMAND test_profile_retry)
 endif()
 
 if(NOT WIN32)
@@ -254,7 +262,7 @@ if(MSVC)
     # installer. Kernel targets keep the WDK's independent runtime settings.
     foreach(binary IN ITEMS oa2dp_core oa2dp_codecs oa2dp_manage oa2dpsvc oa2dpctl
                             oa2dpgui ldac sbc oa2dp_tests test_encoders verify_native_metadata test_ks_attributes
-                            test_ring_concurrency)
+                            test_ring_concurrency test_profile_retry)
         if(TARGET ${binary})
             set_property(TARGET ${binary} PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
         endif()

@@ -53,6 +53,7 @@ LDAC encode calls consume 128 samples per channel. At 88.2/96 kHz, a codec frame
 - Local channel closes are not echoed as remote disconnects, preventing an old close notification from tearing down a replacement connection.
 - Signalling receive uses one persistent overlapped request on the protocol thread. Its buffer survives timeouts and is canceled/completed before closing a channel; the extra receive thread and PDU relay queue have been removed.
 - Stream errors stop the native path and report failure. Reconnection discards stale PCM.
+- Failed profile-availability publications retry from the existing service loop at one-second intervals, using current policy/link state. A locally blocked start retains its intent; stopping clears it and retries cannot originate a new peer START. No additional worker or steady-state PCM polling is introduced.
 - KS jack properties and jack-change events expose the negotiated endpoint's connection state. Link teardown and service-handle cleanup mark it disconnected.
 - Transport file cleanup releases orphaned channels after service exit. Removed-device cleanup is joined before SCM reports the service stopped.
 

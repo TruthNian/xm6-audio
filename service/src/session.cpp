@@ -506,7 +506,7 @@ bool Session::start_stream()
         return false;
     }
     begin_streaming();
-    return true;
+    return streaming_;
 }
 
 void Session::suspend_stream()
@@ -917,6 +917,9 @@ void Session::main_loop()
         for (const auto &c : cmds)
             handle(c);
         oa2dp_avdtp_check_timeouts(&av_);
+        // Apply queued disconnect/suspend/format changes before retrying a
+        // failed publication. No new PCM or player event is needed to recover.
+        retry_profile_state();
     }
 
     teardown("session stopping");
@@ -939,6 +942,7 @@ void Session::main_loop()
 
 void Session::begin_streaming()
 {
+    stream_start_pending_ = false;
     if (!connection_enabled_ || transport_suspended_ || suspend_requested_ || teardown_pending_ || streaming_ || !media_open_ || !audio_ready_)
         return;
     if (audio_format_.SampleRate &&
@@ -971,6 +975,7 @@ void Session::begin_streaming()
     // Publish availability before admitting a new sender. Otherwise a cached
     // suspended state could re-acknowledge HFP while this new thread starts.
     if (!update_suspend_state()) {
+        stream_start_pending_ = true;
         publish("profile-policy-pending");
         return;
     }
@@ -984,6 +989,7 @@ void Session::begin_streaming()
 
 void Session::end_streaming()
 {
+    stream_start_pending_ = false;
     streaming_ = false;
     SetEvent(stream_stop_event_);
     if (stream_.joinable())
@@ -1000,7 +1006,31 @@ bool Session::update_suspend_state()
     if (!audio_ready_) return false;
     const bool unavailable = !connection_enabled_ || transport_suspended_ ||
         suspend_requested_ || !sig_open_ || !media_open_;
-    return audio_.set_suspended(unavailable, suspend_serial_, sig_generation_);
+    const bool accepted = audio_.set_suspended(unavailable, suspend_serial_, sig_generation_);
+    suspend_publication_pending_ = !accepted;
+    if (!accepted)
+        next_profile_retry_ = GetTickCount() + 1000;
+    return accepted;
+}
+
+void Session::retry_profile_state()
+{
+    if ((!suspend_publication_pending_ && !stream_start_pending_) || stopping_ || !audio_ready_ ||
+        !is_after(GetTickCount(), next_profile_retry_))
+        return;
+    next_profile_retry_ = GetTickCount() + 1000;
+    // Recompute availability and use the current serial/link rather than
+    // replaying an obsolete reply after HFP, disconnect or endpoint recovery.
+    if (suspend_publication_pending_ && !update_suspend_state())
+        return;
+    if (stream_start_pending_) {
+        stream_start_pending_ = false;
+        oa2dp_avdtp_sep *sep = oa2dp_avdtp_sep_get(&av_, local_seid_);
+        // Retry only local admission of an accepted START. Never originate a
+        // new remote START after the peer has suspended or closed the stream.
+        if (sep && sep->state == OA2DP_SEP_STREAMING)
+            begin_streaming();
+    }
 }
 
 void Session::stream_loop(const StreamContext &stream)

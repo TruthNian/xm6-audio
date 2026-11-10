@@ -1,5 +1,45 @@
 # Native lifecycle review
 
+## 0.3.43: retry profile publication and blocked local start, source only
+
+The production START procedure previously returned success after the peer
+accepted START even when local encoder admission failed. In particular,
+begin_streaming returned without creating a worker if the suspend/resume
+publication failed. That failure was not retained for retry; the remote SEP
+could remain STREAMING while no local encoder existed, with no further PCM
+format/player event guaranteed to try again. A source fixture compiled the
+old production bodies and reproduced the false-success return using one
+injected publication failure. This demonstrates the source path, not that it
+caused the previously observed hardware silence or Settings failure.
+
+START now returns the actual local admission flag. Failed availability
+publications retain retry intent, including idle suspend/resume replies.
+The existing main loop retries after processing queued policy/format commands,
+at one-second intervals while work remains; it does no publication polling
+after success. Each attempt recomputes availability and uses the latest
+request serial and connection generation rather than replaying an old reply.
+An encoder start blocked on publication retains a separate intent so that
+another successful publication cannot lose the start. A retry starts the local
+worker only if its peer SEP is still STREAMING and the existing admission
+gates permit it; it never sends a replacement remote START. End-streaming
+clears that intent, covering suspend, close and teardown. Stop and an absent
+audio child suppress retries. No worker, PCM polling, format, codec, gain or
+driver/service contract is added or changed.
+
+Production-body checks cover repeated failure followed by recovery without
+another player event, no redundant remote START, publication success from a
+separate caller, idle availability, current request/link binding, stop/removal,
+disconnect, HFP/transport suspension, teardown, peer OPEN/missing SEP and
+32-bit deadline wrap. External profile/OS APIs are fake; a real test worker
+performs no audio or I/O. These checks do not emulate MPM or Windows scheduling.
+The full kernel/service build and all fifteen CTest checks pass locally.
+
+ABI remains driver/service 11, bus 6, mapped ring 2. This candidate is source
+only: no device operation, deployment or reboot occurred. Actual Settings
+Paired/Connected, per-device disconnect/reconnect, sound/controls/formats and
+CPU/jitter/latency still require acceptance. No optimality or measured
+performance claim follows from these tests.
+
 ## 0.3.42: channel mapping before final quantization, source only
 
 The service formerly quantized float/full-S32 channels independently, then
