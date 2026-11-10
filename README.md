@@ -14,7 +14,7 @@ XM6 Audio adds an A2DP profile driver and a WaveRT render endpoint while Windows
 
 The [controlled developer trial](docs/HARDWARE-BRINGUP.md) established native QQ Music/PotPlayer playback, media controls, wearing detection and bidirectional master volume. The last verified runtime is 0.3.32. **Its Windows connection labels and per-device disconnect/connect still fail acceptance.**
 
-Source-only 0.3.35 includes the connection fixes, event-driven PCM consumption, cancellable media waits, format-epoch tracking and opt-in timing probes. It has not been installed or hardware-accepted, and no measured performance gain is claimed. See the [lifecycle review](docs/LIFECYCLE-REVIEW.md). **Do not load candidate 0.3.5**; its descriptor ABI error caused a developer-machine bugcheck and is corrected in 0.3.6.
+Source-only 0.3.36 also forwards the original outgoing connection request to the Bluetooth stack, removing an extra request allocation and letting caller cancellation reach the lower OPEN. Earlier fixes include event-driven PCM consumption, cancellable media waits, format-epoch tracking and opt-in timing probes. It has not been installed or hardware-accepted, and no measured performance gain is claimed. See the [lifecycle review](docs/LIFECYCLE-REVIEW.md). **Do not load candidate 0.3.5**; its descriptor ABI error caused a developer-machine bugcheck and is corrected in 0.3.6.
 
 **[Architecture](docs/ARCHITECTURE.md) · [Build from source](BUILDING.md) · [Signing status](docs/SIGNING.md) · [Roadmap](docs/ROADMAP.md)**
 

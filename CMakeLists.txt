@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(XM6Audio VERSION 0.3.35 LANGUAGES C CXX)
+project(XM6Audio VERSION 0.3.36 LANGUAGES C CXX)
 
 # The loaded binary's version must agree with the configured project and INF.
 # Generate resources in the build tree rather than keeping a stale copy.
@@ -76,6 +76,11 @@ if(OA2DP_BUILD_TESTS)
     add_executable(test_channel_close tools/test-channel-close.cpp)
     target_include_directories(test_channel_close PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
     add_test(NAME channel_close COMMAND test_channel_close)
+    xm6_test_body(driver/oa2dp/l2cap.c "static EVT_WDF_REQUEST_COMPLETION_ROUTINE OpenDone;"
+        "\nstatic NTSTATUS CloseChannelGeneration(OA2DP_DEVICE_CONTEXT *dev,\n                                       OA2DP_CHANNEL_KIND kind, ULONG expectedGeneration," channel-open)
+    add_executable(test_channel_open tools/test-channel-open.cpp)
+    target_include_directories(test_channel_open PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
+    add_test(NAME channel_open COMMAND test_channel_open)
     xm6_test_body(driver/oa2dpaudio/ring.c "NTSTATUS Oa2dpRingSetDataEvent(" "" pcm-notification)
     add_executable(test_pcm_notification tools/test-pcm-notification.cpp)
     target_include_directories(test_pcm_notification PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")

@@ -392,13 +392,26 @@ VOID Oa2dpOpenChannel(_In_ OA2DP_DEVICE_CONTEXT *dev, _In_ WDFREQUEST request,
 {
     OA2DP_CHANNEL *ch = &dev->Channels[in->Kind];
     struct _BRB_L2CA_OPEN_CHANNEL *brb;
-    WDFREQUEST lower;
-    WDF_OBJECT_ATTRIBUTES attrs;
+    OA2DP_CHANNEL_INFO *out;
+    OA2DP_REQUEST_CONTEXT *rc;
     NTSTATUS status;
     ULONG generation;
     USHORT mtu = in->InMtu ? in->InMtu
                            : (in->Kind == Oa2dpChannelMedia ? OA2DP_DEFAULT_MEDIA_MTU
                                                             : OA2DP_DEFAULT_SIGNALING_MTU);
+
+    // Save the original buffered output before formatting the caller's request
+    // as a BRB. Invalid output must not create a physical connection. Input and
+    // output can alias; do not write output until all input has been consumed.
+    status = WdfRequestRetrieveOutputBuffer(request, sizeof(*out), (PVOID *)&out, NULL);
+    if (!NT_SUCCESS(status)) {
+        WdfRequestComplete(request, status);
+        return;
+    }
+    if (WdfRequestIsCanceled(request)) {
+        WdfRequestComplete(request, STATUS_CANCELLED);
+        return;
+    }
 
     WdfSpinLockAcquire(dev->Lock);
     OA2DP_CHANNEL *signal = &dev->Channels[Oa2dpChannelSignaling];
@@ -435,23 +448,21 @@ VOID Oa2dpOpenChannel(_In_ OA2DP_DEVICE_CONTEXT *dev, _In_ WDFREQUEST request,
     FillChannelConfig(brb, ch, mtu);
     brb->Callback = IndicationCallback;
 
-    WDF_OBJECT_ATTRIBUTES_INIT_CONTEXT_TYPE(&attrs, OA2DP_REQUEST_CONTEXT);
-    attrs.ParentObject = dev->Device;
-    status = WdfRequestCreate(&attrs, dev->IoTarget, &lower);
-    if (!NT_SUCCESS(status)) {
-        dev->Profile.BthFreeBrb((PBRB)brb);
-        goto fail;
-    }
-    Oa2dpGetRequest(lower)->Brb = (struct _BRB *)brb;
-    Oa2dpGetRequest(lower)->Channel = ch;
-    Oa2dpGetRequest(lower)->Generation = generation;
-    Oa2dpGetRequest(lower)->UserRequest = request;
-    status = SubmitBrbAsync(dev, lower, (struct _BRB *)brb, sizeof(*brb), OpenDone, dev, 8000);
+    rc = Oa2dpGetRequest(request);
+    rc->Brb = (struct _BRB *)brb;
+    rc->Channel = ch;
+    rc->Generation = generation;
+    rc->OpenOutput = out;
+    // Forward the original IRP: caller cancellation now reaches the lower
+    // OPEN instead of leaving a separate, uncancellable caller waiting for it.
+    status = SubmitBrbAsync(dev, request, (struct _BRB *)brb, sizeof(*brb), OpenDone, dev, 8000);
     if (status != STATUS_PENDING) {
-        WdfObjectDelete(lower);
+        rc->Brb = NULL;
+        rc->OpenOutput = NULL;
         dev->Profile.BthFreeBrb((PBRB)brb);
         goto fail;
     }
+    // Completion may have run inline. Do not access request or rc here.
     return;
 
 fail:
@@ -467,20 +478,22 @@ fail:
     WdfRequestComplete(request, status);
 }
 
-static void OpenDone(_In_ WDFREQUEST Lower, _In_ WDFIOTARGET Target,
+static void OpenDone(_In_ WDFREQUEST Request, _In_ WDFIOTARGET Target,
                      _In_ PWDF_REQUEST_COMPLETION_PARAMS Params, _In_ WDFCONTEXT Context)
 {
     OA2DP_DEVICE_CONTEXT *dev = (OA2DP_DEVICE_CONTEXT *)Context;
-    OA2DP_REQUEST_CONTEXT *rc = Oa2dpGetRequest(Lower);
+    OA2DP_REQUEST_CONTEXT *rc = Oa2dpGetRequest(Request);
     struct _BRB_L2CA_OPEN_CHANNEL *brb = (struct _BRB_L2CA_OPEN_CHANNEL *)rc->Brb;
     OA2DP_CHANNEL *ch = rc->Channel;
     NTSTATUS status = Params->IoStatus.Status;
-    WDFREQUEST user = rc->UserRequest;
-    OA2DP_CHANNEL_INFO *out = NULL;
+    OA2DP_CHANNEL_INFO *out = rc->OpenOutput;
     ULONG_PTR info = 0;
     BOOLEAN close = FALSE;
     OA2DP_CHANNEL_INFO openedInfo = {0};
     BOOLEAN current;
+    // Completion returned ownership to us. A cancelled caller must not adopt
+    // a late successful OPEN; preserve its handle until the close worker retires it.
+    const BOOLEAN cancelled = WdfRequestIsCanceled(Request);
     UNREFERENCED_PARAMETER(Target);
 
     WdfSpinLockAcquire(dev->Lock);
@@ -489,7 +502,7 @@ static void OpenDone(_In_ WDFREQUEST Lower, _In_ WDFIOTARGET Target,
         ch->Handle = brb->ChannelHandle;
         ch->OutMtu = brb->OutResults.Params.Mtu;
         ch->InMtu = brb->InResults.Params.Mtu;
-        close = ch->Life.CloseRequested || !dev->PolicyConnected || dev->TransportStopping;
+        close = cancelled || ch->Life.CloseRequested || !dev->PolicyConnected || dev->TransportStopping;
         if (close) Oa2dpChannelRequestClose(&ch->Life);
         openedInfo.Kind = ch->Kind;
         openedInfo.OutMtu = ch->OutMtu;
@@ -504,22 +517,20 @@ static void OpenDone(_In_ WDFREQUEST Lower, _In_ WDFIOTARGET Target,
             Oa2dpMpmConnectFailed(dev, rc->Generation);
         WdfWorkItemEnqueue(dev->PublicationWork);
     }
-    if (!current) status = STATUS_CANCELLED;
+    if (!current || cancelled) status = STATUS_CANCELLED;
     if (close) {
         WdfWorkItemEnqueue(ch->CloseWork);
         status = STATUS_CANCELLED;
     }
 
-    if (user) {
-        if (NT_SUCCESS(status) &&
-            NT_SUCCESS(WdfRequestRetrieveOutputBuffer(user, sizeof(*out), (PVOID *)&out, NULL))) {
-            *out = openedInfo;
-            info = sizeof(*out);
-        }
-        WdfRequestCompleteWithInformation(user, status, info);
+    if (NT_SUCCESS(status)) {
+        *out = openedInfo;
+        info = sizeof(*out);
     }
     dev->Profile.BthFreeBrb((PBRB)brb);
-    WdfObjectDelete(Lower);
+    rc->Brb = NULL;
+    rc->OpenOutput = NULL;
+    WdfRequestCompleteWithInformation(Request, status, info);
 }
 
 static NTSTATUS CloseChannelGeneration(OA2DP_DEVICE_CONTEXT *dev,

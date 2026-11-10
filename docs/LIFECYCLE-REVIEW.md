@@ -1,5 +1,40 @@
 # Native lifecycle review
 
+## 0.3.36: original-request outgoing OPEN, source only
+
+Outgoing OPEN previously allocated a separate WDF request and kept the caller
+waiting for that request's completion. CancelIoEx on the caller did not directly
+cancel the lower OPEN. The driver now formats and forwards the original request,
+as the ACL transfer path already does. This removes one WDF request allocation
+per outgoing OPEN and the separate caller/lower lifetime bridge. The lower
+8-second timeout remains; cancellation still depends on BTHPORT completing I/O.
+
+The original output buffer is validated before starting a channel generation,
+then retained until completion. Input/output can alias, so no output is written
+before the input is consumed. In completion, when the driver owns the request
+again, it checks cancellation. A late successful cancelled OPEN keeps the real
+handle, latches closing and queues the existing close worker instead of exposing
+an apparently usable channel. Failed current attempts still notify the Windows
+state-publication path; obsolete failed completions cannot fail a replacement.
+The BRB and request-context pointers are cleared before completing the caller;
+the submit path does not touch the request after possible inline completion.
+
+The implementation follows Microsoft's [request forwarding](https://learn.microsoft.com/en-us/windows-hardware/drivers/wdf/forwarding-i-o-requests),
+[buffer lifetime](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/wdfrequest/nf-wdfrequest-wdfrequestretrieveoutputbuffer)
+and [cancellation ownership](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/wdfrequest/nf-wdfrequest-wdfrequestiscanceled)
+contracts. A production-body fake-API regression checks original-request identity,
+invalid output, cancellation before/after submission, late success, inline
+completion, allocation/send/OPEN failures, closing policy, stale failed
+completion, and aliased signalling/media output. It does not emulate BTHPORT or
+prove actual Windows Settings reconnect behavior. No host device, service,
+installed package or boot policy was changed. ABI remains 11/bus 5/ring 2.
+
+The local kernel/service build and all eleven CTest checks pass. As a regression
+sensitivity check, replacing the completion's cancellation query with FALSE in
+the generated build-only fixture produced the expected test failure; restoring
+the production body passed. This does not establish a hardware performance
+improvement or eliminate the private MPM call/reentry gap described below.
+
 ## 0.3.35: PCM notifications and cancellable media waits, source only
 
 This batch changes the driver/service ABI to 11; both drivers and the service
