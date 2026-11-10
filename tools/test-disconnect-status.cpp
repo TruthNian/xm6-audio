@@ -37,7 +37,7 @@ struct Session {
     } audio_;
     bool policy = true, audio_ready_ = true, media_open_ = true, sig_open_ = true;
     bool teardown_pending_ = false, publication_pending_ = false, rx_failed_ = false,
-         need_remote_caps_ = true;
+         peer_configuration_pending_ = true;
     ULONG sig_generation_ = 1, closed_connection_generation_ = 0;
     uint32_t init_deadline_ = 1, next_reconnect_ = 0, next_publication_retry_ = 0;
     int av_ = 0, local_seid_ = 1;

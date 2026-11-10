@@ -49,4 +49,6 @@ Source-only 0.3.46 fixes multi-frame RTP timestamp accounting. The actual servic
 
 Source-only 0.3.47 reconciles accepted peer START after endpoint readiness and prevents new local admission after stop. Production setup/admission fixtures cover reversed notification order, duplicate readiness, failed setup/publication and policy/state gates. Real Windows reconnect/UI and existing-client recovery remain unaccepted.
 
+Source-only 0.3.48 fixes a reproduced missed rate transition after peer configuration/START: unchanged running PCM is reconciled after capabilities and media readiness, including peer RECONFIGURE. Production service procedures and two real AVDTP cores cover supported rate pairs, policy/state changes and command delivery during capability discovery. Audio IOCTLs/encoder admission remain controlled fixtures; the host is still 0.3.44 and the UI/Chrome faults remain unresolved.
+
 The inherited [SPEC.md](SPEC.md) is a protocol requirement catalogue, not proof of current hardware compatibility. The status table in the README and this acceptance list describe the current fork.

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(XM6Audio VERSION 0.3.47 LANGUAGES C CXX)
+project(XM6Audio VERSION 0.3.48 LANGUAGES C CXX)
 
 # The loaded binary's version must agree with the configured project and INF.
 # Generate resources in the build tree rather than keeping a stale copy.
@@ -172,6 +172,16 @@ if(OA2DP_BUILD_TESTS)
     target_include_directories(test_endpoint_formats PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
     target_link_libraries(test_endpoint_formats PRIVATE oa2dp_core)
     add_test(NAME endpoint_formats COMMAND test_endpoint_formats)
+    xm6_test_body(service/src/session.cpp "void Session::on_avdtp_event("
+        "\n// ---------------------------------------------------------------------------\n// Procedures" peer-events)
+    xm6_test_body(service/src/session.cpp "void Session::reconcile_peer_configuration("
+        "\nvoid Session::teardown(" peer-reconciliation)
+    xm6_test_body(service/src/session.cpp "bool Session::start_stream("
+        "\nvoid Session::reconcile_peer_configuration(" peer-stream-procedures)
+    add_executable(test_peer_format tools/test-peer-format.cpp)
+    target_include_directories(test_peer_format PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
+    target_link_libraries(test_peer_format PRIVATE oa2dp_core)
+    add_test(NAME peer_format COMMAND test_peer_format)
     xm6_test_body(service/src/session.cpp "        int r = oa2dp_rtp_add_frames("
         "\n        DWORD now = GetTickCount();" service-rtp)
     add_executable(test_service_rtp tools/test-service-rtp.cpp)
@@ -290,7 +300,7 @@ if(MSVC)
     foreach(binary IN ITEMS oa2dp_core oa2dp_codecs oa2dp_manage oa2dpsvc oa2dpctl
                             oa2dpgui ldac sbc oa2dp_tests test_encoders verify_native_metadata test_ks_attributes
                             test_ring_concurrency test_profile_retry test_handle_lifetime test_endpoint_formats
-                            test_service_rtp)
+                            test_service_rtp test_peer_format)
         if(TARGET ${binary})
             set_property(TARGET ${binary} PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
         endif()

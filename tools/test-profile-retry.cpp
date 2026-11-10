@@ -103,6 +103,7 @@ struct Session {
     bool teardown_pending_ = false, streaming_ = false, media_open_ = true, sig_open_ = true;
     bool audio_ready_ = true, media_drain_pending_ = false;
     bool publication_pending_ = false;
+    bool peer_configuration_pending_ = false;
     bool stopping_ = false, suspend_publication_pending_ = false, stream_start_pending_ = false;
     DWORD next_profile_retry_ = 0;
     ULONG pcm_sequence_ = 0, media_generation_ = 2, sig_generation_ = 1;
@@ -173,7 +174,7 @@ int main() {
         REQUIRE(s.workers == 1);
     }
     // Reconciliation must not create a new remote START or bypass admission.
-    for (int condition = 0; condition < 8; ++condition) {
+    for (int condition = 0; condition < 9; ++condition) {
         Session s;
         now = 12;
         s.av_.sep.state = OA2DP_SEP_STREAMING;
@@ -201,6 +202,9 @@ int main() {
             break;
         case 7:
             s.local_seid_ = 0;
+            break;
+        case 8:
+            s.peer_configuration_pending_ = true;
             break;
         }
         REQUIRE(s.finish_endpoint_setup());

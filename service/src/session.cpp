@@ -266,7 +266,7 @@ void Session::on_avdtp_event(const oa2dp_avdtp_event &ev)
         if (oa2dp_codec_parse(ev.caps.codec, ev.caps.codec_len, &config_) == OA2DP_OK) {
             local_seid_ = ev.local_seid;
             have_remote_caps_ = false;
-            need_remote_caps_ = true;
+            peer_configuration_pending_ = true;
             init_deadline_ = 0;
             LOGI("headset configured %s at %u Hz", oa2dp_codec_name(config_.codec),
                  oa2dp_codec_sample_rate(&config_));
@@ -274,8 +274,9 @@ void Session::on_avdtp_event(const oa2dp_avdtp_event &ev)
         }
         break;
     case OA2DP_AVDTP_RECONFIGURE:
-        if (ev.caps.media_codec)
-            oa2dp_codec_parse(ev.caps.codec, ev.caps.codec_len, &config_);
+        if (ev.caps.media_codec &&
+            oa2dp_codec_parse(ev.caps.codec, ev.caps.codec_len, &config_) == OA2DP_OK)
+            peer_configuration_pending_ = true;
         break;
     case OA2DP_AVDTP_START:
         begin_streaming();
@@ -584,6 +585,46 @@ void Session::reconfigure_rate(uint32_t rate)
         start_stream();
 }
 
+void Session::reconcile_peer_configuration()
+{
+    if (!peer_configuration_pending_ || stopping_ || transport_suspended_ || teardown_pending_ ||
+        !connection_enabled_ || !audio_ready_ || !sig_open_ || rx_failed_ || !media_open_ || !local_seid_)
+        return;
+    const uint8_t seid = local_seid_;
+    const ULONG connection = sig_generation_;
+    oa2dp_avdtp_sep *sep = oa2dp_avdtp_sep_get(&av_, seid);
+    if (!sep || (sep->state != OA2DP_SEP_OPEN && sep->state != OA2DP_SEP_STREAMING))
+        return;
+    const uint8_t remote_seid = sep->remote_seid;
+    if (!have_remote_caps_) {
+        oa2dp_avdtp_event caps{};
+        oa2dp_codec_caps remote{};
+        const bool received = request(oa2dp_avdtp_get_capabilities(&av_, remote_seid, true), caps);
+        // request() pumps peer commands. A stop/close or replacement binding
+        // must not publish the old configuration when that wait returns.
+        sep = oa2dp_avdtp_sep_get(&av_, local_seid_);
+        if (stopping_ || transport_suspended_ || teardown_pending_ || !connection_enabled_ ||
+            !audio_ready_ || !sig_open_ || rx_failed_ || !media_open_ ||
+            sig_generation_ != connection || local_seid_ != seid || !sep ||
+            sep->remote_seid != remote_seid ||
+            (sep->state != OA2DP_SEP_OPEN && sep->state != OA2DP_SEP_STREAMING))
+            return;
+        if (received && caps.caps.media_codec &&
+            oa2dp_codec_parse(caps.caps.codec, caps.caps.codec_len, &remote) == OA2DP_OK &&
+            remote.codec == config_.codec) {
+            remote_caps_ = remote;
+            have_remote_caps_ = true;
+        }
+    }
+    peer_configuration_pending_ = false;
+    // Publish the complete format list before reconciling the accepted START.
+    // Otherwise an unchanged PCM stream can remain at 96 kHz while the peer's
+    // 48 kHz configuration permanently prevents local encoder admission.
+    if (setup_audio_endpoint() && !stopping_ && !suspend_requested_ && have_remote_caps_ &&
+        settings_.follow_source_rate && audio_running_)
+        reconfigure_rate(audio_format_.SampleRate);
+}
+
 void Session::teardown(const char *why)
 {
     LOGI("teardown: %s", why);
@@ -601,7 +642,7 @@ void Session::teardown(const char *why)
     if (sig_closed) sig_open_ = false;
     teardown_pending_ = !media_closed || !sig_closed;
     init_deadline_ = 0;
-    need_remote_caps_ = false;
+    peer_configuration_pending_ = false;
     if (teardown_pending_) {
         LOGW("channel close is incomplete; retaining transport ownership");
         next_reconnect_ = GetTickCount() + kReconnectPollMs;
@@ -677,7 +718,7 @@ void Session::handle(const Command &c)
         }
         media_mtu_ = c.channel.OutMtu;
         media_open_ = true;
-        setup_audio_endpoint();
+        peer_configuration_pending_ = true;
         break;
     case Cmd::SignalingClosed:
         if (!Oa2dpChannelEventCurrent(sig_generation_, c.channel.ConnectionGeneration)) break;
@@ -910,16 +951,6 @@ void Session::main_loop()
             else if (audio_running_)
                 start_stream();
         }
-        if (!transport_suspended_ && need_remote_caps_ && local_seid_) {
-            need_remote_caps_ = false;
-            oa2dp_avdtp_sep *sep = oa2dp_avdtp_sep_get(&av_, local_seid_);
-            oa2dp_avdtp_event caps{};
-            if (sep && request(oa2dp_avdtp_get_capabilities(&av_, sep->remote_seid, true), caps) &&
-                oa2dp_codec_parse(caps.caps.codec, caps.caps.codec_len, &remote_caps_) == OA2DP_OK)
-                have_remote_caps_ = true;
-            if (media_open_)
-                setup_audio_endpoint();
-        }
         if (streaming_ && !audio_running_ && idle_since_ &&
             is_after(GetTickCount(), idle_since_ + kIdleSuspendMs))
             suspend_stream();
@@ -943,6 +974,7 @@ void Session::main_loop()
         for (const auto &c : cmds)
             handle(c);
         oa2dp_avdtp_check_timeouts(&av_);
+        reconcile_peer_configuration();
         // Apply queued disconnect/suspend/format changes before retrying a
         // failed publication. No new PCM or player event is needed to recover.
         retry_profile_state();
@@ -969,7 +1001,8 @@ void Session::main_loop()
 void Session::begin_streaming()
 {
     stream_start_pending_ = false;
-    if (stopping_ || !connection_enabled_ || transport_suspended_ || suspend_requested_ || teardown_pending_ || streaming_ || !media_open_ || !audio_ready_)
+    if (stopping_ || peer_configuration_pending_ || !connection_enabled_ || transport_suspended_ ||
+        suspend_requested_ || teardown_pending_ || streaming_ || !media_open_ || !audio_ready_)
         return;
     if (audio_format_.SampleRate &&
         audio_format_.SampleRate != oa2dp_codec_sample_rate(&config_)) {

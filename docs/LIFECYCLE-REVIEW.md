@@ -1,5 +1,37 @@
 # Native lifecycle review
 
+## 0.3.48: reconcile peer configuration with running PCM, source only
+
+Two real AVDTP cores and the production session event/configuration/setup
+procedures reproduce a missed rate transition: the peer configures and starts
+48 kHz while the unchanged Windows PCM is 96 kHz. The old capability-discovery
+block preserves 96 kHz as the preferred endpoint format, but never reconfigures
+the codec. Local admission correctly refuses the mismatched rate, so no new
+PCM notification means persistent silence. Peer RECONFIGURE also previously
+updated the codec without scheduling endpoint/rate reconciliation.
+
+Replace the old capability-discovery flag with pending peer-configuration
+work. Consume it on the existing main thread after queued policy/format
+commands and after media readiness. Discover capabilities before publishing
+the format list, then use the existing rate-reconfiguration procedure for
+running PCM in automatic mode. Defer encoder admission while this work is
+pending. A synchronous capability request may pump peer commands; recheck
+stop, channel identity and the current SEP before publishing its result.
+There is no new thread, timer, polling process or per-file mix selection.
+
+The old production block fails the new test at the required 96 kHz codec
+result. The replacement covers 96/48, 48/96, 44.1/48 and 88.2/96 kHz pairs;
+same-rate startup without renegotiation; reversed media readiness; an accepted
+peer RECONFIGURE followed by START; duplicate reconciliation; unsupported
+rates, explicit fixed/follow-off settings and HFP suspension; policy/state
+gates and stop/disconnect/channel replacement/peer CLOSE during capability
+discovery. Event handling, setup, rate/start/suspend procedures and AVDTP
+packets are production code. Audio IOCTLs and encoder admission are fake;
+the actual admission fixture separately checks the pending-configuration
+gate. This does not establish Windows GUI correctness, actual headset
+format-transition acceptance, the Chrome stutter cause or optimal performance.
+Version 0.3.48 is not installed on the host; the observed runtime remains 0.3.44.
+
 ## 0.3.47: reconcile accepted START after endpoint readiness, source only
 
 The service drains signalling before consuming queued transport commands.

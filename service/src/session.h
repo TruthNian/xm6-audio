@@ -82,6 +82,7 @@ private:
     bool start_stream();
     void suspend_stream();
     void reconfigure_rate(uint32_t rate);
+    void reconcile_peer_configuration(); // main-thread format reconciliation after peer commands
     void teardown(const char *why);
     void on_avdtp_event(const oa2dp_avdtp_event &ev);
     void begin_streaming();
@@ -138,7 +139,7 @@ private:
     DWORD idle_since_ = 0;
     DWORD init_deadline_ = 0;      // become INT if the peer has not configured us by then
     DWORD next_reconnect_ = 0;
-    bool need_remote_caps_ = false;
+    bool peer_configuration_pending_ = false;
     std::atomic<bool> audio_ready_{false};
     // A failed waiter stays quiescent until the main thread closes its handle.
     std::atomic<bool> audio_wait_failed_{false};

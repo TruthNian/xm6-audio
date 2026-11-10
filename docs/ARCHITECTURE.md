@@ -31,6 +31,14 @@ normal codec selection and do not become new fixed-rate constraints. Shared
 mixing remains owned by Windows; the driver does not recover individual
 applications' original rates/precision from an already mixed stream.
 
+Peer configuration and media readiness schedule reconciliation on the existing
+session main thread, after queued policy/format updates. Capability discovery
+precedes endpoint publication. An unchanged running PCM rate is reconciled
+with a different peer-selected rate using normal AVDTP reconfiguration; it
+does not depend on another player or PCM event. Encoder admission waits for
+this pending configuration work. Requests that pump peer commands recheck
+the current channel/SEP and stop state before publishing capabilities.
+
 The format contract distinguishes sample rate, channels, container width, valid precision and integer/float representation. Integer32 remains integer32 in the shared ring; 24-in-32 follows WAVEFORMATEXTENSIBLE's left-aligned precision convention. Conversion to 16/24 useful bits occurs at the selected encoder boundary.
 
 Ring protocol v2 fixes the allocated frame stride, independent of the active channel count. A producer sequence and first-frame position separate format generations. The consumer copies only a complete bounded block for its encoder's snapshot, checks the generation after copying, and releases no block on a format race. Old-format backlog is skipped, not reinterpreted. Partial codec input blocks remain queued until complete. Driver and service must both use v2; a v1/v2 mismatch is rejected during mapping. These contracts have offline concurrent coverage, not hardware acceptance.
