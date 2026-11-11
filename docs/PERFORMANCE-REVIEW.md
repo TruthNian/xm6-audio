@@ -32,6 +32,49 @@ interval does not establish audible quality, lip sync, a relative performance
 gain, or resolution of the earlier interruption. Collection stopped normally.
 See the [activation limitations](HARDWARE-BRINGUP.md).
 
+### Video playback-speed observation, with application-reported rates
+
+The user subsequently began video-speed testing. Core Audio snapshots identified
+Chrome as the active source; PotPlayer and QQ Music were paused. No radio,
+service, endpoint, codec or player setting was changed by the observer.
+
+| Metric | Chrome, 20:48:33–20:53:39 | Chrome, 20:54:27–20:56:09 |
+|---|---:|---:|
+| Trace duration | 306.363 s | 102.473 s |
+| Decoded events / lost events / lost buffers | 57,750 / 0 / 0 | 19,317 / 0 / 0 |
+| Media completions / failures | 57,441 / 0 | 19,213 / 0 |
+| Completion latency p99 / maximum | 7.831 / 28.277 ms | 7.321 / 18.774 ms |
+| Approximate completion interval p99 / maximum | 9 / 32 ms | 9.2 / 23.7 ms |
+| Peak buffered PCM / maximum data-event wait | 940 frames / 9.042 ms | 1,026 frames / 10.392 ms |
+| Ring overrun frames, excluding first PCM window | 0 | 0 |
+| Media rate including protocol headers | 1,009,497 bit/s | 1,009,506 bit/s |
+| Service CPU, one logical CPU, tracing included | 0.602% | 0.548% |
+| Read-only audio snapshots | 60 | 20 |
+
+Both windows retained one PCM stream generation at 96 kHz, native render defaults
+for all three roles and Chrome with nonzero signal at every audio snapshot.
+No new service error or connection rebuild was observed. No local build ran
+during collection. Completion interval estimates use the decoder's displayed
+timestamps; microsecond completion latency comes from the event field itself.
+
+A separate read-only Windows GSMTC observer queried
+[PlaybackRate](https://learn.microsoft.com/en-us/uwp/api/windows.media.control.globalsystemmediatransportcontrolssessionplaybackinfo.playbackrate)
+without sending playback-control requests. Forty-five samples overlap the
+second trace, from 20:54:28 to 20:55:56, all reporting Chrome Playing at **1.5x**.
+The original five-minute trace did not collect rates, so its clean result is
+not attributed retrospectively to 1.5x. These are application-reported rates
+and sampled state, not verification of rendered video speed or audible lip sync.
+The second trace does not establish other speeds or the act of switching speed.
+
+An earlier 87.412-second segment at 20:45:31–20:46:58 had 16,389 successful media
+completions and zero trace loss/overrun, but its collector stopped on a sample-file
+sharing error. A subsequent collector startup stopped on a summary-formatting
+error. Neither stopped the audio service. Both partial captures are preserved;
+the first lacks a final CPU measurement. The observer now appends live snapshots
+to a shared-read JSONL stream and writes the final array after closing it.
+These disjoint captures must not be reported as uninterrupted monitoring.
+Further rate-change observation continues separately from these completed results.
+
 ## 0.3.61: passive playback observations and remaining failure visibility
 
 Installed source `b378045332f704af05f07abc12c44772f9f985a1` was observed without

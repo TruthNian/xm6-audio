@@ -157,6 +157,16 @@ These observations do not establish why Windows changed the ID or prove that
 every existing application will recover. Do not infer endpoint continuity from
 the absence of an explicit replacement operation in the publisher.
 
+Microsoft defines [endpoint IDs as installation-scoped](https://learn.microsoft.com/en-us/windows/win32/coreaudio/endpoint-id-strings):
+driver upgrades can change them, whereas normal system restarts and device
+unplug/replug preserve them. Therefore this before/after installation mismatch
+does not by itself establish an identity defect in the driver. Preserve the
+failed assertion as evidence, but do not use it as a failed ordinary-reconnect
+test or try to force the old ID into Windows' private cache. The exact migration
+mechanism was not traced; ordinary Bluetooth reconnect continuity and upgrade
+client recovery are separate requirements. PKEY_AudioEndpoint_StableId is a
+Windows 11 24H2 addition, not available as a Windows 10 solution.
+
 Microsoft documents the separate
 [audio interface registrations](https://learn.microsoft.com/en-us/windows-hardware/drivers/audio/installing-device-interfaces-for-an-audio-adapter)
 and the [interface name property](https://learn.microsoft.com/en-us/windows-hardware/drivers/install/devpkey-deviceinterface-friendlyname).

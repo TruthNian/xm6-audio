@@ -98,10 +98,14 @@ generator, file saving, KMDF.
    `control.cpp`; everything else goes to PortCls unchanged. The driver
    needs no KMDF.
 7. **Friendly name.** `IOCTL_OA2DP_AUDIO_SET_NAME` stores the name
-   (`Oa2dpName`), sets `DEVPKEY_Device_FriendlyName` on the PDO (Sound
-   settings shows "Headphones (<name>)") and the KS interfaces' friendly
-   name, then re-registers the filters once no stream is open so the
-   endpoint builder picks the name up immediately.
+   (`Oa2dpName`), sets `DEVPKEY_Device_FriendlyName` on the PDO and publishes
+   the name to all five audio interface/reference pairs in the INF. Cached
+   names are published before filter registration; a same-name service request
+   retries interface publication. Naming never re-registers filters or restarts
+   audio clients. In the 0.3.62 host observation all these properties matched
+   the headset name, while Core Audio still returned the old display name.
+   Do not treat successful property writes as visible-name acceptance; see
+   [current diagnostics](../../docs/DIAGNOSTICS.md#endpoint-name-publication-0362-partially-effective).
 
 `oa2dp.sys` now reports `UniqueID` for the child PDO; without it the PnP
 manager would prefix the instance ID and the service would not find the
@@ -120,11 +124,12 @@ The service validates the header against the mapping size
 
 ## Open points
 
-- Not run yet: Driver Verifier and a real headset require a legitimately
-  signed package and a controlled test system (see `BUILDING.md`).
-- Whether `IoSetDevicePropertyData(DEVPKEY_Device_FriendlyName)` is
-  accepted for the PDO has to be checked on a real system; a failure is
-  logged and ignored (the endpoint then shows the INF description).
+- Driver Verifier has not been run; it requires a controlled test system.
+  The authorized local test-signed headset trial and its acceptance limits
+  are recorded in [hardware bring-up](../../docs/HARDWARE-BRINGUP.md).
+- PDO and interface names have been verified on the host, but Core Audio's
+  visible-name refresh remains unresolved. A publication failure is logged
+  and does not prevent the other name properties from being attempted.
 - The service now discards accumulated PCM when a Bluetooth stream restarts,
   rather than replaying the pre-reconnection backlog. Hardware timing
   still needs validation.
