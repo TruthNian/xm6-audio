@@ -127,6 +127,66 @@ no event from that selected keyword was recorded. It began after the earlier
 PCM gap and cannot explain it. This is a bounded observation, not proof that
 every detector path ran or that the headset rendered uninterrupted sound.
 
+### One-second state sampling separates a later pause from transmission failure
+
+A subsequent capture ran from 21:08:43 to 21:19:01 local time for 618.063 seconds.
+It combined the native stream/transport providers with the same Windows audio
+GlitchDetection keyword, 600 playback-state/rate snapshots and 120 Core Audio
+snapshots. No playback settings, runtime binaries or radio state changed, and
+no local build ran. Chrome was the only sampled application with audio signal;
+QQ Music and PotPlayer reported Paused. Sampled Playing rates included
+0.25x, 0.5x, 0.75x, 1x, 1.25x, 1.5x and 2x, plus short 0.35x/0.45x transitions.
+These unequal sampled spans do not establish separate acceptance at every rate.
+
+| Observed metric | Result |
+|---|---:|
+| Decoded events / lost events / lost buffers | 112,648 / 0 / 0 |
+| Media completions / failed completions | 112,046 / 0 |
+| Completion latency p99 / maximum | 7.267 / 29.090 ms |
+| Approximate completion interval p99 | 9 ms |
+| Largest interval outside the pause-associated gap | 32 ms |
+| Peak buffered PCM / maximum data-event wait, excluding first windows | 415 frames / 3.996 ms |
+| Ring overrun frames, excluding first window per stream | 0 |
+| Service CPU, one logical CPU, tracing included | 0.576% |
+
+The sole completion gap of at least 100 ms lasted approximately 20.475 seconds,
+from 21:09:18.501 to 21:09:38.976. Twenty one-second samples inside it reported
+Chrome Paused. The native status subsequently reported Suspended and returned
+to Streaming; PCM stream generation advanced from 3 to 4 while connection
+generation stayed at 1. The surrounding samples show Playing before and after
+the gap. This is consistent with a playback pause/resume, without a connection
+rebuild or failed send; it does not identify who initiated the pause or measure
+exact resume latency. The whole-window average of 976,061 bit/s includes that
+pause and is not evidence of LDAC quality reduction. The endpoint stayed at
+96 kHz under the unchanged LDAC HQ policy.
+
+The native endpoint ID and all three default render roles were unchanged at
+every Core Audio snapshot. No event from the selected Windows audio keyword
+was recorded, with no trace loss. The session stopped normally. This later
+pause correlation does **not** explain or close the earlier 20:59:54 PCM wait:
+that separate interval still lacks sufficiently frequent playback-state data.
+No newly unexplained long supply gap was observed in this capture; neither
+successful sends nor absent selected glitch events establish audible rendering
+or physical lip sync.
+
+A separate follow-up ran from 21:19:57 to 21:25:08 for 310.293 seconds with
+300 state/rate samples and 60 Core Audio snapshots. The same observer and
+unchanged runtime recorded a longest consecutive 2x sample span of 279.748
+seconds, with short 0.5x and 1x observations. All 57,237 media completions
+succeeded, with no lost trace events/buffers or ring overrun after excluding
+each stream's first window. Completion latency p99 was 7.536 ms and maximum
+35.216 ms; peak PCM buffering was 424 frames and maximum recorded data-event
+wait was 4.514 ms. Service CPU was 0.836% of one logical CPU, including tracing.
+
+Its only completion gap of at least 100 ms was approximately 5.027 seconds
+at 21:24:41.035–21:24:46.062. Five samples inside it reported Chrome Paused;
+stream generation advanced from 4 to 5 while connection generation remained 1.
+All other completion intervals were at most approximately 32 ms. The native
+default endpoint and 96 kHz LDAC policy were unchanged; no selected Windows
+audio glitch event was recorded. The service process stayed the same and the
+trace stopped normally. These are two separately bounded captures, not one
+continuous 15-minute observation, and neither resolves the earlier PCM gap.
+
 ## 0.3.61: passive playback observations and remaining failure visibility
 
 Installed source `b378045332f704af05f07abc12c44772f9f985a1` was observed without
