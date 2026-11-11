@@ -2,9 +2,9 @@
 
 The controlled developer trial targets WH-1000XM6 on Windows 10 x64, build 19045. It uses a local development signature under explicitly authorized test signing. This is separate from the production installer, which still requires Microsoft-signed catalogs.
 
-Current runtime is **0.3.62**, with the loaded kernel images and running service
-verified against the local signed package. The name-publication and diagnostic
-changes are deployed; Core Audio's displayed endpoint name is still unresolved.
+Current runtime is **0.3.63**, with the loaded kernel images and running service
+verified against the local signed package. Native LDAC input and complete PCM
+format epochs are deployed; Core Audio's displayed endpoint name is unresolved.
 The user's acceptance of **Paired while disconnected** and correct Settings
 connect/disconnect display belongs to 0.3.61 and remains recorded below.
 Passive Chrome/QQ Music and PotPlayer observations were also collected on
@@ -17,6 +17,33 @@ service matched the verified local test-signed candidate. The service process
 started approximately twelve seconds after boot without a manual start in the
 post-boot session. This establishes automatic service startup, not complete
 automatic audio/reconnect acceptance.
+
+## 0.3.63 activation: PCM precision fixes (2026-11-11)
+
+Source `d3c62280751864b8b0375546cddad68cf36b24d7` passed all 29 local checks
+after the complete native Release build, and passed
+[Linux sanitizer and Windows native CI](https://github.com/TruthNian/xm6-audio/actions/runs/43035576755).
+The CI artifact digest, manifest and every payload hash were verified before
+signing with the existing local development certificate. The two loaded kernel
+images and running service match this signed package. Activation required one
+Bluetooth off/on cycle; no PC restart, boot-policy or certificate-trust change
+was made. Current transport/render restart flags are clear.
+
+The service selected native int32 LDAC input at 96 kHz stereo. The endpoint
+supplies 24 valid integer bits in a 32-bit container; this is not evidence of
+32-bit wireless precision or added source detail. Automatic PCM/codec policy,
+LDAC HQ and ABR-off were read back unchanged. The later state snapshot was
+suspended, with existing applications paused. No test audio or sustained trace
+was started; this activation has no new audible acceptance or quality claim.
+
+All three default render roles still select native XM6. The shared mix, master
+volume, mute and capture defaults were preserved. **The MMDevice endpoint ID
+changed again**, so identity continuity remains a failure; its cause is not yet
+isolated. The Core Audio name remains `XM6 Audio Topology`. The earlier 0.3.61
+Settings display acceptance is retained as historical user evidence, not a
+new 0.3.63 UI test. These limitations and the actual loaded identities are
+recorded in the private activation receipt. See the
+[precision changes and validation limits](PERFORMANCE-REVIEW.md).
 
 ## 0.3.62 activation, endpoint migration and partial acceptance (2026-11-11)
 

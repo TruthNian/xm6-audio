@@ -458,8 +458,11 @@ bool Session::ensure_audio_endpoint()
             LOGE("audio endpoint for this headset not found (is oa2dpaudio.sys installed?)");
             return false;
         }
-        if (!name_.empty())
-            audio_.set_name(name_);
+        if (!audio_.set_name(name_.empty() ? L"Bluetooth Headphones" : name_)) {
+            LOGW("cannot publish the native endpoint name; will retry before mapping PCM");
+            audio_.close();
+            return false;
+        }
         if (!audio_.map_ring())
             return false;
         OA2DP_FORMAT_CHANGE state{};

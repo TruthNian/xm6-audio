@@ -15,7 +15,7 @@ Class       = MEDIA
 ClassGuid   = {4d36e96c-e325-11ce-bfc1-08002be10318}
 Provider    = %ProviderName%
 CatalogFile = oa2dpaudio.cat
-DriverVer   = 11/11/2026,0.3.63.0
+DriverVer   = 11/11/2026,0.3.64.0
 PnpLockdown = 1
 
 [DestinationDirs]
@@ -67,14 +67,15 @@ AddReg = Oa2dpAudio.I.Wave.AddReg
 
 [Oa2dpAudio.I.Wave.AddReg]
 HKR,,CLSID,,%Proxy.CLSID%
-HKR,,FriendlyName,,%WaveName%
+; Preserve the per-headset name across driver updates (FLG_ADDREG_NOCLOBBER).
+HKR,,FriendlyName,0x00000002,%WaveName%
 
 [Oa2dpAudio.I.Topology]
 AddReg = Oa2dpAudio.I.Topology.AddReg
 
 [Oa2dpAudio.I.Topology.AddReg]
 HKR,,CLSID,,%Proxy.CLSID%
-HKR,,FriendlyName,,%TopologyName%
+HKR,,FriendlyName,0x00000002,%TopologyName%
 HKR,EP\0,%PKEY_AudioEndpoint_Association%,,%KSNODETYPE_ANY%
 HKR,EP\0,%PKEY_AudioEndpoint_Supports_EventDriven_Mode%,0x00010001,0x1
 ; Initial shared-mode format: 48 kHz stereo float32. This is a default,

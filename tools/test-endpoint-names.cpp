@@ -38,6 +38,8 @@ static OA2DP_AUDIO_DEVICE *selected;
 static std::map<std::wstring, std::wstring> names;
 static std::vector<std::wstring> attempted;
 static unsigned saves, allocated, freed;
+static unsigned ensure_calls;
+static NTSTATUS ensure_status;
 static std::wstring saved_name, register_failure, property_failure;
 static bool fail_device;
 static void Oa2dpLock(Lock *lock) { REQUIRE(!lock->held); lock->held = true; }
@@ -84,9 +86,15 @@ static void SaveValue(OA2DP_AUDIO_DEVICE *dev, PCWSTR key, ULONG type, PCWSTR na
     ++saves; saved_name = name;
 }
 #include "endpoint-name-publication-under-test.inc"
+static NTSTATUS Oa2dpEnsureNamedFilters(OA2DP_AUDIO_DEVICE *dev) {
+    REQUIRE(dev == selected && !dev->ControlLock.held && dev->Name[0]);
+    ++ensure_calls; return ensure_status;
+}
 #include "endpoint-name-update-under-test.inc"
-static void startup(OA2DP_AUDIO_DEVICE *dev) {
+static NTSTATUS startup(OA2DP_AUDIO_DEVICE *dev) {
+    NTSTATUS ntStatus;
 #include "endpoint-name-startup-under-test.inc"
+    return ntStatus;
 }
 static void check_names(PCWSTR expected) {
     REQUIRE(names.size() == 6 && allocated == freed && !selected->ControlLock.held);
@@ -97,9 +105,9 @@ static void check_names(PCWSTR expected) {
 int main() {
     OA2DP_AUDIO_DEVICE dev;
     selected = &dev;
-    startup(&dev); REQUIRE(attempted.empty()); // no cached name on first install
+    REQUIRE(startup(&dev) == STATUS_INVALID_PARAMETER && attempted.empty());
     std::wcscpy(dev.Name, L"WH-1000XM6");
-    startup(&dev); check_names(dev.Name); REQUIRE(saves == 0);
+    REQUIRE(startup(&dev) == 0); check_names(dev.Name); REQUIRE(saves == 0);
     OA2DP_ENDPOINT_NAME in;
     std::wcscpy(in.Name, dev.Name);
     names.clear(); // INF reinstall overwrote published properties, cache did not change
@@ -108,12 +116,18 @@ int main() {
     fail_device = true; register_failure = L"2:WaveOa2dp"; property_failure = L"4:TopologyOa2dp";
     REQUIRE(SetName(&dev, &in) == 0 && attempted.size() == 6 && names.size() == 3);
     REQUIRE(allocated == freed && !dev.ControlLock.held);
+    REQUIRE(startup(&dev) < 0); // initial registration must see publication errors
     fail_device = false; register_failure.clear(); property_failure.clear();
     REQUIRE(SetName(&dev, &in) == 0); check_names(in.Name); // equal name retries failed properties
     std::wcscpy(in.Name, L"XM6 \u8033\u673a");
     REQUIRE(SetName(&dev, &in) == 0); check_names(in.Name);
     REQUIRE(saves == 1 && saved_name == in.Name && std::wcscmp(dev.Name, in.Name) == 0);
+    ensure_status = -9;
+    REQUIRE(SetName(&dev, &in) == -9 && saves == 1); // first-filter failure reaches service
+    ensure_status = 0;
+    REQUIRE(SetName(&dev, &in) == 0 && saves == 1); // cached retry can complete creation
     attempted.clear(); in.Name[0] = 0;
     REQUIRE(SetName(&dev, &in) == STATUS_INVALID_PARAMETER && attempted.empty() && saves == 1);
+    REQUIRE(ensure_calls == 6);
     std::puts("production endpoint-name startup, cached retry, category coverage and failure isolation passed (OS APIs fake)");
 }

@@ -141,7 +141,9 @@ VOID Oa2dpUnlock(_Inout_ PKEVENT lock);
 /* ---- adapter.cpp / minwavert.cpp ------------------------------------------- */
 
 /* PASSIVE_LEVEL, ControlLock held. Metadata only; never removes filters. */
-VOID Oa2dpPublishNameLocked(_In_ OA2DP_AUDIO_DEVICE *dev);
+NTSTATUS Oa2dpPublishNameLocked(_In_ OA2DP_AUDIO_DEVICE *dev);
+/* PASSIVE_LEVEL, no caller locks held; first creation only, checks stop/remove. */
+NTSTATUS Oa2dpEnsureNamedFilters(_Inout_ OA2DP_AUDIO_DEVICE *dev);
 
 /* Tell the audio engine that the supported formats changed. */
 VOID Oa2dpWaveFormatsChanged(_Inout_ OA2DP_AUDIO_DEVICE *dev);

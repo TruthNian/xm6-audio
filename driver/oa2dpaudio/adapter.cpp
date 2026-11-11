@@ -197,7 +197,7 @@ Oa2dpDispatch
 // Best effort: name the KS interfaces too (legacy WinMM device names).
 #pragma code_seg("PAGE")
 // ControlLock held; all five interface identities must match the INF.
-extern "C" VOID Oa2dpPublishNameLocked(_In_ OA2DP_AUDIO_DEVICE *dev)
+extern "C" NTSTATUS Oa2dpPublishNameLocked(_In_ OA2DP_AUDIO_DEVICE *dev)
 {
     static const struct { const GUID *Category; PCWSTR Reference; } interfaces[] = {
         { &KSCATEGORY_AUDIO, OA2DP_WAVE_NAME },
@@ -211,13 +211,14 @@ extern "C" VOID Oa2dpPublishNameLocked(_In_ OA2DP_AUDIO_DEVICE *dev)
     PAGED_CODE();
 
     if (!NT_SUCCESS(RtlStringCchLengthW(dev->Name, RTL_NUMBER_OF(dev->Name), &len)) || len == 0)
-        return;
+        return STATUS_INVALID_PARAMETER;
     const ULONG bytes = (ULONG)((len + 1) * sizeof(WCHAR));
     NTSTATUS status = IoSetDevicePropertyData(dev->Pdo, &DEVPKEY_Device_FriendlyName,
         LOCALE_NEUTRAL, PLUGPLAY_PROPERTY_PERSISTENT, DEVPROP_TYPE_STRING, bytes, dev->Name);
     if (!NT_SUCCESS(status))
         KdPrintEx((DPFLTR_IHVAUDIO_ID, DPFLTR_WARNING_LEVEL,
             "oa2dpaudio: publishing device name failed 0x%08X\n", status));
+    NTSTATUS result = status;
     for (ULONG i = 0; i < RTL_NUMBER_OF(interfaces); ++i) {
         UNICODE_STRING ref, link;
         RtlInitUnicodeString(&ref, interfaces[i].Reference);
@@ -227,10 +228,13 @@ extern "C" VOID Oa2dpPublishNameLocked(_In_ OA2DP_AUDIO_DEVICE *dev)
                 LOCALE_NEUTRAL, PLUGPLAY_PROPERTY_PERSISTENT, DEVPROP_TYPE_STRING, bytes, dev->Name);
             RtlFreeUnicodeString(&link);
         }
-        if (!NT_SUCCESS(status))
+        if (!NT_SUCCESS(status)) {
+            if (NT_SUCCESS(result)) result = status;
             KdPrintEx((DPFLTR_IHVAUDIO_ID, DPFLTR_WARNING_LEVEL,
                 "oa2dpaudio: publishing interface name %lu failed 0x%08X\n", i, status));
+        }
     }
+    return result;
 }
 
 //=============================================================================
@@ -373,13 +377,15 @@ InstallFilters
     // Restore metadata before PortCls exposes the filters. A driver reinstall
     // may have restored the INF defaults even when our cached name is unchanged.
     Oa2dpLock(&dev->ControlLock);
-    Oa2dpPublishNameLocked(dev);
+    ntStatus = Oa2dpPublishNameLocked(dev);
     Oa2dpUnlock(&dev->ControlLock);
 
     if (dev->WavePort != NULL)
     {
         return STATUS_SUCCESS;
     }
+    if (!NT_SUCCESS(ntStatus))
+        return ntStatus; // never create a new endpoint from an unpublished name
 
     // Topology first (the wave filter's bridge pin connects to it).
     ntStatus = CreateMiniportTopology(&miniTopo, dev);
@@ -425,6 +431,20 @@ InstallFilters
     SAFE_RELEASE(wavePort);
     SAFE_RELEASE(topoPort);
     return ntStatus;
+}
+
+// First installation has no cached name. The control interface can accept it
+// before filters exist; a later name update never unregisters working filters.
+#pragma code_seg("PAGE")
+extern "C" NTSTATUS Oa2dpEnsureNamedFilters(_Inout_ OA2DP_AUDIO_DEVICE *dev)
+{
+    PAGED_CODE();
+    Oa2dpLock(&dev->FilterLock);
+    NTSTATUS status = Oa2dpControlStatus(dev, FALSE);
+    if (NT_SUCCESS(status) && !dev->WavePort)
+        status = InstallFilters(dev);
+    Oa2dpUnlock(&dev->FilterLock);
+    return status;
 }
 
 //=============================================================================
@@ -562,9 +582,15 @@ Routine Description:
         }
     }
 
-    // Install wave+topology filters for the render endpoint.
+    // A first installation has no cached headset name. Expose only the control
+    // interface until SET_NAME can publish it before PcRegisterSubdevice.
+    // Cached names allow normal immediate endpoint startup, including offline.
     Oa2dpLock(&dev->FilterLock);
-    ntStatus = InstallFilters(dev);
+    Oa2dpLock(&dev->ControlLock);
+    const BOOLEAN haveName = dev->Name[0] != L'\0';
+    Oa2dpUnlock(&dev->ControlLock);
+    if (haveName)
+        ntStatus = InstallFilters(dev);
     Oa2dpUnlock(&dev->FilterLock);
 
     if (NT_SUCCESS(ntStatus))

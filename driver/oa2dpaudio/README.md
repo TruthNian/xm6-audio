@@ -104,8 +104,10 @@ generator, file saving, KMDF.
 7. **Friendly name.** `IOCTL_OA2DP_AUDIO_SET_NAME` stores the name
    (`Oa2dpName`), sets `DEVPKEY_Device_FriendlyName` on the PDO and publishes
    the name to all five audio interface/reference pairs in the INF. Cached
-   names are published before filter registration; a same-name service request
-   retries interface publication. Naming never re-registers filters or restarts
+   names are published before filter registration. With no cached name, only
+   the control interface starts; the first valid name creates the filters.
+   The INF preserves existing interface names during upgrade. A same-name service request
+   retries interface publication. Naming never re-registers existing filters or restarts
    audio clients. In the 0.3.62 host observation all these properties matched
    the headset name, while Core Audio still returned the old display name.
    Do not treat successful property writes as visible-name acceptance; see

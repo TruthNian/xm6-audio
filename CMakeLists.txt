@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(XM6Audio VERSION 0.3.63 LANGUAGES C CXX)
+project(XM6Audio VERSION 0.3.64 LANGUAGES C CXX)
 
 # The loaded binary's version must agree with the configured project and INF.
 # Generate resources in the build tree rather than keeping a stale copy.
@@ -120,7 +120,7 @@ if(OA2DP_BUILD_TESTS)
     add_executable(test_audio_pnp tools/test-audio-pnp.cpp)
     target_include_directories(test_audio_pnp PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
     add_test(NAME audio_pnp COMMAND test_audio_pnp)
-    xm6_test_body(driver/oa2dpaudio/adapter.cpp "extern \"C\" VOID Oa2dpPublishNameLocked("
+    xm6_test_body(driver/oa2dpaudio/adapter.cpp "extern \"C\" NTSTATUS Oa2dpPublishNameLocked("
         "\n//=============================================================================\n#pragma code_seg(\"PAGE\")\nstatic NTSTATUS\nInstallSubdevice" endpoint-name-publication)
     xm6_test_body(driver/oa2dpaudio/control.cpp "static NTSTATUS SetName("
         "\nstatic NTSTATUS WaitFormat(" endpoint-name-update)
@@ -129,6 +129,15 @@ if(OA2DP_BUILD_TESTS)
     add_executable(test_endpoint_names tools/test-endpoint-names.cpp)
     target_include_directories(test_endpoint_names PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
     add_test(NAME endpoint_names COMMAND test_endpoint_names)
+    xm6_test_body(driver/oa2dpaudio/adapter.cpp "NTSTATUS\nStartDevice\n("
+        "\n//=============================================================================\n#pragma code_seg(\"PAGE\")\nstatic VOID\nStopDevice" endpoint-start-device)
+    xm6_test_body(driver/oa2dpaudio/adapter.cpp "extern \"C\" NTSTATUS Oa2dpEnsureNamedFilters("
+        "\n//=============================================================================\n#pragma code_seg()\nstatic NTSTATUS BusQueryComplete" endpoint-ensure-named)
+    xm6_test_body(service/src/session.cpp "bool Session::ensure_audio_endpoint("
+        "\nbool Session::setup_audio_endpoint(" endpoint-name-admission)
+    add_executable(test_endpoint_startup tools/test-endpoint-startup.cpp)
+    target_include_directories(test_endpoint_startup PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
+    add_test(NAME endpoint_startup COMMAND test_endpoint_startup)
     xm6_test_body(driver/oa2dp/driver.c "static VOID CompleteEvent(" "\nstatic NTSTATUS Oa2dpChildEnumerated(" transport-events)
     add_executable(test_transport_events tools/test-transport-events.cpp)
     target_include_directories(test_transport_events PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
@@ -279,6 +288,9 @@ endif()
 if(NOT WIN32)
     return()  # everything below is Windows-only
 endif()
+
+add_test(NAME endpoint_inf_metadata COMMAND powershell.exe -NoProfile -File
+    "${CMAKE_CURRENT_SOURCE_DIR}/scripts/tests/endpoint-metadata.ps1")
 
 # --- codec adapters ---------------------------------------------------------
 add_library(oa2dp_codecs STATIC codecs/src/encoder.c codecs/src/enc_sbc.c

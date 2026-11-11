@@ -430,7 +430,8 @@ extern "C" NTSTATUS Oa2dpControlStart(_Inout_ OA2DP_AUDIO_DEVICE *dev)
         if (!NT_SUCCESS(status))
             return status;
     }
-    // Filters and ring are ready before the control interface announces itself.
+    // The ring is ready. On first install SET_NAME creates filters only after
+    // their headset metadata is available, avoiding a cached placeholder name.
     KeAcquireSpinLock(&dev->Lock, &irql);
     dev->Started = TRUE;
     KeReleaseSpinLock(&dev->Lock, irql);
@@ -623,7 +624,7 @@ static NTSTATUS SetName(_Inout_ OA2DP_AUDIO_DEVICE *dev, _In_ const OA2DP_ENDPOI
     Oa2dpUnlock(&dev->ControlLock);
     // Naming is metadata. Never unregister a working endpoint to refresh it;
     // existing DirectSound/WASAPI clients must keep their device identity.
-    return STATUS_SUCCESS;
+    return Oa2dpEnsureNamedFilters(dev);
 }
 
 static NTSTATUS WaitFormat(_Inout_ OA2DP_AUDIO_DEVICE *dev, _Inout_ PIRP irp, _In_ ULONG outLen)

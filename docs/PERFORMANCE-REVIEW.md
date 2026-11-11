@@ -1,11 +1,11 @@
 # Audio clock, PCM computation and output-lifetime review
 
-Reviewed 2026-11-11 against source 0.3.54 and 0.3.59–0.3.62. The 0.3.61/0.3.62
+Reviewed 2026-11-11 against source 0.3.54 and 0.3.59–0.3.63. The 0.3.61/0.3.62
 observations below include a connected headset. Earlier computational reviews
 were performed without the headset and exclude Windows rendering, scheduling
 under audio load, Bluetooth transmission and headphone playback.
 
-## 0.3.63 candidate: precision-only changes also delimit PCM epochs
+## 0.3.63: precision-only changes also delimit PCM epochs
 
 A controlled regression on the preceding production body reproduced packed
 16 -> packed 24 PCM at the same rate/channel count without a ring epoch change:
@@ -33,12 +33,14 @@ notification. OS event and state-callback boundaries are controlled. The real
 producer/consumer thread fixture includes 10,000 epoch changes, half retaining
 the same normalized storage, with generation-tagged sample and buffer-boundary
 checks. The complete 0.3.63 native Release build and all 29 local checks passed,
-with CTest started only after the build completed. This source is not yet
-installed; loaded 0.3.62 and hardware acceptance remain separate.
+with CTest started only after the build completed. Exact-source Linux/Windows
+CI passed; 0.3.63 was subsequently activated on the development host. See the
+[deployment evidence](HARDWARE-BRINGUP.md#0363-activation-pcm-precision-fixes-2026-11-11).
+Source regression checks and hardware acceptance remain separate.
 It does not explain the earlier 2.178-second PCM supply gap
 or implement automatic per-file shared-mix selection.
 
-## 0.3.63 candidate: remove fixed S24 quantization before native LDAC input
+## 0.3.63: remove fixed S24 quantization before native LDAC input
 
 The common adapter contract previously rounded full int32/float32 input onto
 a fixed 24-bit integer grid, then shifted those samples into libldac's S32
@@ -74,9 +76,9 @@ selection. The native Release build and all 29 local checks pass. A preliminary
 check run overlapped compilation and could not launch a locked executable;
 the reported complete run was repeated only after the build exited successfully.
 
-This source has **not been installed or heard on the headset**. The currently
-loaded source remains `292a0c98b07b545c8c8b377eeef307056ab0b5fb` (0.3.62).
-At the quality inspection, Windows used a 96 kHz shared mix and supplied
+This source is now installed in 0.3.63, with native int32 input selection
+confirmed by the service log. **No audible quality gain has been established.**
+At the preceding 0.3.62 quality inspection, Windows used a 96 kHz shared mix and supplied
 24 valid integer bits in a 32-bit device container. Native input cannot recover
 detail already removed upstream. Media/Movie/GameMedia effects enumeration
 returned no advertised effect, the active endpoint had no FxProperties key,
