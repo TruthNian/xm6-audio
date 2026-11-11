@@ -2,8 +2,8 @@
 
 The controlled developer trial targets WH-1000XM6 on Windows 10 x64, build 19045. It uses a local development signature under explicitly authorized test signing. This is separate from the production installer, which still requires Microsoft-signed catalogs.
 
-Current runtime is **0.3.64**, with the loaded kernel images and running service
-verified against the local signed package. Native LDAC input and complete PCM
+Current runtime uses **0.3.64 kernel drivers and the 0.3.65 service**, each
+verified against its recorded local package. Native LDAC input and complete PCM
 format epochs are deployed; Core Audio's displayed endpoint name is unresolved.
 The user's acceptance of **Paired while disconnected** and correct Settings
 connect/disconnect display belongs to 0.3.61 and remains recorded below.
@@ -17,6 +17,41 @@ service matched the verified local test-signed candidate. The service process
 started approximately twelve seconds after boot without a manual start in the
 post-boot session. This establishes automatic service startup, not complete
 automatic audio/reconnect acceptance.
+
+## 0.3.65 user-mode activation, retaining 0.3.64 drivers (2026-11-11)
+
+Service source `19eda47981528ac343fefb7a0963a4ad2a48d160` passed a complete
+native Release build, 31/31 local tests and
+[Linux sanitizer / Windows native CI](https://github.com/TruthNian/xm6-audio/actions/runs/43047019940).
+Its kernel and ABI sources are unchanged from the installed 0.3.64 source;
+the only driver-directory differences are INF release numbers. Therefore this
+activation updated only the SCM service image and its colocated codec DLLs,
+from a verified catalog in an administrator/SYSTEM-only package directory.
+Both loaded kernel hashes remain those of 0.3.64. No kernel package install,
+radio cycle, endpoint restart, boot/trust change or computer restart occurred.
+The previous service path and identities are retained in the private receipt.
+
+This fixes the reproduced concurrent shutdown/rate-selection crash and reports
+the adapter's actual input type. After activation, Windows render/capture
+defaults and the native endpoint ID were unchanged. The existing application
+session had nonzero signal, the service reported LDAC at 96 kHz stereo with
+native `int32` adapter input, and the endpoint supplied 24 valid integer bits
+in a 32-bit container. The observed shared mix is float32/96 kHz; these are
+different boundaries. The measured transport rate was about 1.01 Mbit/s,
+including protocol overhead. The unchanged policy requests LDAC HQ without ABR.
+This snapshot is not a new listening test or proof of audible quality gain.
+
+The user reported one interruption a few minutes after deployment. Service
+timestamps correlate with the deliberate update: teardown starts at local
+23:22:00.933, the new service starts at 23:22:02.533, and LDAC streaming restarts
+at 23:22:05.148. The software restart interval is 4.215 seconds, not a measured
+headphone-silence duration. No independent encoder/send failure or service-crash
+entry was found in that interval. Do not count this planned interruption as an
+unexplained playback defect, or use it to explain earlier unrelated gaps.
+
+The legacy Core Audio name still needs migration; per-file format selection
+after shared mixing is absent. Historical 0.3.61 Settings acceptance remains
+separate. No broader hardware acceptance is asserted.
 
 ## 0.3.64 activation: name publication and offline epoch (2026-11-11)
 
