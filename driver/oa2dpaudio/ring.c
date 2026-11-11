@@ -163,17 +163,22 @@ NTSTATUS Oa2dpRingSetDataEvent(OA2DP_AUDIO_RING *r, HANDLE event,
 
 /* Rewrites only the format fields: positions keep counting, so a consumer
  * that is still running never sees them jump backwards. */
-BOOLEAN Oa2dpRingSetFormat(_Inout_ OA2DP_AUDIO_RING *r, _In_ ULONG rate, _In_ USHORT channels,
-                           _In_ USHORT format)
+BOOLEAN Oa2dpRingSetFormat(_Inout_ OA2DP_AUDIO_RING *r, _In_ const OA2DP_FORMAT *format)
 {
     KIRQL irql;
     BOOLEAN changed = FALSE;
 
-    if (channels == 0 || channels > OA2DP_RING_MAX_CHANNELS)
+    if (!oa2dp_pcm_format_valid(format))
         return FALSE;
     KeAcquireSpinLock(&r->Lock, &irql);
-    if (r->Ring)
-        changed = oa2dp_ring_set_format(r->Ring, rate, channels, format) > 0;
+    if (r->Ring && (!r->SourceFormatValid || !oa2dp_pcm_format_same(&r->SourceFormat, format))) {
+        changed = oa2dp_ring_begin_format(r->Ring, format->SampleRate, format->Channels,
+            oa2dp_pcm_format_ring_type(format)) > 0;
+        if (changed) {
+            r->SourceFormat = *format;
+            r->SourceFormatValid = TRUE;
+        }
+    }
     if (changed && r->DataEvent) KeSetEvent(r->DataEvent, IO_NO_INCREMENT, FALSE);
     KeReleaseSpinLock(&r->Lock, irql);
     return changed;
@@ -213,7 +218,8 @@ VOID Oa2dpRingPump(_Inout_ OA2DP_AUDIO_RING *r, _In_reads_bytes_(cyclicBytes) co
     if (pos >= cyclicBytes)
         pos = 0;
     KeAcquireSpinLock(&r->Lock, &irql);
-    if (r->Ring && r->Ring->sample_rate == format->SampleRate &&
+    if (r->Ring && r->SourceFormatValid && oa2dp_pcm_format_same(&r->SourceFormat, format) &&
+        r->Ring->sample_rate == format->SampleRate &&
         r->Ring->channels == channels && r->Ring->format == want) {
         while (frames) {
             ULONG untilWrap = (cyclicBytes - pos) / frameBytes;

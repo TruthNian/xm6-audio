@@ -77,6 +77,11 @@ int oa2dp_ring_validate(const oa2dp_pcm_ring *r, size_t mapped_bytes);
  * Storage stride and counters do not change. Old-format backlog is not retyped. */
 int oa2dp_ring_set_format(oa2dp_pcm_ring *r, uint32_t sample_rate,
                           uint16_t channels, uint16_t format);
+/* Producer only: start a new epoch even if normalized storage is unchanged.
+ * Use when source PCM precision/container metadata changes within one ring
+ * representation; old consumers must not process the new source's samples. */
+int oa2dp_ring_begin_format(oa2dp_pcm_ring *r, uint32_t sample_rate,
+                            uint16_t channels, uint16_t format);
 /* A stable format transaction, or ERR_BUSY while the producer changes it. */
 int oa2dp_ring_snapshot(const oa2dp_pcm_ring *r, oa2dp_ring_format *format);
 

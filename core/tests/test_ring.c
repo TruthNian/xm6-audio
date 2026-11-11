@@ -156,12 +156,19 @@ void test_ring(void)
     CHECK_MEM(out, next, sizeof(next));
     CHECK_EQ(oa2dp_ring_set_format(r, 44100, 2, OA2DP_RING_FMT_FLOAT32), 0);
     CHECK_EQ(r->format_sequence, stereo_format.sequence);
+    /* Precision metadata can change without changing normalized storage. */
+    CHECK_EQ(oa2dp_ring_begin_format(r, 44100, 2, OA2DP_RING_FMT_FLOAT32), 1);
+    CHECK_EQ(oa2dp_ring_read(r, &stereo_format, out, sizeof(out), 1, &got), OA2DP_ERR_STATE);
+    CHECK_EQ(oa2dp_ring_snapshot(r, &stereo_format), OA2DP_OK);
     CHECK_EQ(oa2dp_ring_set_format(r, 44100, 2, OA2DP_RING_FMT_S32_FULL), 1);
     CHECK_EQ(oa2dp_ring_read(r, &stereo_format, out, sizeof(out), 1, &got), OA2DP_ERR_STATE);
     CHECK_EQ(oa2dp_ring_set_format(r, 48000, 3, OA2DP_RING_FMT_S32), OA2DP_ERR_INVAL);
     r->format_sequence |= 1;
     CHECK_EQ(oa2dp_ring_snapshot(r, &stereo_format), OA2DP_ERR_BUSY);
+    CHECK_EQ(oa2dp_ring_begin_format(r, 44100, 2, OA2DP_RING_FMT_S32_FULL), OA2DP_ERR_BUSY);
     r->format_sequence &= ~1u;
+    CHECK_EQ(oa2dp_ring_begin_format(r, 0, 2, OA2DP_RING_FMT_S32_FULL), OA2DP_ERR_INVAL);
+    CHECK_EQ(oa2dp_ring_begin_format(r, 44100, 3, OA2DP_RING_FMT_S32_FULL), OA2DP_ERR_INVAL);
     r->version = 1;
     CHECK_EQ(oa2dp_ring_validate(r, bytes), OA2DP_ERR_PROTO);
     r->version = OA2DP_RING_VERSION;

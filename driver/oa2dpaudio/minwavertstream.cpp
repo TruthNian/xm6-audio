@@ -130,8 +130,7 @@ CMiniportWaveRTStream::Init
     // F4.3: Windows opened the endpoint with a (possibly) new format. The ring
     // allocation never moves, so only its header changes; the service learns
     // about it from WAIT_FORMAT and reconfigures the headset.
-    if (Oa2dpRingSetFormat(&m_Device->Ring, m_Format.SampleRate, m_Format.Channels,
-                           oa2dp_pcm_format_ring_type(&m_Format)))
+    if (Oa2dpRingSetFormat(&m_Device->Ring, &m_Format))
     {
         Oa2dpReportStream(m_Device, &m_Format, FALSE);
     }
@@ -809,7 +808,6 @@ CMiniportWaveRTStream::SetState
     if (wasRunning && State_ != KSSTATE_RUN)
     {
         ExCancelTimer(m_pNotificationTimer, NULL);
-        Oa2dpRingSetRunning(&m_Device->Ring, FALSE);
         Oa2dpReportStream(m_Device, &m_Format, FALSE);
     }
     else if (!wasRunning && State_ == KSSTATE_RUN)
@@ -817,7 +815,6 @@ CMiniportWaveRTStream::SetState
         // 1 ms software hardware-emulation timer; notification cadence comes
         // from actual packet progress, including intervening position queries.
         ExSetTimer(m_pNotificationTimer, -(LONGLONG)OA2DP_HNS_PER_MS, OA2DP_HNS_PER_MS, NULL);
-        Oa2dpRingSetRunning(&m_Device->Ring, TRUE);
         Oa2dpReportStream(m_Device, &m_Format, TRUE);
     }
     return STATUS_SUCCESS;

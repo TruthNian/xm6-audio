@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(XM6Audio VERSION 0.3.62 LANGUAGES C CXX)
+project(XM6Audio VERSION 0.3.63 LANGUAGES C CXX)
 
 # The loaded binary's version must agree with the configured project and INF.
 # Generate resources in the build tree rather than keeping a stale copy.
@@ -180,6 +180,8 @@ if(OA2DP_BUILD_TESTS)
     target_link_libraries(test_pcm_quantization PRIVATE oa2dp_core)
     add_test(NAME pcm_quantization COMMAND test_pcm_quantization)
     xm6_test_body(driver/oa2dpaudio/ring.c "NTSTATUS Oa2dpRingSetDataEvent(" "" pcm-notification)
+    xm6_test_body(driver/oa2dpaudio/control.cpp "extern \"C\" VOID Oa2dpReportStream("
+        "\n/* ---- lifetime" pcm-report)
     add_executable(test_pcm_notification tools/test-pcm-notification.cpp)
     target_include_directories(test_pcm_notification PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
     target_link_libraries(test_pcm_notification PRIVATE oa2dp_core)

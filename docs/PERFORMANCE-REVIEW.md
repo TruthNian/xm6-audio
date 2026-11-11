@@ -5,7 +5,40 @@ observations below include a connected headset. Earlier computational reviews
 were performed without the headset and exclude Windows rendering, scheduling
 under audio load, Bluetooth transmission and headphone playback.
 
-## Unreleased: remove fixed S24 quantization before native LDAC input
+## 0.3.63 candidate: precision-only changes also delimit PCM epochs
+
+A controlled regression on the preceding production body reproduced packed
+16 -> packed 24 PCM at the same rate/channel count without a ring epoch change:
+`changed=0, epoch=0->0, old read=0 frames=2`. Both source formats normalize to
+the same S24-in-int32 storage. Valid-bit changes within an int32 container also
+share one storage representation. The old consumer could therefore accept new
+source samples before the asynchronous format notification retired its encoder,
+potentially applying the previous precision policy. This is a reproduced format
+boundary defect, not an attribution of an observed headset artifact.
+
+The kernel now keeps the complete producer PCM tuple under its existing ring
+lock and begins an epoch for every change to that tuple. A precision/container
+change advances the sequence and first-frame position even if storage shape
+stays the same. The old consumer rejects the new generation; obsolete producer
+metadata and old-format state reports are also rejected. Running publication
+has moved into the accepted format report, removing the separate unqualified
+RUN/STOP flag update. The device-to-ring lock order is unchanged, and external
+state callbacks still execute after unlocking. No mapped-header/IOCTL layout,
+additional timer, worker or resampler is introduced.
+
+The production-body fixture covers six precision/container transitions,
+unchanged-format no-ops, A -> B -> A, stale consumer/producer rejection, an
+uninitialized source descriptor, late old-format STOP, and accepted RUN/STOP
+notification. OS event and state-callback boundaries are controlled. The real
+producer/consumer thread fixture includes 10,000 epoch changes, half retaining
+the same normalized storage, with generation-tagged sample and buffer-boundary
+checks. The complete 0.3.63 native Release build and all 29 local checks passed,
+with CTest started only after the build completed. This source is not yet
+installed; loaded 0.3.62 and hardware acceptance remain separate.
+It does not explain the earlier 2.178-second PCM supply gap
+or implement automatic per-file shared-mix selection.
+
+## 0.3.63 candidate: remove fixed S24 quantization before native LDAC input
 
 The common adapter contract previously rounded full int32/float32 input onto
 a fixed 24-bit integer grid, then shifted those samples into libldac's S32

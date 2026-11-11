@@ -157,12 +157,12 @@ int oa2dp_ring_snapshot(const oa2dp_pcm_ring *r, oa2dp_ring_format *format)
     return OA2DP_OK;
 }
 
-int oa2dp_ring_set_format(oa2dp_pcm_ring *r, uint32_t rate, uint16_t channels, uint16_t format)
+static int set_format(oa2dp_pcm_ring *r, uint32_t rate, uint16_t channels, uint16_t format, int new_epoch)
 {
     if (!r || !rate || !channels || channels > r->storage_channels ||
         format > OA2DP_RING_FMT_S32_FULL)
         return OA2DP_ERR_INVAL;
-    if (r->sample_rate == rate && r->channels == channels && r->format == format)
+    if (!new_epoch && r->sample_rate == rate && r->channels == channels && r->format == format)
         return 0;
     uint32_t sequence = load32(&r->format_sequence);
     if (sequence & 1)
@@ -179,6 +179,16 @@ int oa2dp_ring_set_format(oa2dp_pcm_ring *r, uint32_t rate, uint16_t channels, u
 #endif
     store32(&r->format_sequence, sequence + 2);
     return 1;
+}
+
+int oa2dp_ring_set_format(oa2dp_pcm_ring *r, uint32_t rate, uint16_t channels, uint16_t format)
+{
+    return set_format(r, rate, channels, format, 0);
+}
+
+int oa2dp_ring_begin_format(oa2dp_pcm_ring *r, uint32_t rate, uint16_t channels, uint16_t format)
+{
+    return set_format(r, rate, channels, format, 1);
 }
 
 uint32_t oa2dp_ring_readable(const oa2dp_pcm_ring *r)

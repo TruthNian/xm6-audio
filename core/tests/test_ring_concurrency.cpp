@@ -78,8 +78,9 @@ int main()
     std::thread producer([&] {
         while (!start.load()) std::this_thread::yield();
         for (unsigned n = 0; n < 10000 && !failed.load(); ++n) {
-            const bool mono = (n & 1) == 0;
-            if (oa2dp_ring_set_format(ring, mono ? 44100 : 48000, mono ? 1 : 2,
+            const bool mono = ((n / 2) & 1) == 0;
+            const auto change = n & 1 ? oa2dp_ring_begin_format : oa2dp_ring_set_format;
+            if (change(ring, mono ? 44100 : 48000, mono ? 1 : 2,
                     mono ? OA2DP_RING_FMT_FLOAT32 : OA2DP_RING_FMT_S32_FULL) != 1) {
                 failed = true; break;
             }
@@ -101,6 +102,6 @@ int main()
     const bool ok = !failed.load() && blocks > 0;
     std::free(ring);
     if (!ok) { std::fputs("Concurrent PCM format/read contract failed.\n", stderr); return 1; }
-    std::printf("Concurrent PCM PASS: 10000 format transitions, %u complete blocks; no audio device opened.\n", blocks);
+    std::printf("Concurrent PCM PASS: 10000 epochs (5000 unchanged storage), %u complete blocks; no audio device opened.\n", blocks);
     return 0;
 }

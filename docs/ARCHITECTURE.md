@@ -60,7 +60,7 @@ a peer pause as a request to restart. Retry uses the current PCM target and
 revalidates connection/SEP identity after protocol waits. An accepted rate
 with a failed START retries that START without repeating the rate change.
 
-The format contract distinguishes sample rate, channels, container width, valid precision and integer/float representation. Integer32 remains integer32 in the shared ring; 24-in-32 follows WAVEFORMATEXTENSIBLE's left-aligned precision convention. Conversion to 16/24 useful bits occurs at the selected encoder boundary.
+The format contract distinguishes sample rate, channels, container width, valid precision and integer/float representation. Integer32 remains integer32 in the shared ring; 24-in-32 follows WAVEFORMATEXTENSIBLE's left-aligned precision convention. The 0.3.63 source preserves native S32/F32 input at the LDAC boundary in automatic mode; explicit 16/24-bit settings and other adapters retain their precision conversion. This is an encoder-input contract, not a 32-bit wireless-precision claim.
 
 Integer precision reduction/averaging uses unsigned magnitude shifts with the
 same rounding and saturation as the earlier division contract. The float path
@@ -69,6 +69,15 @@ provided a sample object; events-only output cannot become an empty AAC frame.
 All returned COM objects pass common cleanup before an input-needed return.
 
 Ring protocol v2 fixes the allocated frame stride, independent of the active channel count. A producer sequence and first-frame position separate format generations. The consumer copies only a complete bounded block for its encoder's snapshot, checks the generation after copying, and releases no block on a format race. Old-format backlog is skipped, not reinterpreted. Partial codec input blocks remain queued until complete. Driver and service must both use v2; a v1/v2 mismatch is rejected during mapping. These contracts have offline concurrent coverage, not hardware acceptance.
+
+Starting with the 0.3.63 source, the driver binds the full source PCM tuple to
+each epoch, including container width and valid bits. A precision-only change
+starts a new epoch even when normalized ring storage is unchanged. The ring
+producer and stream-state reporter reject obsolete source metadata. The
+accepted reporter publishes Running and the corresponding format/epoch under
+the existing device-to-ring lock order. The mapped header and IOCTL layout do
+not change. This does not turn individual mixed applications into separate
+endpoint formats.
 
 Windows shared mode supplies a mixed stream. The driver cannot infer the original format of each contributing file. Exclusive mode can supply a supported player-selected stream format. Unsupported rate changes do not become a falsely labeled fixed-rate success.
 

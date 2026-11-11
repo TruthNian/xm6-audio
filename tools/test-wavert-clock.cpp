@@ -127,12 +127,9 @@ static void ExSetTimer(PEX_TIMER t, LONGLONG due, ULONGLONG period, void *) {
     t->Active = true;
     ++t->Sets;
 }
-static void Oa2dpRingSetRunning(FakeRing *r, bool running) {
-    REQUIRE(!locked);
-    r->Running = running;
-}
 static void Oa2dpReportStream(OA2DP_AUDIO_DEVICE *d, const OA2DP_FORMAT *, bool running) {
     REQUIRE(!locked);
+    d->Ring.Running = running;
     d->Reports.push_back(running);
 }
 static ULONG Oa2dpLatencyUs(OA2DP_AUDIO_DEVICE *) {

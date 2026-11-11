@@ -56,7 +56,8 @@ generator, file saving, KMDF.
    hardware emulation, here also in polled mode) calls `Oa2dpRingPump()`
    with the frames played since the last tick. Float32 is copied as is;
    16/24-bit PCM becomes 24-bit values in int32 (`OA2DP_RING_FMT_S32`).
-   `OA2DP_RING_FLAG_RUNNING` follows `SetState(RUN)` / leaving RUN.
+   `OA2DP_RING_FLAG_RUNNING` follows accepted `SetState(RUN)` / leaving RUN
+   reports, after checking the complete producer format.
    ABI 11's referenced data-ready event wakes the service at a complete
    encoder-block threshold, including already-buffered data at registration.
    Format/RUN changes also wake it; unmap/cleanup release the event reference.
@@ -64,7 +65,10 @@ generator, file saving, KMDF.
 4. **Format change.** The ring is allocated once for 2 channels and never
    moves. Ring protocol v2 keeps the two-channel storage stride fixed, even
    for mono PCM. A format transaction updates rate/channels/representation,
-   an atomic sequence and the first position of the new format. Counters
+   an atomic sequence and the first position of the new format. Source
+   container/valid-bit changes also start an epoch even if this normalized
+   storage layout is unchanged. Producer admission and state reports compare
+   the complete source tuple. Counters
    keep growing; the consumer discards preceding backlog instead of treating
    it as the new format. A bounded complete-block read uses one snapshot and
    rejects a sequence change before publishing the block to the encoder.

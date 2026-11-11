@@ -327,14 +327,23 @@ extern "C" VOID Oa2dpReportStream(_Inout_ OA2DP_AUDIO_DEVICE *dev, _In_ const OA
     // this report must retain the old epoch, so the encoder defers starting.
     // Device -> ring is the only nested order; ring producers do not take Lock.
     KeAcquireSpinLockAtDpcLevel(&dev->Ring.Lock);
-    const oa2dp_pcm_ring *ring = dev->Ring.Ring;
-    if (!ring || ring->sample_rate != format->SampleRate || ring->channels != format->Channels ||
+    oa2dp_pcm_ring *ring = dev->Ring.Ring;
+    if (!ring || !dev->Ring.SourceFormatValid ||
+        !oa2dp_pcm_format_same(&dev->Ring.SourceFormat, format) ||
+        ring->sample_rate != format->SampleRate || ring->channels != format->Channels ||
         ring->format != oa2dp_pcm_format_ring_type(format)) {
         KeReleaseSpinLockFromDpcLevel(&dev->Ring.Lock);
         KeReleaseSpinLock(&dev->Lock, irql);
         return; // an obsolete stream cannot replace the new stream's state
     }
     dev->PcmSequence = ring->format_sequence;
+    // Running belongs to the accepted source format too. A late STOP from an
+    // obsolete stream must not clear the new stream's shared running flag.
+    if (running)
+        InterlockedOr((volatile LONG *)&ring->flags, OA2DP_RING_FLAG_RUNNING);
+    else
+        InterlockedAnd((volatile LONG *)&ring->flags, ~(LONG)OA2DP_RING_FLAG_RUNNING);
+    if (dev->Ring.DataEvent) KeSetEvent(dev->Ring.DataEvent, IO_NO_INCREMENT, FALSE);
     KeReleaseSpinLockFromDpcLevel(&dev->Ring.Lock);
     dev->Current = *format;
     dev->Running = running;

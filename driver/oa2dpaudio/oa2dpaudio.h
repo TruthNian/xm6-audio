@@ -45,6 +45,8 @@ typedef struct _OA2DP_AUDIO_RING {
     PEPROCESS UserProcess;  /* referenced while UserVa is set */
     PKEVENT DataEvent;      /* referenced, accessed only under Lock */
     ULONG MinimumFrames;
+    OA2DP_FORMAT SourceFormat; /* full producer metadata, guarded by Lock */
+    BOOLEAN SourceFormatValid;
 } OA2DP_AUDIO_RING;
 
 typedef struct _OA2DP_AUDIO_DEVICE {
@@ -103,8 +105,7 @@ VOID Oa2dpRingUnmapUser(_Inout_ OA2DP_AUDIO_RING *r);
 NTSTATUS Oa2dpRingSetDataEvent(_Inout_ OA2DP_AUDIO_RING *r, HANDLE event,
                               ULONG minimumFrames, KPROCESSOR_MODE mode);
 /* Rewrite the header in place; TRUE if the format changed. */
-BOOLEAN Oa2dpRingSetFormat(_Inout_ OA2DP_AUDIO_RING *r, _In_ ULONG rate, _In_ USHORT channels,
-                           _In_ USHORT format);
+BOOLEAN Oa2dpRingSetFormat(_Inout_ OA2DP_AUDIO_RING *r, _In_ const OA2DP_FORMAT *format);
 VOID Oa2dpRingSetRunning(_Inout_ OA2DP_AUDIO_RING *r, _In_ BOOLEAN running);
 /* Copy `frames` frames of the WaveRT cyclic buffer, starting at byte offset
  * `pos`, into the ring. `bits` is the container: 32 = IEEE float, 16/24 =
