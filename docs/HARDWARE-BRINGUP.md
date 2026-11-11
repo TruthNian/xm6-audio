@@ -2,14 +2,45 @@
 
 The controlled developer trial targets WH-1000XM6 on Windows 10 x64, build 19045. It uses a local development signature under explicitly authorized test signing. This is separate from the production installer, which still requires Microsoft-signed catalogs.
 
-Latest source audit: [0.3.49 lifecycle review](LIFECYCLE-REVIEW.md). Version
-0.3.49 is now activated with verified loaded images; see the following record.
+Latest source audit: [0.3.51 event-chain review](EVENT-CHAIN-REVIEW.md). Version
+0.3.51 is now activated with verified loaded images; see the following record.
 Earlier runtime observations apply to 0.3.44. After its authorized
 deployment and a user restart, both actual loaded kernel images and the running
 service matched the verified local test-signed candidate. The service process
 started approximately twelve seconds after boot without a manual start in the
 post-boot session. This establishes automatic service startup, not complete
 automatic audio/reconnect acceptance.
+
+## 0.3.50/0.3.51 offline-state acceptance (2026-11-11)
+
+The actual Windows DevicesFlowUI trace supplied a reproducible disconnected
+case without a headset: native49's final state was Connected(7), inbox's final
+state was Disconnected(3), and native49 restoration reproduced Connected(7).
+The common transient Connected during enumeration did not distinguish them.
+
+Version50's PnP wireless-state fix was built, locally test-signed with the
+existing certificate and activated by cycling Bluetooth. Both actual kernel
+images matched the signed package; the running service was version50. Its
+final display-model transition was Disconnected(3), at approximately 5429 ms.
+Trace EventsLost and BuffersLost were zero.
+
+Source `44286f759444c54155383cb5c845da18b57d3822` adds the remaining version51
+event/transport fixes. All 21 local checks, metadata/INF/catalog validation and
+[Linux/Windows source CI](https://github.com/TruthNian/xm6-audio/actions/runs/42979844718)
+passed. The locally built package was signed with the same existing test
+certificate, staged and activated through a radio cycle, without rebooting
+the computer or changing boot policy, certificate trust or radio privacy.
+The actual loaded transport/audio images and running service executable
+matched the signed version51 package hashes. Current transport/render install
+flags requested no restart.
+
+The version51 trace decoded all 305 events and lost no events/buffers. Its final
+target transitions at approximately 5166 ms were Disconnected(3). A subsequent
+read-only report agreed: Bluetooth On, paired AEP Connected=False, container
+Connected=False, native session disconnected with zero bitrate, no query
+errors. Protected activation state records this success without marking
+headset acceptance complete. No connected playback, per-device reconnect,
+Chrome-stability or performance conclusion follows from this offline test.
 
 ## 0.3.49 activation and controlled state comparison (2026-11-11)
 

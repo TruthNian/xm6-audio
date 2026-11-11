@@ -48,6 +48,14 @@ native49 and inbox transiently reported Connected during enumeration; their
 final states differed. A single immediate container snapshot missed the defect.
 The fix was not a cosmetic property overwrite or pairing reset.
 
+Version51 was subsequently activated without a computer restart. Both actual
+kernel images and the running service matched the signed source package;
+transport/render restart flags were clear. All 305 display-trace events were
+decoded with zero loss, and the final state remained Disconnected(3). The
+read-only AEP, container and service report also agreed on disconnection.
+All 21 local checks and the exact
+[source CI](https://github.com/TruthNian/xm6-audio/actions/runs/42979844718) passed.
+
 The service bitrate is accepted media-submission bytes per time window,
 including RTP overhead. Kernel completion counts/timing and PCM buffer/wait
 events are separate measurements. None proves that the headphone rendered
