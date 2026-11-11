@@ -68,6 +68,9 @@ Windows shared-mix behavior are unchanged.
 No audible AAC/SBC fallback, real codec transition, RF stability, Chrome-stutter
 resolution or measured performance gain is established by these checks.
 
+The subsequent [0.3.54 output-lifetime review](PERFORMANCE-REVIEW.md) covers
+events-only output, NO_SAMPLE and cleanup independently of capability probing.
+
 ## Local activation
 
 Source `42f0670618b9771208b0626fe53a554bfc3ca885` passed all 23 local checks

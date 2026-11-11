@@ -131,12 +131,11 @@ HRESULT drain(AacState *x)
         }
         DWORD status = 0;
         HRESULT hr = x->mft->ProcessOutput(0, 1, &db, &status);
-        if (hr == MF_E_TRANSFORM_NEED_MORE_INPUT) {
-            release(buf);
-            release(sample);
-            return S_OK;
-        }
-        if (SUCCEEDED(hr) && db.pSample) {
+        // Caller-provided pSample remains non-NULL on an events-only result.
+        // The explicit NO_SAMPLE status must not become an empty AAC frame.
+        const bool no_sample = (db.dwStatus & MFT_OUTPUT_DATA_BUFFER_NO_SAMPLE) ==
+            MFT_OUTPUT_DATA_BUFFER_NO_SAMPLE;
+        if (SUCCEEDED(hr) && db.pSample && !no_sample) {
             IMFMediaBuffer *contig = nullptr;
             hr = db.pSample->ConvertToContiguousBuffer(&contig);
             if (SUCCEEDED(hr)) {
@@ -144,7 +143,10 @@ HRESULT drain(AacState *x)
                 DWORD len = 0;
                 hr = contig->Lock(&data, nullptr, &len);
                 if (SUCCEEDED(hr)) {
-                    x->pending.emplace_back(data, data + len);
+                    if (len)
+                        x->pending.emplace_back(data, data + len);
+                    else
+                        hr = E_UNEXPECTED; // no valid AAC access unit
                     contig->Unlock();
                 }
                 release(contig);
@@ -156,6 +158,10 @@ HRESULT drain(AacState *x)
             db.pSample->Release();
         release(buf);
         release(sample);
+        // Returned collections/samples are owned even when no media was
+        // produced. Join the same cleanup before handling input-needed.
+        if (hr == MF_E_TRANSFORM_NEED_MORE_INPUT)
+            return S_OK;
         if (FAILED(hr))
             return hr;
     }

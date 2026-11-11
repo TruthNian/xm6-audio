@@ -62,6 +62,12 @@ with a failed START retries that START without repeating the rate change.
 
 The format contract distinguishes sample rate, channels, container width, valid precision and integer/float representation. Integer32 remains integer32 in the shared ring; 24-in-32 follows WAVEFORMATEXTENSIBLE's left-aligned precision convention. Conversion to 16/24 useful bits occurs at the selected encoder boundary.
 
+Integer precision reduction/averaging uses unsigned magnitude shifts with the
+same rounding and saturation as the earlier division contract. The float path
+is unchanged. AAC output honors NO_SAMPLE independently of whether its caller
+provided a sample object; events-only output cannot become an empty AAC frame.
+All returned COM objects pass common cleanup before an input-needed return.
+
 Ring protocol v2 fixes the allocated frame stride, independent of the active channel count. A producer sequence and first-frame position separate format generations. The consumer copies only a complete bounded block for its encoder's snapshot, checks the generation after copying, and releases no block on a format race. Old-format backlog is skipped, not reinterpreted. Partial codec input blocks remain queued until complete. Driver and service must both use v2; a v1/v2 mismatch is rejected during mapping. These contracts have offline concurrent coverage, not hardware acceptance.
 
 Windows shared mode supplies a mixed stream. The driver cannot infer the original format of each contributing file. Exclusive mode can supply a supported player-selected stream format. Unsupported rate changes do not become a falsely labeled fixed-rate success.

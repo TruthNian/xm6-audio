@@ -1,5 +1,17 @@
 # Native lifecycle review
 
+## 0.3.54: PCM cost and AAC output ownership
+
+The [performance/output review](PERFORMANCE-REVIEW.md) removes measured
+per-sample integer division while preserving the numeric PCM contract, and
+corrects AAC events-only/NO_SAMPLE handling and returned-object cleanup.
+The independent division oracle matches 2,424,844 samples. Paired computation
+timing shows about 5.2x improvement for full-int32 stereo preparation, without
+an attributed float-path or whole-stream gain. Controlled old drain bodies
+fail the new ownership/events-only checks. Actual MFT encoding still passes
+all four mono/stereo and 44.1/48 kHz combinations. Hardware sound, reconnect
+and Chrome stability remain separate, incomplete acceptance items.
+
 ## 0.3.53: constrain codec offers to actual backend and policy
 
 The [codec review](CODEC-REVIEW.md) reproduces AAC target overshoot with the

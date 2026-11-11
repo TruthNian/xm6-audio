@@ -365,12 +365,18 @@ static int32_t quantize_float(double value, int32_t scale, int32_t expand)
     return rounded * expand;
 }
 
-static int32_t quantize_integer(int64_t value, int64_t step, int32_t limit, int32_t expand)
+static int32_t quantize_integer(int64_t value, unsigned shift, int32_t limit, int32_t expand)
 {
-    int64_t rounded = value < 0 ? -((-value + step / 2) / step) : (value + step / 2) / step;
-    if (rounded >= limit) rounded = limit - 1;
-    if (rounded < -limit) rounded = -limit;
-    return (int32_t)rounded * expand;
+    /* Every precision/downmix divisor is a power of two. Round magnitudes
+     * with unsigned shifts, preserving ties away from zero without signed
+     * right-shift assumptions or negating INT64_MIN. Clamp before narrowing. */
+    const int negative = value < 0;
+    const uint64_t magnitude = negative ? UINT64_C(0) - (uint64_t)value : (uint64_t)value;
+    const uint64_t half = (UINT64_C(1) << shift) >> 1;
+    uint64_t rounded = (magnitude + half) >> shift;
+    const uint64_t maximum = negative ? (uint64_t)limit : (uint64_t)limit - 1;
+    if (rounded > maximum) rounded = maximum;
+    return (negative ? -(int32_t)rounded : (int32_t)rounded) * expand;
 }
 
 void oa2dp_pcm_float_to_s24(const float *in, int32_t *out, size_t n)
@@ -388,11 +394,11 @@ void oa2dp_pcm_float_to_quantized24(const float *in, int32_t *out, size_t n, uin
 
 void oa2dp_pcm_s32_to_quantized24(const int32_t *in, int32_t *out, size_t n, uint8_t bits)
 {
-    const int64_t step = bits == 16 ? 65536 : 256;
+    const unsigned shift = bits == 16 ? 16 : 8;
     const int32_t limit = bits == 16 ? 32768 : 8388608;
     const int32_t expand = bits == 16 ? 256 : 1;
     for (size_t i = 0; i < n; i++)
-        out[i] = quantize_integer(in[i], step, limit, expand);
+        out[i] = quantize_integer(in[i], shift, limit, expand);
 }
 
 static double load_float_sample(const uint8_t *input, size_t sample)
@@ -437,10 +443,10 @@ int oa2dp_pcm_prepare_encoder(const oa2dp_ring_format *format,
             /* Already in the encoder's declared S24 representation. */
             if (samples && input != output) memcpy(output, input, samples * sizeof(int32_t));
         } else {
-            const int64_t step = format->format == OA2DP_RING_FMT_S32_FULL ?
-                (bits == 16 ? 65536 : 256) : 256;
+            const unsigned shift = format->format == OA2DP_RING_FMT_S32_FULL ?
+                (bits == 16 ? 16 : 8) : 8;
             for (size_t i = 0; i < samples; ++i)
-                output[i] = quantize_integer(load_integer_sample(source, i), step, limit, expand);
+                output[i] = quantize_integer(load_integer_sample(source, i), shift, limit, expand);
         }
         return OA2DP_OK;
     }
@@ -457,15 +463,15 @@ int oa2dp_pcm_prepare_encoder(const oa2dp_ring_format *format,
             if (output_channels == 2) output[dst + 1] = output[dst];
         }
     } else {
-        const int64_t base_step = format->format == OA2DP_RING_FMT_S32_FULL ?
-            (bits == 16 ? 65536 : 256) : (bits == 16 ? 256 : 1);
-        const int64_t step = downmix ? base_step * 2 : base_step;
+        const unsigned base_shift = format->format == OA2DP_RING_FMT_S32_FULL ?
+            (bits == 16 ? 16 : 8) : (bits == 16 ? 8 : 0);
+        const unsigned shift = base_shift + (downmix ? 1 : 0);
         for (size_t i = 0; i < frames; ++i) {
             const size_t frame = reverse ? frames - 1 - i : i;
             const size_t src = frame * channels, dst = frame * output_channels;
             int64_t value = load_integer_sample(source, src);
             if (downmix) value += load_integer_sample(source, src + 1);
-            output[dst] = quantize_integer(value, step, limit, expand);
+            output[dst] = quantize_integer(value, shift, limit, expand);
             if (output_channels == 2) output[dst + 1] = output[dst];
         }
     }

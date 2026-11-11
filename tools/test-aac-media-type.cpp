@@ -73,21 +73,26 @@ int main() {
     settings.aac_bitrate = 64000;
     REQUIRE(oa2dp_encoder_create(&config,&settings,895,&encoder) == OA2DP_ERR_UNSUPPORTED && !encoder);
     settings.aac_bitrate = 0;
-    REQUIRE(oa2dp_encoder_create(&config,&settings,895,&encoder) == OA2DP_OK && encoder);
-    std::vector<int32_t> pcm(encoder->info.samples_per_call * encoder->info.channels,0);
-    std::vector<uint8_t> output(encoder->info.max_output);
-    unsigned frames_total = 0;
-    for (unsigned i = 0; i < 16; ++i) {
-        // A diagnostic/another session's probe must not shut down a live MFT.
-        REQUIRE(oa2dp_encoder_available(OA2DP_CODEC_AAC));
-        size_t bytes = 0;
-        uint8_t frames = 0;
-        REQUIRE(oa2dp_encoder_encode(encoder,pcm.data(),output.data(),output.size(),&bytes,&frames) == OA2DP_OK);
-        REQUIRE(bytes <= output.size());
-        frames_total += frames;
-    }
-    REQUIRE(frames_total > 0);
-    oa2dp_encoder_destroy(encoder);
+    for (auto rate : {OA2DP_AAC_FREQ_44100,OA2DP_AAC_FREQ_48000})
+        for (auto channels : {OA2DP_AAC_CH_1,OA2DP_AAC_CH_2}) {
+            config.u.aac.freq=rate;
+            config.u.aac.channels=channels;
+            REQUIRE(oa2dp_encoder_create(&config,&settings,895,&encoder) == OA2DP_OK && encoder);
+            std::vector<int32_t> pcm(encoder->info.samples_per_call * encoder->info.channels,0);
+            std::vector<uint8_t> output(encoder->info.max_output);
+            unsigned frames_total = 0;
+            for (unsigned i = 0; i < 16; ++i) {
+                // A diagnostic/another session's probe must not shut down a live MFT.
+                REQUIRE(oa2dp_encoder_available(OA2DP_CODEC_AAC));
+                size_t bytes = 0;
+                uint8_t frames = 0;
+                REQUIRE(oa2dp_encoder_encode(encoder,pcm.data(),output.data(),output.size(),&bytes,&frames) == OA2DP_OK);
+                REQUIRE(bytes <= output.size());
+                frames_total += frames;
+            }
+            REQUIRE(frames_total > 0);
+            oa2dp_encoder_destroy(encoder);
+        }
     std::printf("actual Windows AAC MFT: %u accepted media types, %u rejected limits; factory rejection checks passed\n",
                  accepted_types,rejected_limits);
 }
