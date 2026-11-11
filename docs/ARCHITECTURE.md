@@ -43,6 +43,12 @@ with a one-second backoff on that same main thread. Successful setup clears
 the request before encoder admission; retries rebuild from current state
 and respect peer suspension, disconnection and service stop.
 
+Failed rate transitions also retain configuration work. One local resume bit
+remembers that a rate change interrupted an accepted stream, without treating
+a peer pause as a request to restart. Retry uses the current PCM target and
+revalidates connection/SEP identity after protocol waits. An accepted rate
+with a failed START retries admission without repeating the rate change.
+
 The format contract distinguishes sample rate, channels, container width, valid precision and integer/float representation. Integer32 remains integer32 in the shared ring; 24-in-32 follows WAVEFORMATEXTENSIBLE's left-aligned precision convention. Conversion to 16/24 useful bits occurs at the selected encoder boundary.
 
 Ring protocol v2 fixes the allocated frame stride, independent of the active channel count. A producer sequence and first-frame position separate format generations. The consumer copies only a complete bounded block for its encoder's snapshot, checks the generation after copying, and releases no block on a format race. Old-format backlog is skipped, not reinterpreted. Partial codec input blocks remain queued until complete. Driver and service must both use v2; a v1/v2 mismatch is rejected during mapping. These contracts have offline concurrent coverage, not hardware acceptance.

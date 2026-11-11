@@ -1,6 +1,6 @@
 # Event, notification and transport review
 
-Reviewed 2026-11-11 against the 0.3.50/0.3.51 production source. The headset
+Reviewed 2026-11-11 against the 0.3.50–0.3.52 production source. The headset
 was unavailable. Runtime conclusions below concern the disconnected Windows
 path; protocol fixtures do not substitute for connected hardware acceptance.
 
@@ -23,6 +23,11 @@ path; protocol fixtures do not substitute for connected hardware acceptance.
 4. **RTP errors could silently discard audio.** Unsupported LDAC fragmentation
    previously returned to the PCM loop without reporting failure. Version51
    stops the sender and uses the existing generation-bound recovery command.
+5. **A rejected rate transition could leave permanent silence.** Version52
+   retains current-format reconciliation after SUSPEND, RECONFIGURE or START
+   failure. A single resume-intent bit identifies an interrupted local rate
+   change; peer pause/configuration/close and teardown cancel obsolete intent.
+   Each request boundary rechecks the connection/SEP before publication.
 
 ## Producer-to-consumer contracts checked
 
@@ -47,6 +52,15 @@ its final settled state, rather than a rendered Settings screenshot. Both
 native49 and inbox transiently reported Connected during enumeration; their
 final states differed. A single immediate container snapshot missed the defect.
 The fix was not a cosmetic property overwrite or pairing reset.
+
+`Disconnected(3)` is the internal model enumeration, **not the expected screen
+text**. For a paired, disconnected headset, the expected English UI label is
+**Paired**. The installed Windows10 EN-US resources were read offline using
+the SDK MakePRI tool: both `SystemSettings_Device_Bluetooth_Disconnected` and
+`SystemSettings_Device_Bluetooth_DisconnectedAudio` have the string value
+`Paired`. AEP Paired=True/Connected=False and the settled model support that
+state; they are not a direct observation of rendered screen text. Literal
+Settings-label/button acceptance must retain that distinction.
 
 Version51 was subsequently activated without a computer restart. Both actual
 kernel images and the running service matched the signed source package;

@@ -60,6 +60,7 @@ struct Session {
     bool stopping_ = false, publication_pending_ = false;
     bool sig_open_ = true, rx_failed_ = false;
     bool have_remote_caps_ = false, peer_configuration_pending_ = false, audio_running_ = true;
+    bool rate_resume_pending_ = false;
     DWORD next_peer_configuration_retry_ = 0;
     DWORD next_profile_retry_ = 0;
     bool latency_publication_pending_ = false;
@@ -80,6 +81,25 @@ struct Session {
     unsigned admissions = 0, starts = 0, suspends = 0, reconfigures = 0;
     std::function<void(uint8_t)> during_request;
     std::function<void()> during_wait;
+    uint8_t rejected_signal = 0;
+    unsigned rejections = 0;
+    static uint8_t approve(void *context, uint8_t, uint8_t signal) {
+        auto &s = *static_cast<Side *>(context)->s;
+        if (s.rejected_signal == signal && s.rejections) {
+            --s.rejections;
+            return OA2DP_AVDTP_BAD_STATE;
+        }
+        return 0;
+    }
+    static uint8_t check_config(void *context, uint8_t, const oa2dp_avdtp_caps *, uint8_t *category) {
+        auto &s = *static_cast<Side *>(context)->s;
+        *category = OA2DP_AVDTP_CAT_MEDIA_CODEC;
+        if (s.rejected_signal == OA2DP_AVDTP_RECONFIGURE && s.rejections) {
+            --s.rejections;
+            return OA2DP_AVDTP_UNSUPPORTED_CONFIGURATION;
+        }
+        return 0;
+    }
     static uint32_t clock(void *) { return now; }
     static int send(void *context, const uint8_t *p, size_t n) {
         auto &side = *static_cast<Side *>(context);
@@ -104,6 +124,8 @@ struct Session {
         oa2dp_avdtp_callbacks cb{send, clock, event, nullptr, nullptr};
         oa2dp_avdtp_init(&av_, &cb, &local_side, 672);
         oa2dp_avdtp_init(&peer_, &cb, &peer_side, 672);
+        peer_.cb.approve = approve;
+        peer_.cb.check_config = check_config;
         oa2dp_codec_caps codec{};
         oa2dp_codec_local_caps(OA2DP_CODEC_LDAC, &codec);
         auto caps = make_config_caps(codec, true);
@@ -203,6 +225,107 @@ struct Session {
 // clang-format on
 
 int main() {
+    for (uint8_t signal : {OA2DP_AVDTP_SUSPEND, OA2DP_AVDTP_RECONFIGURE}) {
+        Session s;
+        now = 100;
+        s.peer_configure_and_start(96000);
+        s.reconcile_peer_configuration();
+        CHECK(s.streaming_ && s.admissions == 1);
+        s.audio_format_.SampleRate = 48000;
+        s.rejected_signal = signal;
+        s.rejections = 1;
+        s.reconfigure_rate(48000);
+        CHECK(!s.streaming_ && s.peer_configuration_pending_);
+        CHECK(oa2dp_codec_sample_rate(&s.config_) == 96000);
+        const auto publications = s.audio_.publications;
+        now = 1099;
+        s.reconcile_peer_configuration();
+        CHECK(s.audio_.publications == publications && !s.streaming_);
+        now = 1100;
+        s.reconcile_peer_configuration(); // no second PCM or player event
+        CHECK(s.streaming_ && !s.peer_configuration_pending_ && s.admissions == 2);
+        CHECK(oa2dp_codec_sample_rate(&s.config_) == 48000);
+    }
+    {
+        Session s;
+        now = 100;
+        s.peer_configure_and_start(96000);
+        s.reconcile_peer_configuration();
+        s.audio_format_.SampleRate = 48000;
+        s.rejected_signal = OA2DP_AVDTP_START;
+        s.rejections = 1;
+        s.reconfigure_rate(48000);
+        CHECK(!s.streaming_ && s.peer_configuration_pending_ && s.rate_resume_pending_);
+        CHECK(oa2dp_codec_sample_rate(&s.config_) == 48000 && s.reconfigures == 1);
+        now = 1100;
+        s.reconcile_peer_configuration();
+        CHECK(s.streaming_ && !s.rate_resume_pending_ && s.admissions == 2);
+        CHECK(s.reconfigures == 1 && s.suspends == 1); // retry START, not the completed rate change
+    }
+    for (uint32_t latest : {44100u, 96000u}) {
+        Session s;
+        now = UINT32_MAX - 499;
+        s.peer_configure_and_start(96000);
+        s.reconcile_peer_configuration();
+        s.audio_format_.SampleRate = 48000;
+        s.rejected_signal = OA2DP_AVDTP_RECONFIGURE;
+        s.rejections = 1;
+        s.reconfigure_rate(48000);
+        CHECK(!s.streaming_ && s.rate_resume_pending_);
+        s.audio_format_.SampleRate = latest;
+        now = 499;
+        const auto publications = s.audio_.publications;
+        s.reconcile_peer_configuration();
+        CHECK(s.audio_.publications == publications && !s.streaming_);
+        now = 500;
+        s.reconcile_peer_configuration();
+        CHECK(s.streaming_ && !s.rate_resume_pending_);
+        CHECK(oa2dp_codec_sample_rate(&s.config_) == latest);
+        CHECK(s.reconfigures == (latest == 96000 ? 0u : 1u));
+    }
+    {
+        Session s;
+        now = 100;
+        s.peer_configure_and_start(96000);
+        s.reconcile_peer_configuration();
+        s.audio_format_.SampleRate = 48000;
+        s.rejected_signal = OA2DP_AVDTP_RECONFIGURE;
+        s.rejections = 1;
+        s.reconfigure_rate(48000);
+        s.audio_running_ = false; // player paused during the failed transition
+        now = 1100;
+        s.reconcile_peer_configuration();
+        CHECK(!s.streaming_ && !s.starts);
+        s.audio_running_ = true;
+        s.reconfigure_rate(48000);
+        CHECK(s.streaming_ && !s.rate_resume_pending_);
+    }
+    for (uint8_t boundary : {OA2DP_AVDTP_SUSPEND, OA2DP_AVDTP_RECONFIGURE}) {
+        for (unsigned change = 0; change < 3; ++change) {
+            Session s;
+            now = 100;
+            s.peer_configure_and_start(96000);
+            s.reconcile_peer_configuration();
+            const auto publications = s.audio_.publications;
+            s.audio_format_.SampleRate = 48000;
+            s.during_request = [&](uint8_t signal) {
+                if (signal != boundary) return;
+                if (change == 0) s.stopping_ = true;
+                if (change == 1) ++s.sig_generation_;
+                if (change == 2) {
+                    CHECK(oa2dp_avdtp_abort(&s.peer_, s.peer_seid_) >= 0);
+                    // The peer ABORT reaches us before the old response.
+                    auto abort = std::move(s.packets.back());
+                    s.packets.pop_back();
+                    s.packets.push_front(std::move(abort));
+                }
+            };
+            s.reconfigure_rate(48000);
+            CHECK(!s.streaming_ && !s.starts && s.audio_.publications == publications);
+            CHECK(oa2dp_codec_sample_rate(&s.config_) == 96000);
+            if (change == 2) CHECK(!s.rate_resume_pending_);
+        }
+    }
     {
         Session s;
         now = 100;

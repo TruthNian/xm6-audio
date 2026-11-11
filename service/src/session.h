@@ -142,6 +142,7 @@ private:
     DWORD init_deadline_ = 0;      // become INT if the peer has not configured us by then
     DWORD next_reconnect_ = 0;
     bool peer_configuration_pending_ = false; // includes failed endpoint publication
+    bool rate_resume_pending_ = false; // local rate change interrupted an accepted stream
     DWORD next_peer_configuration_retry_ = 0;
     std::atomic<bool> audio_ready_{false};
     // A failed waiter stays quiescent until the main thread closes its handle.

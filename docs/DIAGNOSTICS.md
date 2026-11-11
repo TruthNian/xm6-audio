@@ -55,6 +55,12 @@ verified loaded images and no trace loss. This fixes that offline path;
 connected per-device operations remain unaccepted. See the
 [event-chain review](EVENT-CHAIN-REVIEW.md).
 
+The internal model's `Disconnected(3)` must not be presented as literal UI
+text. The expected label for a paired, disconnected headset is **Paired**.
+The installed EN-US Windows resources for the Bluetooth Disconnected and
+DisconnectedAudio labels both contain `Paired`; this resource inspection is
+separate from reading the actual rendered Settings window.
+
 A render-package update also reproduced PnPUtil exit 259 while reporting that
 the device already uses the up-to-date driver. The installer accepts this
 specific result only after finding the present target child, comparing its

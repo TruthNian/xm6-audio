@@ -1,5 +1,32 @@
 # Native lifecycle review
 
+## 0.3.52: recover interrupted sample-rate changes
+
+Two real AVDTP cores reproduce another lost intent: after a transient SUSPEND
+or RECONFIGURE rejection, the production method forgets the requested rate.
+The unchanged PCM stream cannot restart at the old codec rate and no new
+format/player event is guaranteed. Rejecting START after an accepted rate
+change has the same problem. The old production body fails the new pending
+reconciliation assertion.
+
+Retain failed work on the existing one-second configuration reconciliation
+loop. One resume-intent bit distinguishes an interrupted local rate change
+from an intentional peer pause; it does not introduce another loop, timer or
+thread. Rebuild the rate from current PCM at retry time. An accepted rate is
+not renegotiated merely because its subsequent START failed. Peer configuration,
+START, SUSPEND, CLOSE, ABORT and teardown retire obsolete local resume intent.
+After every synchronous request, revalidate the connection/SEP identity and
+current policy before publishing or resuming. Reject malformed/wrong-codec
+capabilities rather than installing them as the current peer capabilities.
+
+The production rate-change/callback/reconciliation methods execute with actual
+AVDTP packets. Checks cover SUSPEND/RECONFIGURE/START rejection and recovery
+without another PCM event, deadline wrap, replacing the pending PCM target,
+returning to the original rate without another RECONFIGURE, pause during
+backoff, and stop/replacement-connection/peer ABORT during either protocol
+boundary. The peer rejection and OS/encoder boundaries remain controlled;
+none establishes radio or audible acceptance.
+
 ## 0.3.51: timeout classification, delay delivery and RTP failure propagation
 
 The expanded [event-chain review](EVENT-CHAIN-REVIEW.md) found three additional
