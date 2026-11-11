@@ -280,36 +280,51 @@ bool Transport::tx_state(OA2DP_TX_STATE &out)
            n == sizeof(out);
 }
 
-bool Transport::finish_slot(Slot &s, DWORD timeout_ms, HANDLE cancel)
+bool Transport::finish_slot(Slot &s, DWORD timeout_ms, HANDLE cancel, MediaFailure *failure)
 {
+    if (failure) *failure = {};
+    const auto fail = [failure](const char *stage, DWORD error) {
+        if (failure) *failure = {stage, error};
+        return false;
+    };
     if (!s.busy)
         return true;
     DWORD n = 0;
     BOOL ok = GetOverlappedResult(dev_.get(), &s.ov, &n, FALSE);
-    if (!ok && GetLastError() == ERROR_IO_INCOMPLETE) {
+    DWORD error = ok ? ERROR_SUCCESS : GetLastError();
+    if (!ok && error == ERROR_IO_INCOMPLETE) {
         HANDLE waits[] = {cancel, s.event};
         const DWORD wake = WaitForMultipleObjects(cancel ? 2 : 1,
             cancel ? waits : waits + 1, FALSE, timeout_ms);
         if (wake != WAIT_OBJECT_0 + (cancel ? 1 : 0)) {
             // Cancellation requests completion; it does not finish ownership.
             // Keep busy/OVERLAPPED/data intact for a later bounded drain.
-            if (wake == WAIT_TIMEOUT) CancelIoEx(dev_.get(), &s.ov);
-            return false;
+            if (wake == WAIT_TIMEOUT) {
+                CancelIoEx(dev_.get(), &s.ov);
+                return fail("wait-timeout", WAIT_TIMEOUT);
+            }
+            if (wake == WAIT_FAILED) return fail("wait", GetLastError());
+            if (cancel && wake == WAIT_OBJECT_0) return fail("cancel", ERROR_CANCELLED);
+            return fail("wait-result", wake);
         }
         ok = GetOverlappedResult(dev_.get(), &s.ov, &n, FALSE);
-        if (!ok && GetLastError() == ERROR_IO_INCOMPLETE) return false;
+        error = ok ? ERROR_SUCCESS : GetLastError();
+        if (!ok && error == ERROR_IO_INCOMPLETE) return fail("completion-pending", error);
     }
     s.busy = false;
-    return ok != FALSE;
+    return ok ? true : fail("completion", error);
 }
 
 bool Transport::send_media(const OA2DP_SEND_IN &binding, const uint8_t *data, size_t len, HANDLE cancel)
 {
     if (cancel && WaitForSingleObject(cancel, 0) == WAIT_OBJECT_0) return false;
     Slot &s = slots_[next_slot_];
-    if (!finish_slot(s, 1000, cancel)) {
+    MediaFailure failure;
+    if (!finish_slot(s, 1000, cancel, &failure)) {
         if (!cancel || WaitForSingleObject(cancel, 0) != WAIT_OBJECT_0)
-            LOGE("media send failed or exceeded its wait budget");
+            LOGE("media send retirement failed: stage=%s error=%lu slot=%u pending=%u budget_ms=1000",
+                 failure.stage, static_cast<unsigned long>(failure.error),
+                 static_cast<unsigned>(next_slot_), s.busy ? 1u : 0u);
         return false;
     }
     if (cancel && WaitForSingleObject(cancel, 0) == WAIT_OBJECT_0) return false;
@@ -323,8 +338,12 @@ bool Transport::send_media(const OA2DP_SEND_IN &binding, const uint8_t *data, si
     if (!DeviceIoControl(dev_.get(), IOCTL_OA2DP_SEND, &s.binding, sizeof(s.binding), s.data.data(),
                          static_cast<DWORD>(len), nullptr, &s.ov)) {
         DWORD err = GetLastError();
-        if (err != ERROR_IO_PENDING)
+        if (err != ERROR_IO_PENDING) {
+            if (!cancel || WaitForSingleObject(cancel, 0) != WAIT_OBJECT_0)
+                LOGE("media send submission failed: error=%lu bytes=%u",
+                     static_cast<unsigned long>(err), static_cast<unsigned>(len));
             return false;
+        }
     }
     s.busy = true;
     return true;

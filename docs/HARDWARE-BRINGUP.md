@@ -4,6 +4,13 @@ The controlled developer trial targets WH-1000XM6 on Windows 10 x64, build 19045
 
 Latest source audit: [0.3.61 disconnect-wait review](LIFECYCLE-REVIEW.md).
 Version 0.3.61 is activated with verified loaded images; see the following record.
+The user subsequently reported no renewed Chrome stutter so far. A passive
+five-minute Chrome-to-QQ Music observation recorded 56,859 successful media
+completions, no ring overrun and no new service error. An earlier interruption
+outside a shorter trace remains unexplained. See the
+[timing evidence and limits](PERFORMANCE-REVIEW.md#0361-passive-playback-observations-and-remaining-failure-visibility).
+The diagnostic source change accompanying that record has not been deployed;
+the user's active runtime remains the verified 0.3.61 package.
 Earlier runtime observations apply to 0.3.44. After its authorized
 deployment and a user restart, both actual loaded kernel images and the running
 service matched the verified local test-signed candidate. The service process

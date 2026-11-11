@@ -51,8 +51,11 @@ justify overwriting that property. A later DevicesFlowUI trace captured the
 settled difference: native49 finally reported Connected(7), inbox finally
 reported Disconnected(3), and restoring native49 reproduced the error.
 Deployed50's PnP wireless-state correction finally remained Disconnected with
-verified loaded images and no trace loss. This fixes that offline path;
-connected per-device operations remain unaccepted. See the
+verified loaded images and no trace loss. At that point, connected per-device
+operations remained unaccepted. With 0.3.61 installed, the user subsequently
+confirmed **Paired while disconnected** and correct Settings display after
+connection and disconnection. This UI requirement is now accepted on this host;
+it does not establish every audio/reconnect scenario. See the
 [event-chain review](EVENT-CHAIN-REVIEW.md).
 
 The internal model's `Disconnected(3)` must not be presented as literal UI
@@ -77,3 +80,31 @@ Version53 may report `encoder-unavailable` when no linked/runtime backend can
 satisfy the current policy. This is distinct from a healthy active codec or a
 Bluetooth link failure. Missing AAC activation is checked before advertising
 that SEP; other codecs are used only when the user's enabled policy permits it.
+
+## Media-send failure attribution (unreleased source change)
+
+Installed 0.3.61 reports only `media send failed or exceeded its wait budget`.
+That message cannot distinguish a terminal native I/O failure from a 1000 ms
+slot wait timeout. An observed interruption therefore cannot be assigned to
+either cause retrospectively from that log alone.
+
+The updated source records a stage and original Win32 error on failure:
+
+| Stage | Meaning |
+|---|---|
+| `submission failed` | `DeviceIoControl` rejected the new SEND immediately; `ERROR_IO_PENDING` is normal and is not logged. |
+| `completion` | The old SEND completed with a native failure; its slot can now retire. |
+| `wait-timeout` | The 1000 ms slot wait expired. Cancellation was requested, but the slot still owns its buffer and OVERLAPPED until completion. |
+| `wait` | The wait API failed; the original `GetLastError()` value is retained. |
+| `completion-pending` | The completion event woke the waiter but the I/O was still incomplete; ownership is retained. |
+| `wait-result` | An unexpected wait return value; recorded without inventing a native error. |
+
+Normal stop cancellation and drain do not add error logs. Success adds no
+per-packet logging. The change preserves the existing send/drain budgets and
+completion ownership, consistent with Microsoft's
+[CancelIoEx contract](https://learn.microsoft.com/en-us/windows/win32/api/ioapiset/nf-ioapiset-cancelioex).
+The production-body fixture checks exact failure attribution, including error
+codes overwritten by later cancellation checks, and buffer retention until
+terminal completion. The full native Release build and all 28 local checks
+passed. This is a diagnostic improvement, not proof that the earlier
+interruption is fixed. It was not deployed during the user's 0.3.61 tests.

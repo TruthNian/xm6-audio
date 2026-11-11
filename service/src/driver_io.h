@@ -78,7 +78,12 @@ private:
         bool busy = false;
         OA2DP_SEND_IN binding{}; // stable for the entire overlapped request
     };
-    bool finish_slot(Slot &s, DWORD timeout_ms, HANDLE cancel = nullptr);
+    struct MediaFailure {
+        const char *stage = "none";
+        DWORD error = ERROR_SUCCESS;
+    };
+    bool finish_slot(Slot &s, DWORD timeout_ms, HANDLE cancel = nullptr,
+                     MediaFailure *failure = nullptr);
     void cancel_receive();
 
     DriverHandle dev_;

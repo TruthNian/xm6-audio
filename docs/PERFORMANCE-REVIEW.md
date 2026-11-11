@@ -1,8 +1,67 @@
 # Audio clock, PCM computation and output-lifetime review
 
-Reviewed 2026-11-11 against source 0.3.54 and 0.3.59–0.3.60. The headset was unavailable.
-Computational measurements below exclude Windows rendering, scheduling under
-audio load, Bluetooth transmission and headphone playback.
+Reviewed 2026-11-11 against source 0.3.54 and 0.3.59–0.3.61. The 0.3.61
+observations below include a connected headset. Earlier computational reviews
+were performed without the headset and exclude Windows rendering, scheduling
+under audio load, Bluetooth transmission and headphone playback.
+
+## 0.3.61: passive playback observations and remaining failure visibility
+
+Installed source `b378045332f704af05f07abc12c44772f9f985a1` was observed without
+changing radio, endpoint, player, service or codec settings. The user reported
+no renewed Chrome/YouTube audio stutter so far and continued testing scenarios.
+This is a current user observation, not full long-term audio acceptance.
+
+A 20-second ETW capture had 3812 successful media completions, no lost trace
+events/buffers and no ring overrun after excluding its first PCM window.
+Completion latency p99 was 5.779 ms and maximum 9.927 ms. A subsequent session
+snapshot identified QQ Music as active; this short run was not a Chrome test.
+After that capture, at 19:42:57 local time, the service recorded a media-send
+failure and tore the session down. Following connection timeouts, streaming
+resumed at 19:43:36 without restarting the service. This interruption occurred
+outside that trace window; its cause is unresolved. The generic 0.3.61 error
+does not distinguish a native completion failure from slot-wait timeout, and
+there is no evidence here separating physical/link interruption from software
+failure. The preceding clean trace must not be used to erase this observation.
+
+A second, 303.314-second capture ran from 19:54:51 to 19:59:54 local time.
+Twenty read-only application snapshots, approximately 15 seconds apart, showed
+Chrome active with nonzero signal, followed by QQ Music with nonzero signal.
+No simultaneous audible-app case was captured. The native endpoint remained
+default for all three render roles at every snapshot. The stream stayed at
+96 kHz stereo, LDAC HQ policy, 24 useful bits in a 32-bit integer input container.
+This describes the endpoint/encoder stream, not either player's original file
+metadata. No format or connection generation changed during this interval.
+
+| Observed metric | Five-minute result |
+|---|---:|
+| Decoded ETW events / lost events / lost buffers | 57,165 / 0 / 0 |
+| Media-send completions / failed completions | 56,859 / 0 |
+| Completion latency p50 / p95 / p99 / maximum | 0.793 / 2.938 / 7.790 / 29.649 ms |
+| Completions taking at least 20 ms / 100 ms | 16 / 0 |
+| Completion interval p99 / maximum | 9.3 / 28.3 ms |
+| Peak buffered PCM / maximum data-event wait | 383 frames (3.99 ms) / 3.963 ms |
+| Ring overrun frames, excluding first PCM window | 0 |
+| Observed media submission rate including protocol headers | 1,009,503 bit/s |
+| Service CPU over 303.314 seconds, tracing included | 1.719 seconds (0.567% of one logical CPU) |
+
+The service process remained unchanged and added no error or teardown entries
+during the second capture. That interval overlapped a local native build and
+tests; it is not a controlled benchmark against other versions. Numeric ETW
+events contain timing/counters, not audio content. Both trace sessions stopped
+after collection. The first PCM window is excluded because collection starts
+midstream. Lower-driver completion is not headphone rendering, and completion
+intervals alone do not prove audible underrun or lip-sync quality.
+
+The unreleased source now retains the failing media stage and original Win32
+error rather than conflating all failures. Actual production wait/send/drain
+bodies are covered by the expanded regression; the full native Release build
+and all 28 local checks pass. It changes neither the wait budget nor slot/buffer
+ownership, and adds no successful-packet logging. See
+[failure attribution](DIAGNOSTICS.md#media-send-failure-attribution-unreleased-source-change).
+It was not installed during these tests and is not presented as a fix for the
+earlier interruption. Sleep/resume, simultaneous applications, physical
+synchronization and supported-format transitions still need separate evidence.
 
 ## 0.3.60: keep the presentation clock monotonic across delay updates
 
