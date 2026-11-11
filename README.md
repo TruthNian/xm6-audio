@@ -18,6 +18,8 @@ Source-only 0.3.49 retains failed endpoint format, latency and connected-state p
 
 **[Architecture](docs/ARCHITECTURE.md) · [Build from source](BUILDING.md) · [Signing status](docs/SIGNING.md) · [Roadmap](docs/ROADMAP.md)**
 
+For connection-label problems, the [read-only command-line report](docs/DIAGNOSTICS.md) compares Windows radio, AEP, device-container and native-session state without operating the headset or changing settings. It is a diagnostic aid, not a reconnect fix or hardware acceptance.
+
 ## What the project implements
 
 - A **standard Windows headphone endpoint** for applications using Windows Audio/WASAPI.

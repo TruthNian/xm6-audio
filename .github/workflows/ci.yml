@@ -33,6 +33,15 @@ jobs:
         run: |
           ./scripts/tests/recovery.ps1
           ./scripts/tests/install-state.ps1
+      - name: Parse read-only Bluetooth state report
+        shell: powershell
+        run: |
+          $diagnosticTokens = $null
+          $diagnosticErrors = $null
+          $null = [System.Management.Automation.Language.Parser]::ParseFile(
+            (Join-Path $PWD 'scripts/inspect-bluetooth-state.ps1'),
+            [ref]$diagnosticTokens, [ref]$diagnosticErrors)
+          if ($diagnosticErrors.Count) { throw ($diagnosticErrors | Out-String) }
       - name: Package unsigned submission candidate
         shell: pwsh
         run: ./scripts/package-native.ps1 -BuildDirectory build/native -OutputDirectory out/native
