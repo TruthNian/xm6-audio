@@ -59,9 +59,23 @@ Windows shared-mix behavior are unchanged.
   44.1/48 kHz. Current output attributes are read from the actual transform.
   Constructor checks reject peer/user limits below the minimum. Additional
   availability probes while a real AAC encoder is alive must not break encoding.
+  A genuinely absent OS backend is reported as a CTest skip, not an executed
+  success; the developer host's real MFT checks executed successfully.
 - Actual encoder smoke checks and the existing transport/format/lifecycle
   checks remain required. Missing-MF behavior uses controlled failures; no
   Windows feature pack or system component was removed for testing.
 
 No audible AAC/SBC fallback, real codec transition, RF stability, Chrome-stutter
 resolution or measured performance gain is established by these checks.
+
+## Local activation
+
+Source `42f0670618b9771208b0626fe53a554bfc3ca885` passed all 23 local checks
+and [source CI](https://github.com/TruthNian/xm6-audio/actions/runs/42988148471).
+The locally built version53 package was signed with the existing development
+certificate and activated through a radio cycle. Both actual kernel images
+and the running service matched its signed payload hashes. No computer restart
+was performed or pending. Paired/disconnected state remained consistent, with
+all 305 display events decoded and zero trace loss. The expected Paired resource
+text remains distinct from observing a rendered Settings window. Existing auto
+PCM, LDAC HQ, ABR-off and permitted LDAC/AAC/SBC policy were verified unchanged.

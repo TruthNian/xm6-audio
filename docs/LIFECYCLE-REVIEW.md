@@ -10,6 +10,11 @@ those contracts. New production-body and real-MFT checks cover the failure
 paths without opening a headset or audio endpoint. Hardware fallback and
 connected stability acceptance remain open.
 
+Version53 was then activated without rebooting the computer, with both actual
+kernel images and the running service verified against the signed package.
+All 23 local checks and source CI passed; see the codec review for test scope
+and [the runtime record](HARDWARE-BRINGUP.md) for activation evidence.
+
 ## 0.3.52: recover interrupted sample-rate changes
 
 Two real AVDTP cores reproduce another lost intent: after a transient SUSPEND

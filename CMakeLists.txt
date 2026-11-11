@@ -237,6 +237,7 @@ if(OA2DP_BUILD_TESTS)
     target_include_directories(test_aac_media_type PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
     target_link_libraries(test_aac_media_type PRIVATE oa2dp_codecs)
     add_test(NAME aac_media_type COMMAND test_aac_media_type)
+    set_tests_properties(aac_media_type PROPERTIES SKIP_RETURN_CODE 77)
 endif()
 
 # SBC + FastStream: libsbc (LGPL-2.1+), built as a DLL to keep it replaceable.

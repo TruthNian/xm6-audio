@@ -24,7 +24,7 @@ int main() {
     REQUIRE(oa2dp_encoder_available(OA2DP_CODEC_AAC) == installed);
     if (!installed) {
         std::puts("AAC media-type checks skipped: OS backend unavailable; fallback covered separately");
-        return 0;
+        return 77;
     }
     const uint32_t limits[] = {64000,0,95999,96000,127999,128000,159999,160000,191999,192000,320000};
     const uint32_t expected[] = {0,192000,0,96000,96000,128000,128000,160000,160000,192000,192000};

@@ -2,14 +2,36 @@
 
 The controlled developer trial targets WH-1000XM6 on Windows 10 x64, build 19045. It uses a local development signature under explicitly authorized test signing. This is separate from the production installer, which still requires Microsoft-signed catalogs.
 
-Latest source audit: [0.3.52 event-chain review](EVENT-CHAIN-REVIEW.md). Version
-0.3.52 is now activated with verified loaded images; see the following record.
+Latest source audit: [0.3.53 codec review](CODEC-REVIEW.md). Version
+0.3.53 is now activated with verified loaded images; see the following record.
 Earlier runtime observations apply to 0.3.44. After its authorized
 deployment and a user restart, both actual loaded kernel images and the running
 service matched the verified local test-signed candidate. The service process
 started approximately twelve seconds after boot without a manual start in the
 post-boot session. This establishes automatic service startup, not complete
 automatic audio/reconnect acceptance.
+
+## 0.3.53 codec/backend correction activation (2026-11-11)
+
+Source `42f0670618b9771208b0626fe53a554bfc3ca885` passed all 23 local checks,
+including 36 actual Windows AAC media types, 8 rejected limits and encoding
+while additional backend probes run. Restoring the old production setup
+accepted a 64 kbit/s cap at an actual 96 kbit/s output type. Controlled OS
+failures separately cover unavailable backends and balanced resource cleanup.
+[Source CI](https://github.com/TruthNian/xm6-audio/actions/runs/42988148471) passed.
+
+The locally built candidate was signed using the existing certificate and
+activated through a Bluetooth radio cycle, without rebooting the computer or
+changing boot/trust/privacy policy. Both actual loaded kernel images and the
+running service matched the signed version53 payload hashes. Current install
+flags requested no restart. Auto sample rate/precision, LDAC HQ, ABR off and
+the LDAC/AAC/SBC preference were read from the real current settings.
+
+All 305 display-trace events decoded with zero event/buffer loss. The final
+target state was Disconnected(3), followed by approximately 5007 ms of settled
+observation. AEP Paired=True/Connected=False, container Connected=False and
+native disconnected state agreed. The expected English label is Paired;
+rendered UI/buttons, real reconnect and audio stability remain unaccepted.
 
 ## 0.3.52 activation and label-resource clarification (2026-11-11)
 
