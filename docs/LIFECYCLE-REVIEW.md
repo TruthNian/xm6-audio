@@ -1,5 +1,30 @@
 # Native lifecycle review
 
+## 0.3.50: wireless PnP state reporting
+
+A controlled native49 -> inbox -> native49 radio-cycle comparison with the
+headset unavailable captured the actual DevicesFlowUI model, not just an
+immediate container snapshot. Native49 finally returned to Connected(7),
+although the Bluetooth API reported disconnected. Inbox finally remained
+Disconnected(3). Restoring native49 reproduced the erroneous final state.
+Earlier instantaneous container comparisons missed this event-order difference.
+
+The persistent PortCls child reported KS jack changes but never handled
+IRP_MN_QUERY_PNP_DEVICE_STATE or invalidated its PnP state. Implement the
+[documented wireless disconnected flag](https://learn.microsoft.com/en-us/windows-hardware/drivers/kernel/handling-an-irp-mn-surprise-removal-request#about-pnp_device_state)
+without replacing another driver's bits. Invalidate the PDO state only after
+committing an actual connection change. Keep PortCls dispatch, the same PDO,
+KS jack events and the parent's validated transport publication. The initial
+post-START query reports disconnection without needing a transition first.
+
+The production dispatch and SetConnected bodies run against controlled OS
+boundaries. Coverage includes initial state, unrelated state bits, connected
+and disconnected transitions, a query during invalidation, duplicate reports,
+parent publication failures, policy/removal rejection, absent topology,
+uninitialized devices and stop/remove dispatch. This fixture cannot establish
+Windows container aggregation or real connected playback; repeat the actual
+offline display-model trace after deployment before calling the UI defect fixed.
+
 ## 0.3.49: retain failed endpoint setup for retry, source only
 
 The production setup/reconciliation fixture demonstrates another lost request:
@@ -24,8 +49,8 @@ START. Production setup/reconciliation/rate/start/suspend procedures execute;
 audio calls and worker admission remain controlled fakes. The actual admission
 fixture separately checks the pending gate and its release. These checks do
 not establish a Windows Settings fix, actual radio/headset recovery, Chrome
-stutter resolution or measured performance gains. Source 0.3.49 is not installed;
-the last observed host runtime remains 0.3.44.
+stutter resolution or measured performance gains. Version 0.3.49 was later
+activated; see [the runtime record](HARDWARE-BRINGUP.md).
 
 ## 0.3.48: reconcile peer configuration with running PCM, source only
 

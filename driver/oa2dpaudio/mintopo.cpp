@@ -486,6 +486,10 @@ extern "C" NTSTATUS Oa2dpSetConnected(_Inout_ OA2DP_AUDIO_DEVICE *dev, _In_ BOOL
         Oa2dpUnlock(&dev->ConnectionLock);
         return status;
     }
+    // Ask PnP to re-query the committed wireless state as well as notifying
+    // KS jack consumers. The PDO remains present, preserving endpoint identity
+    // and existing clients. PnP owns the query; never send that IRP ourselves.
+    IoInvalidateDeviceState(dev->Pdo);
     PPORTEVENTS events = NULL;
     Oa2dpLock(&dev->FilterLock);
     if (dev->TopoPort)

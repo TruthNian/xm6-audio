@@ -27,8 +27,14 @@ A valid Bluetooth API record reported the headset disconnected. A controlled
 native -> Microsoft inbox A2DP -> native comparison retained pairing and found
 AEP Connected=False, DeviceContainer Connected=True in every phase. The
 restored native image hashes were checked. Container state alone therefore
-does not identify a custom-driver defect. Settings capture remained unavailable;
-its displayed label and per-device disconnect/reconnect were not accepted.
+does not identify a custom-driver defect on its own. A subsequent bounded
+DevicesFlowUI ETW comparison resolved the settling order: native49 finally
+reported Connected(7), inbox finally remained Disconnected(3), and restoring
+native49 reproduced Connected(7), all while the Bluetooth API reported no
+connection. No events or buffers were lost. This independently reproduces the
+offline display defect without a headset. See the 0.3.50 source correction in
+[the lifecycle review](LIFECYCLE-REVIEW.md). Actual per-device reconnect remains
+unaccepted; the trace observes Windows' display model, not a rendered screenshot.
 
 PnPUtil also returned 259 for an up-to-date render binding. The updated
 installer procedure was exercised against that actual unchanged binding:

@@ -645,6 +645,16 @@ Routine Description:
     {
         switch (stack->MinorFunction)
         {
+        case IRP_MN_QUERY_PNP_DEVICE_STATE:
+            // A persistent wireless endpoint is present even without a link.
+            // Jack events alone do not update PnP's device/container state.
+            // Add our flag without erasing another driver's state bits; each
+            // query starts with the stack's current answer, not our old flag.
+            if (!InterlockedCompareExchange(&dev->Connected, 0, 0))
+                _Irp->IoStatus.Information |= PNP_DEVICE_DISCONNECTED;
+            _Irp->IoStatus.Status = STATUS_SUCCESS;
+            break;
+
         case IRP_MN_STOP_DEVICE:
         case IRP_MN_SURPRISE_REMOVAL:
             StopDevice(dev);

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(XM6Audio VERSION 0.3.49 LANGUAGES C CXX)
+project(XM6Audio VERSION 0.3.50 LANGUAGES C CXX)
 
 # The loaded binary's version must agree with the configured project and INF.
 # Generate resources in the build tree rather than keeping a stale copy.
@@ -113,6 +113,11 @@ if(OA2DP_BUILD_TESTS)
     add_executable(test_mpm_publication tools/test-mpm-publication.cpp)
     target_include_directories(test_mpm_publication PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
     add_test(NAME mpm_publication COMMAND test_mpm_publication)
+    xm6_test_body(driver/oa2dpaudio/adapter.cpp "NTSTATUS\nPnpHandler\n(" "" audio-pnp)
+    xm6_test_body(driver/oa2dpaudio/mintopo.cpp "extern \"C\" NTSTATUS Oa2dpSetConnected(" "" audio-connection)
+    add_executable(test_audio_pnp tools/test-audio-pnp.cpp)
+    target_include_directories(test_audio_pnp PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
+    add_test(NAME audio_pnp COMMAND test_audio_pnp)
     xm6_test_body(driver/oa2dpaudio/minwavertstream.cpp "static ULONGLONG HnsToFrames("
         "\n//=============================================================================\n#pragma code_seg(\"PAGE\")\nCMiniportWaveRTStream::~" wavert-time)
     xm6_test_body(driver/oa2dpaudio/minwavertstream.cpp "ULONGLONG CMiniportWaveRTStream::RunningHns("
