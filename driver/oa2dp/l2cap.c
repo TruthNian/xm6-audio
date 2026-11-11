@@ -140,6 +140,28 @@ static void FinishResponseSubmission(OA2DP_DEVICE_CONTEXT *dev)
     WdfSpinLockRelease(dev->Lock);
 }
 
+/* A failed incoming OPEN has no caller IOCTL through which the service can
+ * observe failure. Finish the exact attempt and publish it independently.
+ * Failed media cannot leave a configured signalling link stranded forever:
+ * report the closed attempt so the service's existing teardown/retry handles
+ * the remaining link, including a failed CLOSE. No synthetic OPEN is emitted. */
+static void FailIncomingOpen(OA2DP_DEVICE_CONTEXT *dev, OA2DP_CHANNEL *ch, ULONG generation)
+{
+    BOOLEAN current;
+    WdfSpinLockAcquire(dev->Lock);
+    current = Oa2dpChannelFinishOpen(&ch->Life, generation, FALSE);
+    if (current) {
+        KeSetEvent(&ch->OpenFinished, IO_NO_INCREMENT, FALSE);
+        Oa2dpQueueEventLocked(dev, Oa2dpEventChannelClosed, ch, generation);
+    }
+    WdfSpinLockRelease(dev->Lock);
+    if (!current) return;
+    if (ch->Kind == Oa2dpChannelSignaling)
+        Oa2dpMpmConnectFailed(dev, generation);
+    WdfWorkItemEnqueue(dev->PublicationWork);
+    Oa2dpDeliverEvents(dev);
+}
+
 static void AcceptIncoming(OA2DP_DEVICE_CONTEXT *dev, PINDICATION_PARAMETERS p)
 {
     OA2DP_CHANNEL *ch = NULL;
@@ -165,6 +187,8 @@ static void AcceptIncoming(OA2DP_DEVICE_CONTEXT *dev, PINDICATION_PARAMETERS p)
         if (generation) {
             ch->Life.ConnectionGeneration = ch->Kind == Oa2dpChannelSignaling
                 ? generation : dev->Channels[Oa2dpChannelSignaling].Life.Generation;
+            if (ch->Kind == Oa2dpChannelSignaling)
+                Oa2dpMpmBindAttempt(&dev->MpmRequest, generation);
             KeClearEvent(&ch->OpenFinished);
             KeClearEvent(&dev->DisconnectedEvent);
         }
@@ -204,12 +228,7 @@ static void AcceptIncoming(OA2DP_DEVICE_CONTEXT *dev, PINDICATION_PARAMETERS p)
 fail_brb:
     dev->Profile.BthFreeBrb((PBRB)brb);
 fail_state:
-    if (ch) {
-        WdfSpinLockAcquire(dev->Lock);
-        (void)Oa2dpChannelFinishOpen(&ch->Life, generation, FALSE);
-        KeSetEvent(&ch->OpenFinished, IO_NO_INCREMENT, FALSE);
-        WdfSpinLockRelease(dev->Lock);
-    }
+    if (ch) FailIncomingOpen(dev, ch, generation);
     FinishResponseSubmission(dev);
 }
 
@@ -222,24 +241,25 @@ static void OpenResponseDone(_In_ WDFREQUEST Request, _In_ WDFIOTARGET Target,
     OA2DP_CHANNEL *ch = rc->Channel;
     UNREFERENCED_PARAMETER(Target);
 
-    if (ch) {
+    if (ch && !NT_SUCCESS(Params->IoStatus.Status)) {
+        FailIncomingOpen(dev, ch, rc->Generation);
+    } else if (ch) {
         BOOLEAN close;
-        BOOLEAN opened;
+        BOOLEAN current;
         WdfSpinLockAcquire(dev->Lock);
-        opened = Oa2dpChannelFinishOpen(&ch->Life, rc->Generation,
-                                        NT_SUCCESS(Params->IoStatus.Status));
-        if (opened && NT_SUCCESS(Params->IoStatus.Status)) {
+        current = Oa2dpChannelFinishOpen(&ch->Life, rc->Generation, TRUE);
+        if (current) {
             ch->Handle = brb->ChannelHandle;
             ch->OutMtu = brb->OutResults.Params.Mtu;
             ch->InMtu = brb->InResults.Params.Mtu;
         }
-        close = opened && ch->Life.State == ChannelOpen &&
+        close = current && ch->Life.State == ChannelOpen &&
             (ch->Life.CloseRequested || !dev->PolicyConnected || dev->TransportStopping);
         if (close) Oa2dpChannelRequestClose(&ch->Life);
-        if (opened) KeSetEvent(&ch->OpenFinished, IO_NO_INCREMENT, FALSE);
+        if (current) KeSetEvent(&ch->OpenFinished, IO_NO_INCREMENT, FALSE);
         // Queue OPEN before making this lock available to a peer MEDIA open
         // or a remote CLOSE. Event delivery keeps the same transition order.
-        if (!close && opened && NT_SUCCESS(Params->IoStatus.Status))
+        if (!close && current)
             Oa2dpQueueEventLocked(dev, Oa2dpEventChannelOpened, ch, rc->Generation);
         WdfSpinLockRelease(dev->Lock);
         if (close)

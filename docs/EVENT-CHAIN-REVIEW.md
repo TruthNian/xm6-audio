@@ -1,10 +1,17 @@
 # Event, notification and transport review
 
-Reviewed 2026-11-11 against the 0.3.50–0.3.53 production source. The headset
+Reviewed 2026-11-11 against the 0.3.50–0.3.55 production source. The headset
 was unavailable. Runtime conclusions below concern the disconnected Windows
 path; protocol fixtures do not substitute for connected hardware acceptance.
 
 ## Confirmed corrections
+
+The [0.3.55 lifecycle correction](LIFECYCLE-REVIEW.md) adds the missing
+incoming-OPEN failure chain: attempt binding, terminal closed event and
+Windows-state publication. The service accepts a failed incoming-media
+generation even when it never received a successful OPEN, then uses its
+existing teardown/retry. Production-body fixtures fail against each old
+contract. Connected Windows/radio acceptance remains pending.
 
 1. **Windows wireless state had a missing consumer contract.** The PortCls
    child supplied KS jack state but omitted PnP disconnected state. Version
@@ -56,6 +63,14 @@ its final settled state, rather than a rendered Settings screenshot. Both
 native49 and inbox transiently reported Connected during enumeration; their
 final states differed. A single immediate container snapshot missed the defect.
 The fix was not a cosmetic property overwrite or pairing reset.
+
+Re-reading the retained controlled traces confirms that the inbox driver also
+reported transient Connected at about 3783 ms before settling to Disconnected
+at about 4930 ms. Version54 transiently reported Connected at about 4383 ms,
+then settled to Disconnected at about 5392 ms. The similar startup interval
+alone does not identify a custom-driver defect or establish visible UI flicker.
+It must be distinguished from the reproduced version49 failure that finally
+returned to Connected. Literal rendered text/button acceptance remains open.
 
 `Disconnected(3)` is the internal model enumeration, **not the expected screen
 text**. For a paired, disconnected headset, the expected English UI label is

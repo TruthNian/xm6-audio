@@ -19,6 +19,11 @@ constexpr int Oa2dpChannelMedia = 1, Oa2dpChannelSignaling = 0, kReconnectPollMs
 static uint32_t GetTickCount() { return 100; }
 static void oa2dp_avdtp_reset(int *) {}
 struct Session {
+    enum class Cmd { MediaClosed };
+    struct Command {
+        Cmd cmd = Cmd::MediaClosed;
+        struct { ULONG Generation, ConnectionGeneration; } channel{};
+    };
     struct Transport {
         bool result[2]{true, true};
         bool close_channel(int k, ULONG, ULONG *out) {
@@ -41,6 +46,7 @@ struct Session {
     bool teardown_pending_ = false, publication_pending_ = false, rx_failed_ = false,
          peer_configuration_pending_ = true;
     ULONG sig_generation_ = 1, closed_connection_generation_ = 0;
+    ULONG media_generation_ = 0;
     uint32_t init_deadline_ = 1, next_reconnect_ = 0, next_publication_retry_ = 0;
     int av_ = 0, local_seid_ = 1;
     std::vector<int> responses_;
@@ -50,6 +56,11 @@ struct Session {
     void publish(const char *s) { state = s; }
     bool publish_disconnected_state();
     void teardown(const char *);
+    void handle(const Command &c) {
+        switch (c.cmd) {
+#include "media-closed-under-test.inc"
+        }
+    }
 };
 #include "disconnect-status-under-test.inc"
 int main() {
@@ -75,5 +86,39 @@ int main() {
     s.audio_ready_ = false;
     s.teardown("test");
     REQUIRE(!s.audio_.calls && s.state == "disconnected");
+
+    // A failed incoming media OPEN has no prior successful OPEN notification.
+    // Execute the real event consumer and teardown, including a failed CLOSE
+    // and its existing retry path rather than a once-only close worker.
+    s = Session{};
+    s.media_open_ = false;
+    s.tr_.result[0] = false;
+    const Session::Command failed_media{Session::Cmd::MediaClosed, {1, 1}};
+    s.handle(failed_media);
+    REQUIRE(s.teardown_pending_ && s.sig_open_ && !s.media_open_ && !s.audio_.calls);
+    REQUIRE(s.next_reconnect_ == GetTickCount() + kReconnectPollMs);
+    s.tr_.result[0] = true;
+    s.teardown("retry incomplete channel close");
+    REQUIRE(!s.teardown_pending_ && !s.sig_open_ && !s.media_open_ && s.state == "disconnected");
+
+    s = Session{};
+    s.sig_generation_ = 2;
+    s.handle(failed_media);
+    REQUIRE(s.sig_open_ && s.media_open_ && s.state.empty() && !s.audio_.calls);
+    s = Session{};
+    s.media_generation_ = 2;
+    s.handle(failed_media);
+    REQUIRE(s.sig_open_ && s.media_open_ && s.state.empty());
+    s = Session{};
+    s.media_generation_ = 1;
+    s.handle(failed_media);
+    REQUIRE(!s.sig_open_ && !s.media_open_ && s.state == "disconnected");
+    s = Session{};
+    s.media_generation_ = 0xffffffffu;
+    s.handle(failed_media); // wrapped generation 1 is later, zero is reserved
+    REQUIRE(!s.sig_open_ && !s.media_open_ && s.state == "disconnected");
+    s = Session{};
+    s.handle({Session::Cmd::MediaClosed, {0, 1}});
+    REQUIRE(s.state.empty() && s.sig_open_);
     std::puts("production disconnect status propagation checks passed (OS/endpoint APIs fake)");
 }

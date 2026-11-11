@@ -1,5 +1,35 @@
 # Native lifecycle review
 
+## 0.3.55: complete failed incoming OPEN notifications
+
+Outgoing channel failures already bind and finish the pending Windows connect
+attempt. Incoming signalling OPEN omitted that binding; its allocation,
+request-creation, submission and asynchronous failure paths also omitted
+Windows-state publication and the service's channel-closed notification.
+For incoming media, the service could retain a configured signalling link
+without a media channel or an event that would trigger teardown.
+
+Bind the pending connect request when admitting incoming signalling. Finish
+each failed incoming attempt through one generation-checked helper: commit
+the closed state, release the OPEN waiter, queue the existing CLOSED event,
+mark the matching signalling connect attempt failed, and schedule existing
+state publication. No successful OPEN is fabricated. The service now accepts
+a same-connection media CLOSED at its current or a later generation, allowing
+a failed OPEN with no prior OPEN event to trigger its existing teardown and
+close-retry path. Older media generations and other signalling connections
+remain ignored. No new ABI, thread, timer or event type is required.
+
+Production-body checks reproduce all three old omissions against source
+`1508791bcebb19c24c8df3cfb60727d6369def32`: missing attempt binding, missing
+failure publication/event, and ignoring a failed incoming-media CLOSED.
+The expanded fixtures cover successful synchronous/asynchronous responses,
+allocation/request/submission failures, delayed failure, policy rejection,
+stop/removal gates, close-during-open, obsolete completions, replacement
+connections and generation wrap. The actual service event handler and
+teardown execute with a failed CLOSE followed by a successful retry.
+OS/Bluetooth calls remain controlled; this does not establish that these
+paths caused a particular observed UI error or prove headset acceptance.
+
 ## 0.3.54: PCM cost and AAC output ownership
 
 The [performance/output review](PERFORMANCE-REVIEW.md) removes measured

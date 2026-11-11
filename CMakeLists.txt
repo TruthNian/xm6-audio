@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(XM6Audio VERSION 0.3.54 LANGUAGES C CXX)
+project(XM6Audio VERSION 0.3.55 LANGUAGES C CXX)
 
 # The loaded binary's version must agree with the configured project and INF.
 # Generate resources in the build tree rather than keeping a stale copy.
@@ -78,6 +78,8 @@ if(OA2DP_BUILD_TESTS)
     add_test(NAME channel_close COMMAND test_channel_close)
     xm6_test_body(driver/oa2dp/l2cap.c "static EVT_WDF_REQUEST_COMPLETION_ROUTINE OpenDone;"
         "\nstatic NTSTATUS CloseChannelGeneration(OA2DP_DEVICE_CONTEXT *dev,\n                                       OA2DP_CHANNEL_KIND kind, ULONG expectedGeneration," channel-open)
+    xm6_test_body(driver/oa2dp/l2cap.c "static void FinishResponseSubmission("
+        "\nstatic void IndicationCallback(_In_ PVOID Context, _In_ INDICATION_CODE Indication,\n                               _In_ PINDICATION_PARAMETERS Params)\n{" channel-incoming)
     add_executable(test_channel_open tools/test-channel-open.cpp)
     target_include_directories(test_channel_open PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
     add_test(NAME channel_open COMMAND test_channel_open)
@@ -179,6 +181,8 @@ if(OA2DP_BUILD_TESTS)
     target_include_directories(test_media_wait PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
     add_test(NAME media_wait COMMAND test_media_wait)
     xm6_test_body(service/src/session.cpp "void Session::teardown(" "\nvoid Session::refresh_transport_power(" disconnect-status)
+    xm6_test_body(service/src/session.cpp "    case Cmd::MediaClosed:"
+        "\n    case Cmd::StreamFailed:" media-closed)
     add_executable(test_disconnect_status tools/test-disconnect-status.cpp)
     target_include_directories(test_disconnect_status PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
     add_test(NAME disconnect_status COMMAND test_disconnect_status)

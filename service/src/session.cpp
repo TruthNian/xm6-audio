@@ -794,8 +794,12 @@ void Session::handle(const Command &c)
         teardown("signalling closed");
         break;
     case Cmd::MediaClosed:
+        // An incoming OPEN can fail before it ever announces an open channel.
+        // Its terminal CLOSED is still authoritative for this signalling link.
+        // Ignore older media attempts and every replacement connection.
         if (c.channel.ConnectionGeneration != sig_generation_ ||
-            !Oa2dpChannelEventCurrent(media_generation_, c.channel.Generation)) break;
+            (!Oa2dpChannelEventCurrent(media_generation_, c.channel.Generation) &&
+             !Oa2dpChannelGenerationAfter(c.channel.Generation, media_generation_))) break;
         teardown("media closed");
         next_reconnect_ = GetTickCount() + kReconnectPollMs;
         break;
