@@ -6,7 +6,9 @@
 
 0.3.50 修复了已独立复现的离线误显示 Connected 路径。用户此前对 QQ 音乐、PotPlayer、系统提示声及蓝牙控制的确认，以及 YouTube 音频卡顿报告，适用于 0.3.44。当前安装版本已获用户实测确认：**未连接时正确显示 Paired，连接和断开后的 Windows 显示均正常。** Chrome 音频稳定性仍待验收。
 
-当前实际运行版本为 **0.3.61**，两个已加载驱动及运行中的服务均与本机签名包哈希核对一致，没有重启电脑。Windows 普通断开请求现在会中断服务的控制等待，不再排在连接／协议超时之后。全部 28 项本地检查及[源码 CI](https://github.com/TruthNian/xm6-audio/actions/runs/43011913970)通过。后台单设备断开／重连中，AEP 和容器连接状态正确清零，随后恢复 96 kHz LDAC HQ 传输，没有重启播放器或服务；这证明传输恢复，不代表长期听音稳定性已验收。总线 ABI 6、自动 PCM／编码策略及此前时钟和 RTP 修复保留。详见[生命周期审查](docs/LIFECYCLE-REVIEW.md)、[事件链审查](docs/EVENT-CHAIN-REVIEW.md)、[性能审查](docs/PERFORMANCE-REVIEW.md)、[编码审查](docs/CODEC-REVIEW.md)和[开发记录](docs/HARDWARE-BRINGUP.md)。**不要加载 0.3.5 候选驱动**：该版属性表布局错误曾导致开发机蓝屏，0.3.6 已修正并增加离线 PE/PDB 检查。
+当前实际运行版本为 **0.3.62**，通过一次蓝牙开关循环激活；两个实际加载的驱动及运行中的服务均与本机签名包哈希一致，没有重启电脑。同代码的原生 Release 构建和全部 29 项本地检查通过，版本更新后再次构建、核对元数据，并通过[精确源码 CI](https://github.com/TruthNian/xm6-audio/actions/runs/43018884143)。本版细分媒体发送失败原因，并将耳机名发布到全部音频接口。接口名称已一致，但 Core Audio 仍显示旧名称；安装时 MMDevice 端点 ID 也发生了变化，默认输出归属、音量和混音格式保留。这些未完成项已记入[激活记录](docs/HARDWARE-BRINGUP.md)。
+
+用户已验收 0.3.61 下未连接时显示 Paired、连接和断开后状态正确，并反馈暂未再次出现 Chrome 声音卡顿。Chrome／QQ 音乐与 PotPlayer 各约五分钟的独立记录均无媒体发送失败，但此前一次中断原因仍未查明。0.3.62 激活后的短时记录也无发送失败，随后采样确认原有 PotPlayer 会话包含非零音频信号。这些是部分验收结果，尚不能证明所有播放、格式切换和生命周期场景通过。总线 ABI 6、自动 PCM／编码策略及此前时钟和 RTP 修复保留。详见[生命周期审查](docs/LIFECYCLE-REVIEW.md)、[事件链审查](docs/EVENT-CHAIN-REVIEW.md)、[性能审查](docs/PERFORMANCE-REVIEW.md)和[编码审查](docs/CODEC-REVIEW.md)。**不要加载 0.3.5 候选驱动**：该版属性表布局错误曾导致开发机蓝屏，0.3.6 已修正并增加离线 PE/PDB 检查。
 
 已配对但未连接时，英文界面显示 **Paired**。`Disconnected(3)` 是 Windows 内部状态枚举，本机对应资源文字为 `Paired`。当前界面状态已由用户亲自确认；Computer Use 的窗口截图仍超时，因此视觉验收依据是用户实测，而非工具截图。
 

@@ -81,9 +81,9 @@ satisfy the current policy. This is distinct from a healthy active codec or a
 Bluetooth link failure. Missing AAC activation is checked before advertising
 that SEP; other codecs are used only when the user's enabled policy permits it.
 
-## Media-send failure attribution (unreleased source change)
+## Media-send failure attribution (deployed in 0.3.62)
 
-Installed 0.3.61 reports only `media send failed or exceeded its wait budget`.
+The previous 0.3.61 runtime reported only `media send failed or exceeded its wait budget`.
 That message cannot distinguish a terminal native I/O failure from a 1000 ms
 slot wait timeout. An observed interruption therefore cannot be assigned to
 either cause retrospectively from that log alone.
@@ -108,8 +108,11 @@ codes overwritten by later cancellation checks, and buffer retention until
 terminal completion. The full native Release build and all 28 local checks
 passed. This is a diagnostic improvement, not proof that the earlier
 interruption is fixed. It was not deployed during the user's 0.3.61 tests.
+It is now active in the verified 0.3.62 service. The short post-deployment trace
+had no failed media completion, so it did not exercise failure attribution on
+the real link. The earlier interruption's cause remains unresolved.
 
-## Endpoint name publication (unreleased source change)
+## Endpoint name publication (0.3.62, partially effective)
 
 Read-only queries on the active 0.3.61 host found the following mismatch while
 audio was playing normally:
@@ -131,17 +134,32 @@ filter registration on startup and retries on a same-name service request.
 does not prevent the remaining properties from being attempted, and interface
 strings are freed on property-write failure too.
 
-This changes metadata only: no filter removal/re-registration, endpoint-ID
-replacement, default-output change or audio-process restart. The actual
+The publisher changes metadata and contains no filter removal/re-registration,
+endpoint replacement, default-output change or audio-process restart. The actual
 production publisher, SetName body and startup call are exercised by a focused
 fixture for cached startup, stale/missing properties, individual API failures,
 retry, Unicode names and empty-name rejection. The full native Release build
-and all 29 local checks pass. This source fix has not been deployed during the
-user's playback testing; EndpointBuilder's visible refresh still needs checking
-after a later controlled activation.
+and all 29 local checks pass.
+
+After verified 0.3.62 activation, the PDO, all five modern interface properties
+and all five legacy interface FriendlyName registry values report
+`WH-1000XM6`. Core Audio's IPropertyStore still returns `XM6 Audio Topology`
+for PKEY_DeviceInterface_FriendlyName and the old endpoint display name.
+The publication omission is corrected, but the visible-name requirement is
+not accepted. Adding another legacy-registry write is not justified by these
+observations; those values already agree with the modern interface properties.
+
+The installation also changed the MMDevice endpoint ID. The original identity
+continuity assertion failed and is preserved in the activation record. Logical
+render defaults, volume, mute and shared mix were preserved, and the existing
+PotPlayer process established a session on the new endpoint without a restart.
+These observations do not establish why Windows changed the ID or prove that
+every existing application will recover. Do not infer endpoint continuity from
+the absence of an explicit replacement operation in the publisher.
 
 Microsoft documents the separate
 [audio interface registrations](https://learn.microsoft.com/en-us/windows-hardware/drivers/audio/installing-device-interfaces-for-an-audio-adapter)
 and the [interface name property](https://learn.microsoft.com/en-us/windows-hardware/drivers/install/devpkey-deviceinterface-friendlyname).
-Do not overwrite the user's MMDevice property store to conceal a missing driver
-publication, or reset a working audio endpoint solely to rename it.
+Core Audio [basic device properties](https://learn.microsoft.com/en-us/windows/win32/coreaudio/device-properties)
+are for clients to read. Do not overwrite the user's MMDevice property store to
+conceal a publication/refresh failure, or reset a working endpoint solely to rename it.

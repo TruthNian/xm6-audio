@@ -1,9 +1,36 @@
 # Audio clock, PCM computation and output-lifetime review
 
-Reviewed 2026-11-11 against source 0.3.54 and 0.3.59–0.3.61. The 0.3.61
+Reviewed 2026-11-11 against source 0.3.54 and 0.3.59–0.3.62. The 0.3.61/0.3.62
 observations below include a connected headset. Earlier computational reviews
 were performed without the headset and exclude Windows rendering, scheduling
 under audio load, Bluetooth transmission and headphone playback.
+
+## 0.3.62: short passive observation after activation
+
+Both actual kernel images and the running service match signed source
+`292a0c98b07b545c8c8b377eeef307056ab0b5fb`. A 20.392-second ETW capture ran
+from 20:32:22 to 20:32:43 local time after activation. It made no endpoint,
+player, radio or format changes and did not overlap a local build.
+
+| Observed metric | Result |
+|---|---:|
+| Decoded ETW events / lost events / lost buffers | 3,846 / 0 / 0 |
+| Media completions / failed completions | 3,823 / 0 |
+| Completion latency p50 / p95 / p99 / maximum | 0.800 / 1.482 / 5.638 / 11.264 ms |
+| Completion interval p99 / maximum | 8.54 / 13.4 ms |
+| Peak buffered PCM / maximum data-event wait | 391 frames (4.07 ms) / 3.528 ms |
+| Ring overrun frames, excluding first PCM window | 0 |
+| Media rate including protocol headers | 1,009,479 bit/s |
+| Service CPU over 20.459 seconds, tracing included | 78.125 ms (0.382% of one logical CPU) |
+
+There was one PCM stream generation at 96 kHz. No application snapshots were
+collected during this short trace, so it does not independently attribute the
+PCM to PotPlayer. Separate post-activation snapshots found the existing
+PotPlayer session on the native endpoint; a later sample contained nonzero
+signal. Lower-driver completion is not headphone rendering, and this short
+interval does not establish audible quality, lip sync, a relative performance
+gain, or resolution of the earlier interruption. Collection stopped normally.
+See the [activation limitations](HARDWARE-BRINGUP.md).
 
 ## 0.3.61: passive playback observations and remaining failure visibility
 
@@ -53,12 +80,12 @@ after collection. The first PCM window is excluded because collection starts
 midstream. Lower-driver completion is not headphone rendering, and completion
 intervals alone do not prove audible underrun or lip-sync quality.
 
-The unreleased source now retains the failing media stage and original Win32
+The subsequent 0.3.62 source retains the failing media stage and original Win32
 error rather than conflating all failures. Actual production wait/send/drain
 bodies are covered by the expanded regression; the full native Release build
 and all 28 local checks pass. It changes neither the wait budget nor slot/buffer
 ownership, and adds no successful-packet logging. See
-[failure attribution](DIAGNOSTICS.md#media-send-failure-attribution-unreleased-source-change).
+[failure attribution](DIAGNOSTICS.md#media-send-failure-attribution-deployed-in-0362).
 It was not installed during these tests and is not presented as a fix for the
 earlier interruption. Sleep/resume, simultaneous applications, physical
 synchronization and supported-format transitions still need separate evidence.
@@ -100,6 +127,19 @@ The capture stopped normally. Part of it overlapped an independent local build;
 it is not a controlled performance comparison. The transport result is evidence
 for this interval, not an audible lip-sync assessment, a measured zero-underrun
 result at the headset, or simultaneous-player acceptance.
+
+### Read-only format queries are not streaming acceptance
+
+Before deployment, IsFormatSupported queries on 0.3.61 covered 36 stereo
+variants at 44.1, 48, 88.2 and 96 kHz: integer16/24/32 and float32 with
+WAVEFORMATEX, plus those representations and 24 valid bits in a 32-bit integer
+container with WAVEFORMATEXTENSIBLE. All 36 exclusive-mode queries returned
+S_OK. Shared-mode queries returned S_OK for the nine 96 kHz variants and
+S_FALSE with a closest format for the other 27. The mix remained 96 kHz.
+The probe called neither Initialize nor Start; it establishes format-query
+behavior, not successful exclusive playback, rate switching or audible output.
+Shared clients still feed one Windows mix; capability queries do not provide
+per-file rate adaptation or recover original metadata from mixed PCM.
 
 ## 0.3.60: keep the presentation clock monotonic across delay updates
 

@@ -2,21 +2,64 @@
 
 The controlled developer trial targets WH-1000XM6 on Windows 10 x64, build 19045. It uses a local development signature under explicitly authorized test signing. This is separate from the production installer, which still requires Microsoft-signed catalogs.
 
-Latest source audit: [0.3.61 disconnect-wait review](LIFECYCLE-REVIEW.md).
-Version 0.3.61 is activated with verified loaded images; see the following record.
-The user subsequently reported no renewed Chrome stutter so far. A passive
-five-minute Chrome-to-QQ Music observation recorded 56,859 successful media
-completions, no ring overrun and no new service error. An earlier interruption
-outside a shorter trace remains unexplained. See the
-[timing evidence and limits](PERFORMANCE-REVIEW.md#0361-passive-playback-observations-and-remaining-failure-visibility).
-The diagnostic source change accompanying that record has not been deployed;
-the user's active runtime remains the verified 0.3.61 package.
+Current runtime is **0.3.62**, with the loaded kernel images and running service
+verified against the local signed package. The name-publication and diagnostic
+changes are deployed; Core Audio's displayed endpoint name is still unresolved.
+The user's acceptance of **Paired while disconnected** and correct Settings
+connect/disconnect display belongs to 0.3.61 and remains recorded below.
+Passive Chrome/QQ Music and PotPlayer observations were also collected on
+0.3.61; a short post-activation trace was collected on 0.3.62. An earlier
+interruption remains unexplained. See the
+[timing evidence and limits](PERFORMANCE-REVIEW.md).
 Earlier runtime observations apply to 0.3.44. After its authorized
 deployment and a user restart, both actual loaded kernel images and the running
 service matched the verified local test-signed candidate. The service process
 started approximately twelve seconds after boot without a manual start in the
 post-boot session. This establishes automatic service startup, not complete
 automatic audio/reconnect acceptance.
+
+## 0.3.62 activation, endpoint migration and partial acceptance (2026-11-11)
+
+Source `292a0c98b07b545c8c8b377eeef307056ab0b5fb` passed
+[exact-source Linux/Windows CI](https://github.com/TruthNian/xm6-audio/actions/runs/43018884143).
+The same-code local native Release build and all 29 checks passed; after the
+version-only bump, the package was rebuilt and native metadata checked again.
+Two SYS and two CAT signatures and all eight catalog members verified using
+the existing development certificate. Deployment began during a sampled idle
+interval. One Bluetooth off/on cycle activated both kernel images; their real
+loaded paths/hashes and the running service match the protected signed package.
+Current transport/render restart flags are clear. No PC reboot, boot-policy or
+certificate-trust change was made. The prior installation restart request is
+retained as historical evidence, separate from these activation observations.
+
+Automatic rate/precision, LDAC/AAC/SBC, LDAC HQ and ABR-off policy was read back.
+Signalling and media connected automatically after activation, with 96 kHz LDAC.
+All three render defaults still resolve to native XM6, and volume, mute and
+96 kHz shared mix were preserved. Capture defaults remained unchanged.
+However, the MMDevice endpoint ID changed. The original continuity assertion
+failed with `Original endpoint identity is absent`; this is not a continuity
+pass. The before/after IDs and failure are preserved privately. Installation
+migration versus name-publication causation has not been isolated.
+
+The render PDO and all five interface properties now report `WH-1000XM6`;
+the five legacy interface FriendlyName values agree. Core Audio nevertheless
+returns `XM6 Audio Topology` as its interface name and the old localized
+endpoint display name. **Display-name acceptance remains false.** No private
+MMDevice property overwrite or endpoint recreation was used to hide it.
+See [name diagnostics](DIAGNOSTICS.md#endpoint-name-publication-0362-partially-effective).
+
+The existing PotPlayer process acquired a session on the new native endpoint
+without a player restart. A later snapshot contained nonzero session/endpoint
+signal. A 20.392-second trace recorded 3,823 successful media completions, zero
+trace loss and zero overrun after the first PCM window. That trace did not
+sample application identity concurrently and does not establish audible output.
+No new service error was observed between activation and these checks.
+
+The protected activation receipt records these successes and failures without
+marking complete hardware acceptance. Audible acceptance of this package,
+simultaneous applications, supported rate/codec streaming transitions,
+sleep/resume and physical lip sync still need separate evidence. The earlier
+0.3.61 Settings acceptance is not relabeled as a fresh 0.3.62 UI test.
 
 ## 0.3.61 activation and connected state acceptance (2026-11-11)
 
