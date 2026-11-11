@@ -6,7 +6,7 @@
 
 本机已验证 0.3.50 的两个实际加载驱动和运行中的服务，通过一次蓝牙关闭／开启完成激活，没有重启电脑。耳机不在场时，Windows 实际显示模型最终保持 Disconnected，修复了已独立复现的离线误显示 Connected 路径。用户此前对 QQ 音乐、PotPlayer、系统提示声及蓝牙控制的确认，以及 YouTube 音频卡顿报告，适用于 0.3.44。**真实连接后的单设备断开／重连、已有播放器恢复及 Chrome 稳定性仍待验收。**
 
-当前实际运行版本为 **0.3.57**，两个已加载驱动及运行中的服务均与本机签名包哈希核对一致，无需重启电脑。启动设备枚举现会结合移除通知处理，避免旧快照重新创建已移除设备的会话，同时保留真实到达通知及其他设备。全部 27 项本地检查及[源码 CI](https://github.com/TruthNian/xm6-audio/actions/runs/43005001589)通过。总线 ABI 6 不变，保留此前控制 I/O 取消、连接失败恢复和 PCM 优化。离线后台最终为已配对／未连接，对应英文界面应显示 **Paired**；屏幕实际文字、按钮和真实耳机连接仍未完成验收。详见[生命周期审查](docs/LIFECYCLE-REVIEW.md)、[事件链审查](docs/EVENT-CHAIN-REVIEW.md)、[性能审查](docs/PERFORMANCE-REVIEW.md)、[编码审查](docs/CODEC-REVIEW.md)和[开发记录](docs/HARDWARE-BRINGUP.md)。**不要加载 0.3.5 候选驱动**：该版属性表布局错误曾导致开发机蓝屏，0.3.6 已修正并增加离线 PE/PDB 检查。
+当前实际运行版本为 **0.3.58**，两个已加载驱动及运行中的服务均与本机签名包哈希核对一致，无需重启电脑。电源状态查询失败后会保留重试，并在现有服务主循环中读取最新状态，不再依赖另一条通知或已就绪的音频端点。正常运行不增加驱动查询、线程或定时器。全部 28 项本地检查及[源码 CI](https://github.com/TruthNian/xm6-audio/actions/runs/43006059101)通过。总线 ABI 6 不变，保留此前设备发现、控制 I/O、连接恢复和 PCM 修复。离线后台最终为已配对／未连接，对应英文界面应显示 **Paired**；屏幕文字、按钮和真实耳机连接仍未完成验收。详见[生命周期审查](docs/LIFECYCLE-REVIEW.md)、[事件链审查](docs/EVENT-CHAIN-REVIEW.md)、[性能审查](docs/PERFORMANCE-REVIEW.md)、[编码审查](docs/CODEC-REVIEW.md)和[开发记录](docs/HARDWARE-BRINGUP.md)。**不要加载 0.3.5 候选驱动**：该版属性表布局错误曾导致开发机蓝屏，0.3.6 已修正并增加离线 PE/PDB 检查。
 
 已配对但未连接时，英文界面应显示 **Paired**。`Disconnected(3)` 是 Windows 内部状态枚举；已直接读取本机 Windows 资源，两个对应蓝牙未连接标签的英文值均为 `Paired`。内部状态、AEP／容器状态和资源文字已分别核对，实际屏幕标签及按钮仍需保留为独立验收项目。
 

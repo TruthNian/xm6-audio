@@ -2,14 +2,38 @@
 
 The controlled developer trial targets WH-1000XM6 on Windows 10 x64, build 19045. It uses a local development signature under explicitly authorized test signing. This is separate from the production installer, which still requires Microsoft-signed catalogs.
 
-Latest source audit: [0.3.57 startup discovery review](LIFECYCLE-REVIEW.md).
-Version 0.3.57 is activated with verified loaded images; see the following record.
+Latest source audit: [0.3.58 failed power-query recovery review](LIFECYCLE-REVIEW.md).
+Version 0.3.58 is activated with verified loaded images; see the following record.
 Earlier runtime observations apply to 0.3.44. After its authorized
 deployment and a user restart, both actual loaded kernel images and the running
 service matched the verified local test-signed candidate. The service process
 started approximately twelve seconds after boot without a manual start in the
 post-boot session. This establishes automatic service startup, not complete
 automatic audio/reconnect acceptance.
+
+## 0.3.58 failed power-query recovery activation (2026-11-11)
+
+Source `d08fb0f163c7f5a9e4bc0ba68e7222358960eae3` passed all 28 local checks
+and [Linux/Windows source CI](https://github.com/TruthNian/xm6-audio/actions/runs/43006059101).
+The previous production refresh body loses retry intent on a failed GET_INFO;
+the new fixture verifies latest-state recovery without another notification
+or a ready audio endpoint. Queries and time are controlled, so this is not a
+physical sleep/resume result or a measured host recovery deadline.
+
+The locally built candidate was signed with the existing test certificate and
+activated through one Bluetooth radio cycle. Both actual kernel images and
+the running service match the protected signed package. No computer restart,
+boot/trust or privacy changes were made. Current transport/render install flags
+request no restart. Automatic PCM rate/precision, LDAC/AAC/SBC, LDAC HQ and ABR
+off were read back from the running installation.
+
+All 570 offline display-model events decoded with zero event/buffer loss.
+The last target state was Disconnected(3) at approximately 5859 ms, with
+another 5007 ms of observation. AEP Paired=True/Connected=False, container
+Connected=False and native disconnected/zero-bitrate state agreed. The expected
+English label remains **Paired**. Rendered text/buttons, physical sleep/resume,
+headset recovery/playback and Chrome stability remain unaccepted. The offline
+activation does not establish the cause or resolution of those symptoms.
 
 ## 0.3.57 startup discovery correction activation (2026-11-11)
 

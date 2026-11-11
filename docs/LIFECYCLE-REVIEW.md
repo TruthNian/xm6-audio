@@ -27,8 +27,12 @@ The corrected body passes, including recovery without an endpoint or another
 notification. These checks do not establish Windows sleep behavior, a wall
 clock recovery deadline, or the cause of the reported Chrome/UI symptoms.
 
-The local native x64 Release build and all 28 checks pass. Exact-source CI
-and runtime activation are recorded separately after verification.
+The local native x64 Release build, all 28 checks and
+[exact-source CI](https://github.com/TruthNian/xm6-audio/actions/runs/43006059101)
+pass. Version58 is activated with both actual kernel images and the running
+service matching the signed local package, without a computer restart. The
+offline state settles to paired/disconnected; see the
+[runtime record](HARDWARE-BRINGUP.md) for evidence and acceptance limits.
 
 ## 0.3.57: reconcile startup discovery with removal notifications
 
