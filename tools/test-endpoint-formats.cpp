@@ -52,6 +52,8 @@ struct Session {
     OA2DP_FORMAT audio_format_{48000, 2, 32, 32, OA2DP_PCM_FLOAT};
     bool connection_enabled_ = true, have_remote_caps_ = true, publication_pending_ = false;
     bool peer_configuration_pending_ = false;
+    bool latency_publication_pending_ = false;
+    uint32_t next_profile_retry_ = 0;
     uint32_t next_peer_configuration_retry_ = 0;
     uint32_t delay_report_us_ = 0;
     ULONG sig_generation_ = 1;
@@ -69,6 +71,7 @@ struct Session {
     }
     bool ensure_audio_endpoint() { return true; }
     bool update_suspend_state() { return true; }
+    bool update_latency();
     bool setup_audio_endpoint();
     bool select(oa2dp_codec_caps &out) {
         struct {
@@ -84,6 +87,7 @@ struct Session {
     OA2DP_FORMAT preferred() const { return audio_.formats.Formats[audio_.formats.Preferred]; }
 };
 #include "endpoint-formats-under-test.inc"
+#include "latency-publication-under-test.inc"
 
 int main() {
     const uint32_t rates[] = {44100, 48000, 88200, 96000};

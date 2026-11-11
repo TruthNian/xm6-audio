@@ -73,10 +73,12 @@ LDAC encode calls consume 128 samples per channel. At 88.2/96 kHz, a codec frame
 - Local channel closes are not echoed as remote disconnects, preventing an old close notification from tearing down a replacement connection.
 - Signalling receive uses one persistent overlapped request on the protocol thread. Its buffer survives timeouts and is canceled/completed before closing a channel; the extra receive thread and PDU relay queue have been removed.
 - Stream errors stop the native path and report failure. Reconnection discards stale PCM.
+- Timeout/reset completions are classified before peer commands. The request wait expires and consumes core timeouts; final sender admission requires a STREAMING SEP. RTP errors cannot silently return to the PCM loop.
 - Successful endpoint setup reconciles an already accepted peer START with local encoder readiness. Signalling and media notifications may be observed in either order; this never originates a new remote START. Normal admission and concurrent-stop gates still apply.
 - RTP packet duration is the total per-channel samples represented by every encoded frame in the chunk. Encoder input-call size and one codec frame's duration are separate quantities; LDAC can return multiple frames per output. Normal append, flush/retry and fragmentation use the same represented duration.
 - Failed profile-availability publications retry from the existing service loop at one-second intervals, using current policy/link state. A locally blocked start retains its intent; stopping clears it and retries cannot originate a new peer START. No additional worker or steady-state PCM polling is introduced.
 - KS jack properties and jack-change events expose the negotiated endpoint's connection state. Link teardown and service-handle cleanup mark it disconnected.
+- The persistent audio child also reports PNP_DEVICE_DISCONNECTED and invalidates PnP state on connection transitions. This complements jack notifications without recreating endpoints. Failed live delay updates retry the latest value on the existing profile loop; teardown cancels that pending update.
 - Transport file cleanup releases orphaned channels after service exit. Removed-device cleanup is joined before SCM reports the service stopped.
 - Driver-handle open/close and cross-thread stop cancellation share one lifetime lock. Raw send/I/O access keeps its existing ownership rules and adds no per-packet lock; pending I/O must still retire before close. Failed-open Win32 errors are preserved across lock release for recovery classification.
 

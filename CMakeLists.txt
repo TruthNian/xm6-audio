@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(XM6Audio VERSION 0.3.50 LANGUAGES C CXX)
+project(XM6Audio VERSION 0.3.51 LANGUAGES C CXX)
 
 # The loaded binary's version must agree with the configured project and INF.
 # Generate resources in the build tree rather than keeping a stale copy.
@@ -118,6 +118,10 @@ if(OA2DP_BUILD_TESTS)
     add_executable(test_audio_pnp tools/test-audio-pnp.cpp)
     target_include_directories(test_audio_pnp PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
     add_test(NAME audio_pnp COMMAND test_audio_pnp)
+    xm6_test_body(driver/oa2dp/driver.c "static VOID CompleteEvent(" "\nstatic NTSTATUS Oa2dpChildEnumerated(" transport-events)
+    add_executable(test_transport_events tools/test-transport-events.cpp)
+    target_include_directories(test_transport_events PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
+    add_test(NAME transport_events COMMAND test_transport_events)
     xm6_test_body(driver/oa2dpaudio/minwavertstream.cpp "static ULONGLONG HnsToFrames("
         "\n//=============================================================================\n#pragma code_seg(\"PAGE\")\nCMiniportWaveRTStream::~" wavert-time)
     xm6_test_body(driver/oa2dpaudio/minwavertstream.cpp "ULONGLONG CMiniportWaveRTStream::RunningHns("
@@ -156,6 +160,10 @@ if(OA2DP_BUILD_TESTS)
         "\nvoid Session::suspend_stream(" stream-start)
     xm6_test_body(service/src/session.cpp "void Session::begin_streaming("
         "\nvoid Session::stream_loop(" stream-admission)
+    xm6_test_body(service/src/session.cpp "bool Session::update_latency("
+        "\nbool Session::update_suspend_state(" latency-publication)
+    xm6_test_body(service/src/session.cpp "bool Session::request("
+        "\nvoid Session::on_avdtp_event(" signaling-request)
     xm6_test_body(service/src/session.cpp "    publication_pending_ = false; // an old FALSE must not follow this new link"
         "\n    return true;\n}\n\nbool Session::start_stream(" endpoint-ready)
     add_executable(test_profile_retry tools/test-profile-retry.cpp)

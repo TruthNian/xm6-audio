@@ -88,6 +88,7 @@ private:
     void begin_streaming();
     void end_streaming();
     bool update_suspend_state(); // profile availability is independent of idle PCM
+    bool update_latency(); // current peer delay; caller has a ready audio handle
     void retry_profile_state(); // reconcile failed publication using current policy/epoch
     bool publish_disconnected_state();
     void publish(const char *state);
@@ -117,6 +118,7 @@ private:
     bool publication_pending_ = false;
     DWORD next_publication_retry_ = 0;
     bool suspend_publication_pending_ = false;
+    bool latency_publication_pending_ = false;
     bool stream_start_pending_ = false;
     DWORD next_profile_retry_ = 0;
     bool media_drain_pending_ = false;

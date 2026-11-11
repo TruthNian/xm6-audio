@@ -1,5 +1,37 @@
 # Native lifecycle review
 
+## 0.3.51: timeout classification, delay delivery and RTP failure propagation
+
+The expanded [event-chain review](EVENT-CHAIN-REVIEW.md) found three additional
+failure paths. Core timeout/reset completions have `timed_out=true` and a
+zero-initialized message type, the same numeric value as COMMAND. The service
+previously interpreted a timed-out START as an accepted remote START. Classify
+timeouts as responses first. The production request wait now expires core
+transactions during its loop and consumes their result before its outer
+deadline, rather than leaving a completion for label reuse. Admission itself
+also requires an actual STREAMING SEP.
+
+An unsuccessful DELAYREPORT-to-endpoint update previously discarded the new
+delay. Retain the latest value for the existing one-second profile retry,
+without publishing formats, renegotiating or restarting an encoder. Endpoint
+setup uses that same publication method. Teardown clears the pending delay
+request so a retired link cannot replay it.
+
+The RTP service block previously broke out of a failed fragmentation operation
+and kept consuming PCM. LDAC intentionally rejects fragmentation. Unexpected
+packetization/fragmentation failures now post the existing generation-bound
+stream failure and stop sending; they cannot masquerade as a healthy stream.
+
+Production-body fixtures reproduce the old timeout-triggered admission, lost
+delay report/retry and silent LDAC fragmentation failure. Restoring each old
+behavior fails its new assertion. Two real AVDTP cores cover START timeout,
+reset and label reuse. Admission tests cover non-STREAMING/missing SEPs.
+Delay checks include failure recovery without another report, latest-value
+replacement, current-policy/transport gates and tick wrap. The actual kernel
+event queue now has coverage for insertion races, cancellation, generation
+rejection, wraparound, hint coalescing, overflow recovery and device removal.
+OS notification APIs and radio behavior remain external boundaries.
+
 ## 0.3.50: wireless PnP state reporting
 
 A controlled native49 -> inbox -> native49 radio-cycle comparison with the
@@ -24,6 +56,11 @@ parent publication failures, policy/removal rejection, absent topology,
 uninitialized devices and stop/remove dispatch. This fixture cannot establish
 Windows container aggregation or real connected playback; repeat the actual
 offline display-model trace after deployment before calling the UI defect fixed.
+That deployment check subsequently passed: both actual 0.3.50 kernel images
+matched the signed package, the service was running, and DevicesFlowUI finally
+remained Disconnected(3). No trace events/buffers were lost. The radio cycle
+activated the candidate without rebooting the computer. This establishes the
+previously reproduced offline path, not real connected per-device operations.
 
 ## 0.3.49: retain failed endpoint setup for retry, source only
 

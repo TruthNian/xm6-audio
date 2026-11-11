@@ -48,7 +48,8 @@ struct Session {
         bool passes(unsigned stage) const {
             return stage != failed_stage || publications != failed_attempt;
         }
-        bool set_latency(unsigned, unsigned) { return passes(2); }
+        unsigned delay = 0;
+        bool set_latency(unsigned, unsigned value) { delay = value; return passes(2); }
         bool set_connected(bool value, ULONG) { return value && passes(3); }
     } audio_;
     oa2dp_settings settings_{};
@@ -60,6 +61,8 @@ struct Session {
     bool sig_open_ = true, rx_failed_ = false;
     bool have_remote_caps_ = false, peer_configuration_pending_ = false, audio_running_ = true;
     DWORD next_peer_configuration_retry_ = 0;
+    DWORD next_profile_retry_ = 0;
+    bool latency_publication_pending_ = false;
     uint32_t delay_report_us_ = 0, init_deadline_ = 0;
     ULONG sig_generation_ = 1;
     oa2dp_avdtp av_{}, peer_{};
@@ -76,6 +79,8 @@ struct Session {
     } local_side{this, false}, peer_side{this, true};
     unsigned admissions = 0, starts = 0, suspends = 0, reconfigures = 0;
     std::function<void(uint8_t)> during_request;
+    std::function<void()> during_wait;
+    static uint32_t clock(void *) { return now; }
     static int send(void *context, const uint8_t *p, size_t n) {
         auto &side = *static_cast<Side *>(context);
         side.s->packets.push_back({!side.is_peer, {p, p + n}});
@@ -96,7 +101,7 @@ struct Session {
     }
     Session() {
         oa2dp_settings_default(&settings_);
-        oa2dp_avdtp_callbacks cb{send, nullptr, event, nullptr, nullptr};
+        oa2dp_avdtp_callbacks cb{send, clock, event, nullptr, nullptr};
         oa2dp_avdtp_init(&av_, &cb, &local_side, 672);
         oa2dp_avdtp_init(&peer_, &cb, &peer_side, 672);
         oa2dp_codec_caps codec{};
@@ -138,6 +143,13 @@ struct Session {
         responses_.erase(it);
         return out.msg_type == OA2DP_AVDTP_MSG_ACCEPT;
     }
+    bool wait_request(int label, oa2dp_avdtp_event &out, DWORD timeout_ms = 4000);
+    bool pump(DWORD timeout) {
+        if (during_wait) during_wait();
+        else pump_all();
+        now += timeout;
+        return true;
+    }
     oa2dp_avdtp_caps selected(uint32_t rate) {
         oa2dp_codec_caps codec{}, caps{};
         oa2dp_codec_local_caps(OA2DP_CODEC_LDAC, &caps);
@@ -158,6 +170,7 @@ struct Session {
     }
     bool ensure_audio_endpoint() { return audio_ready_; }
     bool update_suspend_state() { return true; }
+    bool update_latency();
     void publish(const char *) {}
     void begin_streaming() {
         if (stopping_ || peer_configuration_pending_ || !connection_enabled_ ||
@@ -178,12 +191,76 @@ struct Session {
 };
 // clang-format off
 #include "peer-events-under-test.inc"
+// Compile the production waiting method alongside the immediate helper used
+// for configuration tests. Only its name changes; the body remains unchanged.
+#define request wait_request
+#include "signaling-request-under-test.inc"
+#undef request
+#include "latency-publication-under-test.inc"
 #include "endpoint-formats-under-test.inc"
 #include "peer-stream-procedures-under-test.inc"
 #include "peer-reconciliation-under-test.inc"
 // clang-format on
 
 int main() {
+    {
+        Session s;
+        now = 100;
+        s.peer_configure_and_start(48000);
+        s.reconcile_peer_configuration();
+        s.suspend_stream();
+        CHECK(!s.streaming_);
+        const auto admitted = s.admissions;
+        const int label = oa2dp_avdtp_start(&s.av_, s.local_seid_);
+        CHECK(label >= 0);
+        s.during_wait = [&] { s.packets.clear(); }; // peer never receives START
+        oa2dp_avdtp_event result{};
+        CHECK(!s.wait_request(label, result));
+        CHECK(!s.streaming_ && s.admissions == admitted);
+        CHECK(result.timed_out && result.signal_id == OA2DP_AVDTP_START);
+        CHECK(s.responses_.empty() && now == 100 + OA2DP_AVDTP_TIMEOUT_MS);
+        // The same label may be used again without consuming an old timeout.
+        s.av_.next_label = static_cast<uint8_t>(label);
+        const int replacement = oa2dp_avdtp_start(&s.av_, s.local_seid_);
+        CHECK(replacement == label);
+        s.during_wait = {};
+        CHECK(s.wait_request(replacement, result) && !result.timed_out);
+        CHECK(s.responses_.empty());
+    }
+    {
+        Session s;
+        now = 100;
+        s.peer_configure_and_start(48000);
+        s.reconcile_peer_configuration();
+        s.suspend_stream();
+        const auto admitted = s.admissions;
+        const int label = oa2dp_avdtp_start(&s.av_, s.local_seid_);
+        CHECK(label >= 0);
+        oa2dp_avdtp_reset(&s.av_);
+        CHECK(!s.streaming_ && s.admissions == admitted);
+        CHECK(s.responses_.at(label).timed_out);
+    }
+    {
+        Session s;
+        s.audio_.failed_stage = 2;
+        s.audio_.failed_attempt = 0;
+        oa2dp_avdtp_event delay{};
+        delay.msg_type = OA2DP_AVDTP_MSG_COMMAND;
+        delay.signal_id = OA2DP_AVDTP_DELAYREPORT;
+        delay.delay = 1200;
+        now = 100;
+        s.on_avdtp_event(delay);
+        CHECK(s.latency_publication_pending_ && s.next_profile_retry_ == 1100);
+        CHECK(s.delay_report_us_ == 120000 && s.audio_.delay == 120000);
+        s.audio_.failed_stage = 0;
+        delay.delay = 1500;
+        s.on_avdtp_event(delay);
+        CHECK(!s.latency_publication_pending_ && s.audio_.delay == 150000);
+        s.audio_ready_ = false;
+        delay.delay = 1700;
+        s.on_avdtp_event(delay);
+        CHECK(s.delay_report_us_ == 170000 && s.audio_.delay == 150000);
+    }
     for (unsigned stage = 1; stage <= 3; ++stage) {
         Session s;
         now = 100;

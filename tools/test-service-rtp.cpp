@@ -11,6 +11,7 @@
 #include <cstring>
 #include <initializer_list>
 #include <vector>
+#define LOGE(...) ((void)0)
 
 #define REQUIRE(x)                                                                                 \
     do {                                                                                           \
@@ -28,6 +29,9 @@ struct Packetizer {
     oa2dp_rtp rtp{};
     uint32_t spf;
     bool flush_each;
+    bool streaming_ = true;
+    unsigned failures = 0;
+    void fail_stream() { ++failures; }
     Packetizer(oa2dp_codec_id codec, size_t mtu, uint32_t samples, bool flush)
         : pkt(mtu), spf(samples), flush_each(flush) {
         REQUIRE(oa2dp_rtp_init(&rtp, codec, pkt.data(), pkt.size(), 1) == OA2DP_OK);
@@ -62,6 +66,18 @@ static void verify_ldac(const Packetizer &p, uint32_t represented, uint32_t firs
     REQUIRE(p.rtp.timestamp == first + represented && expected == first + represented);
 }
 static void synthetic() {
+    {
+        // LDAC explicitly disallows RTP fragmentation. An oversized encoder
+        // output must reach the failure path, not silently drop PCM forever.
+        Packetizer p(OA2DP_CODEC_LDAC, 679, 128, true);
+        p.add(std::vector<uint8_t>(1000, 0x5a), 3);
+        REQUIRE(p.failures == 1 && !p.streaming_ && p.sent.empty() && !p.rtp.timestamp);
+    }
+    {
+        Packetizer p(OA2DP_CODEC_LDAC, 679, 128, true);
+        p.add(std::vector<uint8_t>(100, 0x5a), 16); // invalid LDAC frame count
+        REQUIRE(p.failures == 1 && !p.streaming_ && p.sent.empty());
+    }
     for (uint32_t spf : {128u, 256u}) {
         Packetizer p(OA2DP_CODEC_LDAC, 1024, spf, true);
         uint32_t represented = 0;

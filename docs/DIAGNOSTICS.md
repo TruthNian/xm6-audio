@@ -47,8 +47,13 @@ native -> Microsoft inbox A2DP -> native comparison on that system reported
 AEP Connected=False but DeviceContainer Connected=True in all three phases.
 The native package was restored and its real loaded images checked. Therefore
 container Connected=True alone does not establish a custom-driver fault or
-justify overwriting that property. The actual Settings label and its failed
-per-device operation remain unresolved.
+justify overwriting that property. A later DevicesFlowUI trace captured the
+settled difference: native49 finally reported Connected(7), inbox finally
+reported Disconnected(3), and restoring native49 reproduced the error.
+Deployed50's PnP wireless-state correction finally remained Disconnected with
+verified loaded images and no trace loss. This fixes that offline path;
+connected per-device operations remain unaccepted. See the
+[event-chain review](EVENT-CHAIN-REVIEW.md).
 
 A render-package update also reproduced PnPUtil exit 259 while reporting that
 the device already uses the up-to-date driver. The installer accepts this

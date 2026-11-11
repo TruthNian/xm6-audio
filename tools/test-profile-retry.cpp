@@ -65,6 +65,15 @@ struct Session {
     struct Audio {
         std::vector<uint64_t> storage;
         unsigned failures = 0, calls = 0;
+        unsigned latency_failures = 0, latency_calls = 0, delay = 0;
+        bool set_latency(unsigned transport, unsigned peer) {
+            REQUIRE(transport == 0);
+            ++latency_calls;
+            delay = peer;
+            if (!latency_failures) return true;
+            --latency_failures;
+            return false;
+        }
         bool suspended = false;
         ULONG serial = 0, connection = 0;
         std::function<void()> during_publication;
@@ -105,6 +114,8 @@ struct Session {
     bool publication_pending_ = false;
     bool peer_configuration_pending_ = false;
     bool stopping_ = false, suspend_publication_pending_ = false, stream_start_pending_ = false;
+    bool latency_publication_pending_ = false;
+    uint32_t delay_report_us_ = 0;
     DWORD next_profile_retry_ = 0;
     ULONG pcm_sequence_ = 0, media_generation_ = 2, sig_generation_ = 1;
     ULONG stream_generation_ = 0, suspend_serial_ = 1;
@@ -134,6 +145,7 @@ struct Session {
     void begin_streaming();
     void end_streaming();
     bool update_suspend_state();
+    bool update_latency();
     void retry_profile_state();
     bool finish_endpoint_setup();
 };
@@ -147,6 +159,69 @@ bool Session::finish_endpoint_setup() {
 }
 
 int main() {
+    for (int state : {0, OA2DP_SEP_OPEN, 5}) {
+        Session s;
+        s.av_.sep.state = state;
+        s.begin_streaming();
+        REQUIRE(!s.streaming_ && !s.workers && !s.audio_.calls);
+    }
+    {
+        Session s;
+        s.local_seid_ = 0;
+        s.av_.sep.state = OA2DP_SEP_STREAMING;
+        s.begin_streaming();
+        REQUIRE(!s.streaming_ && !s.workers && !s.audio_.calls);
+    }
+    {
+        Session s;
+        now = 10;
+        s.audio_.latency_failures = 2;
+        s.delay_report_us_ = 120000;
+        REQUIRE(!s.update_latency() && s.latency_publication_pending_);
+        now = 1009;
+        s.retry_profile_state();
+        REQUIRE(s.audio_.latency_calls == 1);
+        // No new DELAYREPORT is needed to recover; always use the latest value.
+        s.delay_report_us_ = 150000;
+        now = 1010;
+        s.retry_profile_state();
+        REQUIRE(s.audio_.latency_calls == 2 && s.latency_publication_pending_);
+        now = 2010;
+        s.retry_profile_state();
+        REQUIRE(s.audio_.latency_calls == 3 && !s.latency_publication_pending_);
+        REQUIRE(s.audio_.delay == 150000 && !s.starts && !s.workers);
+        REQUIRE(!s.audio_.calls); // latency-only retry does not republish suspend
+    }
+    for (unsigned condition = 0; condition < 7; ++condition) {
+        Session s;
+        now = 10;
+        s.audio_.latency_failures = 1;
+        REQUIRE(!s.update_latency());
+        switch (condition) {
+        case 0: s.stopping_ = true; break;
+        case 1: s.audio_ready_ = false; break;
+        case 2: s.transport_suspended_ = true; break;
+        case 3: s.teardown_pending_ = true; break;
+        case 4: s.connection_enabled_ = false; break;
+        case 5: s.sig_open_ = false; break;
+        case 6: s.media_open_ = false; break;
+        }
+        now = 1010;
+        s.retry_profile_state();
+        REQUIRE(s.audio_.latency_calls == 1 && !s.starts && !s.workers);
+    }
+    {
+        Session s;
+        now = UINT32_MAX - 99;
+        s.audio_.latency_failures = 1;
+        REQUIRE(!s.update_latency());
+        now = 899;
+        s.retry_profile_state();
+        REQUIRE(s.audio_.latency_calls == 1);
+        now = 900;
+        s.retry_profile_state();
+        REQUIRE(s.audio_.latency_calls == 2 && !s.latency_publication_pending_);
+    }
     {
         Session s;
         now = 10;

@@ -237,14 +237,17 @@ bool Session::request(int label, oa2dp_avdtp_event &out, DWORD timeout_ms)
         return false;
     DWORD deadline = GetTickCount() + timeout_ms;
     while (!stopping_ && sig_open_ && !rx_failed_) {
+        // Core timeouts are completions, not peer commands. Deliver and
+        // consume them before the caller's outer deadline can leave one
+        // behind for a reused transaction label.
+        oa2dp_avdtp_check_timeouts(&av_);
         auto it = responses_.find(label);
         if (it != responses_.end()) {
             out = it->second;
             responses_.erase(it);
-            return out.msg_type == OA2DP_AVDTP_MSG_ACCEPT;
+            return !out.timed_out && out.msg_type == OA2DP_AVDTP_MSG_ACCEPT;
         }
         if (is_after(GetTickCount(), deadline)) {
-            oa2dp_avdtp_check_timeouts(&av_);
             out = {};
             out.timed_out = true;
             return false;
@@ -256,7 +259,7 @@ bool Session::request(int label, oa2dp_avdtp_event &out, DWORD timeout_ms)
 
 void Session::on_avdtp_event(const oa2dp_avdtp_event &ev)
 {
-    if (ev.msg_type != OA2DP_AVDTP_MSG_COMMAND) {
+    if (ev.timed_out || ev.msg_type != OA2DP_AVDTP_MSG_COMMAND) {
         responses_[ev.label] = ev;
         return;
     }
@@ -293,7 +296,7 @@ void Session::on_avdtp_event(const oa2dp_avdtp_event &ev)
     case OA2DP_AVDTP_DELAYREPORT:
         delay_report_us_ = static_cast<uint32_t>(ev.delay) * 100;
         if (audio_ready_)
-            audio_.set_latency(0, delay_report_us_);
+            update_latency();
         LOGI("headset delay report: %u us", delay_report_us_.load());
         break;
     default:
@@ -506,7 +509,7 @@ bool Session::setup_audio_endpoint()
             }
         }
     }
-    if (!audio_.set_formats(list) || !audio_.set_latency(0, delay_report_us_)) {
+    if (!audio_.set_formats(list) || !update_latency()) {
         LOGE("cannot configure the native audio endpoint");
         return retry_setup();
     }
@@ -638,6 +641,7 @@ void Session::reconcile_peer_configuration()
 void Session::teardown(const char *why)
 {
     LOGI("teardown: %s", why);
+    latency_publication_pending_ = false; // a retired link must not replay its delay
     end_streaming();
     // Also close an OPEN whose caller timed out before receiving its handle.
     // A failed close must retain ownership and suppress a replacement open.
@@ -1015,6 +1019,9 @@ void Session::begin_streaming()
     if (stopping_ || peer_configuration_pending_ || !connection_enabled_ || transport_suspended_ ||
         suspend_requested_ || teardown_pending_ || streaming_ || !media_open_ || !audio_ready_)
         return;
+    const oa2dp_avdtp_sep *sep = oa2dp_avdtp_sep_get(&av_, local_seid_);
+    if (!sep || sep->state != OA2DP_SEP_STREAMING)
+        return; // only an accepted peer/local START authorizes the sender
     if (audio_format_.SampleRate &&
         audio_format_.SampleRate != oa2dp_codec_sample_rate(&config_)) {
         LOGE("endpoint rate %lu does not match negotiated codec rate; not sending mistimed audio",
@@ -1073,6 +1080,15 @@ void Session::end_streaming()
     publish("open");
 }
 
+bool Session::update_latency()
+{
+    const bool accepted = audio_.set_latency(0, delay_report_us_);
+    latency_publication_pending_ = !accepted;
+    if (!accepted)
+        next_profile_retry_ = GetTickCount() + 1000;
+    return accepted;
+}
+
 bool Session::update_suspend_state()
 {
     if (!audio_ready_) return false;
@@ -1087,7 +1103,8 @@ bool Session::update_suspend_state()
 
 void Session::retry_profile_state()
 {
-    if ((!suspend_publication_pending_ && !stream_start_pending_) || stopping_ || !audio_ready_ ||
+    if ((!suspend_publication_pending_ && !stream_start_pending_ && !latency_publication_pending_) ||
+        stopping_ || !audio_ready_ ||
         !is_after(GetTickCount(), next_profile_retry_))
         return;
     next_profile_retry_ = GetTickCount() + 1000;
@@ -1095,6 +1112,12 @@ void Session::retry_profile_state()
     // replaying an obsolete reply after HFP, disconnect or endpoint recovery.
     if (suspend_publication_pending_ && !update_suspend_state())
         return;
+    // Retry the latest value in place, without format publication, codec
+    // renegotiation or restarting a working encoder. Teardown clears this
+    // request; an unavailable transport waits for normal endpoint setup.
+    if (latency_publication_pending_ && !transport_suspended_ && !teardown_pending_ &&
+        connection_enabled_ && sig_open_ && media_open_)
+        update_latency();
     if (stream_start_pending_) {
         stream_start_pending_ = false;
         oa2dp_avdtp_sep *sep = oa2dp_avdtp_sep_get(&av_, local_seid_);
@@ -1247,12 +1270,20 @@ void Session::stream_loop(const StreamContext &stream)
         if (r == OA2DP_ERR_NOSPC) {  // larger than one packet: fragment
             send_packet(oa2dp_rtp_flush(&rtp));
             size_t off = 0;
-            while (off < len) {
+            while (off < len && streaming_) {
                 int n = oa2dp_rtp_fragment(&rtp, out.data(), len, spf * frames, &off);
-                if (n <= 0)
+                if (n <= 0) {
+                    LOGE("RTP fragmentation failed (%d); stopping the stream", n);
+                    fail_stream();
+                    streaming_ = false;
                     break;
+                }
                 send_packet(static_cast<size_t>(n));
             }
+        } else if (r != 1) {
+            LOGE("RTP packetization failed (%d); stopping the stream", r);
+            fail_stream();
+            streaming_ = false;
         } else if (flush_each) {
             send_packet(oa2dp_rtp_flush(&rtp));
         }
