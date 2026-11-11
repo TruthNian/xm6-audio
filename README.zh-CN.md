@@ -6,9 +6,11 @@
 
 本机已验证 0.3.50 的两个实际加载驱动和运行中的服务，通过一次蓝牙关闭／开启完成激活，没有重启电脑。耳机不在场时，Windows 实际显示模型最终保持 Disconnected，修复了已独立复现的离线误显示 Connected 路径。用户此前对 QQ 音乐、PotPlayer、系统提示声及蓝牙控制的确认，以及 YouTube 音频卡顿报告，适用于 0.3.44。**真实连接后的单设备断开／重连、已有播放器恢复及 Chrome 稳定性仍待验收。**
 
-当前实际运行版本为 **0.3.53**，两个已加载驱动及运行中的服务均与本机签名包哈希核对一致，无需重启电脑。它统一 AAC 协商与真实编码器的位率设置，不公布不可用后端或不满足固定要求的编码选项，保留此前采样率切换及事件链修正。全部 23 项本地检查及[源码 CI](https://github.com/TruthNian/xm6-audio/actions/runs/42988148471)通过。总线 ABI 6 保持不变，未声称已测得 CPU／延迟或听感收益。详见[编码审查](docs/CODEC-REVIEW.md)、[事件链审查](docs/EVENT-CHAIN-REVIEW.md)、[生命周期审查](docs/LIFECYCLE-REVIEW.md)和[开发记录](docs/HARDWARE-BRINGUP.md)。**不要加载 0.3.5 候选驱动**：该版属性表布局错误曾导致开发机蓝屏，0.3.6 已修正并增加离线 PE/PDB 检查。
+当前实际运行版本为 **0.3.54**，两个已加载驱动及运行中的服务均与本机签名包哈希核对一致，无需重启电脑。它在保留样本结果的前提下移除整数 PCM 的逐样本除法，并修正 AAC 仅事件输出及对象清理。全部 25 项本地检查及[源码 CI](https://github.com/TruthNian/xm6-audio/actions/runs/42996976885)通过。同进程交替对照中，部分整数预处理路径约快 5.2 倍；这不代表整条音频链、抖动或听感收益。总线 ABI 6 保持不变。详见[性能审查](docs/PERFORMANCE-REVIEW.md)、[编码审查](docs/CODEC-REVIEW.md)、[事件链审查](docs/EVENT-CHAIN-REVIEW.md)、[生命周期审查](docs/LIFECYCLE-REVIEW.md)和[开发记录](docs/HARDWARE-BRINGUP.md)。**不要加载 0.3.5 候选驱动**：该版属性表布局错误曾导致开发机蓝屏，0.3.6 已修正并增加离线 PE/PDB 检查。
 
 已配对但未连接时，英文界面应显示 **Paired**。`Disconnected(3)` 是 Windows 内部状态枚举；已直接读取本机 Windows 资源，两个对应蓝牙未连接标签的英文值均为 `Paired`。内部状态、AEP／容器状态和资源文字已分别核对，实际屏幕标签及按钮仍需保留为独立验收项目。
+
+最新离线蓝牙开关事件仍记录到约 1 秒的临时 Connected，之后模型才稳定为对应 Paired 的状态。最终状态正确，不代表启动过渡及界面已经全部验收；详见[运行记录](docs/HARDWARE-BRINGUP.md)。
 
 `follow_source_rate` 这个兼容配置名实际表示“跟随端点 PCM 采样率”，不读取播放器文件或 Hi-Res／SQ 标签。共享模式下，多个应用先按一个 Windows 端点格式混音；96 kHz 文件进入 48 kHz 混音时，驱动仍只收到 48 kHz。逐文件自动选择共享混音格式尚未实现。播放器可通过独占模式直接提交支持的格式，但会排除其他应用同时使用该端点。
 

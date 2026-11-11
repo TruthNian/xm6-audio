@@ -2,14 +2,40 @@
 
 The controlled developer trial targets WH-1000XM6 on Windows 10 x64, build 19045. It uses a local development signature under explicitly authorized test signing. This is separate from the production installer, which still requires Microsoft-signed catalogs.
 
-Latest source audit: [0.3.53 codec review](CODEC-REVIEW.md). Version
-0.3.53 is now activated with verified loaded images; see the following record.
+Latest source audit: [0.3.54 performance/output review](PERFORMANCE-REVIEW.md).
+Version 0.3.54 is activated with verified loaded images; see the following record.
 Earlier runtime observations apply to 0.3.44. After its authorized
 deployment and a user restart, both actual loaded kernel images and the running
 service matched the verified local test-signed candidate. The service process
 started approximately twelve seconds after boot without a manual start in the
 post-boot session. This establishes automatic service startup, not complete
 automatic audio/reconnect acceptance.
+
+## 0.3.54 PCM/output correction activation (2026-11-11)
+
+Source `a582b7d39e88b39ab176b1b474726ffba9657303` passed all 25 local checks
+and [source CI](https://github.com/TruthNian/xm6-audio/actions/runs/42996976885).
+The locally built package was signed with the existing development certificate.
+A Bluetooth radio cycle activated both actual kernel images and the running
+service, verified against the protected signed package hashes. No computer
+restart or boot/trust/privacy change was made. Both current install flags
+requested no restart. Auto sample rate/precision, LDAC HQ, ABR off and the
+LDAC/AAC/SBC preference were read back unchanged.
+
+All 359 display-trace events decoded, with zero event/buffer loss. The last
+target transition was Disconnected(3) at approximately 5392 ms, followed by
+approximately 4997 ms of settled observation. AEP Paired=True/Connected=False,
+container Connected=False and native disconnected/zero-bitrate state agreed.
+The installed English resource for this state is **Paired**; the enum is not
+the literal screen label. Rendered Settings text/buttons were not observed.
+
+The same trace records transient Connected(7) at approximately 4383/4398 ms
+before settling to Disconnected(3) at approximately 5392 ms. This roughly
+one-second startup transition remains an open observation; this trace does
+not attribute it to a particular driver/Windows component or establish its
+visible duration. Do not describe the entire display lifecycle as fixed.
+Connected per-device reconnect, existing-client recovery, Chrome audio
+stability and actual headset playback remain unaccepted for version54.
 
 ## 0.3.53 codec/backend correction activation (2026-11-11)
 

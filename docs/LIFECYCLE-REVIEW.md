@@ -12,6 +12,13 @@ fail the new ownership/events-only checks. Actual MFT encoding still passes
 all four mono/stereo and 44.1/48 kHz combinations. Hardware sound, reconnect
 and Chrome stability remain separate, incomplete acceptance items.
 
+Version54 was activated through a radio cycle, without rebooting the computer.
+Both actual kernel images and the running service match the signed payload.
+All 25 local checks and source CI pass. The offline display model settles to
+the state whose installed English resource is Paired, but still records an
+approximately one-second transient Connected beforehand. This is not complete
+display lifecycle or rendered-UI acceptance; see the [runtime record](HARDWARE-BRINGUP.md).
+
 ## 0.3.53: constrain codec offers to actual backend and policy
 
 The [codec review](CODEC-REVIEW.md) reproduces AAC target overshoot with the
