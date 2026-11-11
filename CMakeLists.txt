@@ -120,6 +120,15 @@ if(OA2DP_BUILD_TESTS)
     add_executable(test_audio_pnp tools/test-audio-pnp.cpp)
     target_include_directories(test_audio_pnp PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
     add_test(NAME audio_pnp COMMAND test_audio_pnp)
+    xm6_test_body(driver/oa2dpaudio/adapter.cpp "extern \"C\" VOID Oa2dpPublishNameLocked("
+        "\n//=============================================================================\n#pragma code_seg(\"PAGE\")\nstatic NTSTATUS\nInstallSubdevice" endpoint-name-publication)
+    xm6_test_body(driver/oa2dpaudio/control.cpp "static NTSTATUS SetName("
+        "\nstatic NTSTATUS WaitFormat(" endpoint-name-update)
+    xm6_test_body(driver/oa2dpaudio/adapter.cpp "    // Restore metadata before PortCls exposes the filters."
+        "\n    if (dev->WavePort != NULL)" endpoint-name-startup)
+    add_executable(test_endpoint_names tools/test-endpoint-names.cpp)
+    target_include_directories(test_endpoint_names PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
+    add_test(NAME endpoint_names COMMAND test_endpoint_names)
     xm6_test_body(driver/oa2dp/driver.c "static VOID CompleteEvent(" "\nstatic NTSTATUS Oa2dpChildEnumerated(" transport-events)
     add_executable(test_transport_events tools/test-transport-events.cpp)
     target_include_directories(test_transport_events PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")

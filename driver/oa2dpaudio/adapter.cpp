@@ -22,7 +22,7 @@ Abstract:
  *  - IRP_MJ_CREATE/CLEANUP/CLOSE/DEVICE_CONTROL are hooked so the control
  *    interface for oa2dpsvc.exe (control.cpp) can share PortCls's device
  *    object; everything else still goes to PortCls;
- *  - the filters are re-registered after a friendly-name change.
+ *  - name updates publish metadata without re-registering working filters.
  */
 // All the GUIDS for the port class and our interfaces end up in this object.
 #include <initguid.h>
@@ -196,37 +196,40 @@ Oa2dpDispatch
 //=============================================================================
 // Best effort: name the KS interfaces too (legacy WinMM device names).
 #pragma code_seg("PAGE")
-static VOID
-SetInterfaceName
-(
-    _In_ OA2DP_AUDIO_DEVICE *dev,
-    _In_ PCWSTR              ReferenceString
-)
+// ControlLock held; all five interface identities must match the INF.
+extern "C" VOID Oa2dpPublishNameLocked(_In_ OA2DP_AUDIO_DEVICE *dev)
 {
-    WCHAR           name[RTL_NUMBER_OF_FIELD(OA2DP_AUDIO_DEVICE, Name)];
-    UNICODE_STRING  ref;
-    UNICODE_STRING  link;
-    size_t          len = 0;
+    static const struct { const GUID *Category; PCWSTR Reference; } interfaces[] = {
+        { &KSCATEGORY_AUDIO, OA2DP_WAVE_NAME },
+        { &KSCATEGORY_RENDER, OA2DP_WAVE_NAME },
+        { &KSCATEGORY_REALTIME, OA2DP_WAVE_NAME },
+        { &KSCATEGORY_AUDIO, OA2DP_TOPO_NAME },
+        { &KSCATEGORY_TOPOLOGY, OA2DP_TOPO_NAME },
+    };
+    size_t len = 0;
 
     PAGED_CODE();
 
-    Oa2dpLock(&dev->ControlLock);
-    RtlCopyMemory(name, dev->Name, sizeof(name));
-    Oa2dpUnlock(&dev->ControlLock);
-    name[RTL_NUMBER_OF(name) - 1] = L'\0';
-    if (!NT_SUCCESS(RtlStringCchLengthW(name, RTL_NUMBER_OF(name), &len)) || len == 0)
-    {
+    if (!NT_SUCCESS(RtlStringCchLengthW(dev->Name, RTL_NUMBER_OF(dev->Name), &len)) || len == 0)
         return;
-    }
-
-    RtlInitUnicodeString(&ref, ReferenceString);
-    if (NT_SUCCESS(IoRegisterDeviceInterface(dev->Pdo, &KSCATEGORY_AUDIO, &ref, &link)))
-    {
-        (void)IoSetDeviceInterfacePropertyData(&link, &DEVPKEY_DeviceInterface_FriendlyName,
-                                               LOCALE_NEUTRAL, PLUGPLAY_PROPERTY_PERSISTENT,
-                                               DEVPROP_TYPE_STRING,
-                                               (ULONG)((len + 1) * sizeof(WCHAR)), name);
-        RtlFreeUnicodeString(&link);
+    const ULONG bytes = (ULONG)((len + 1) * sizeof(WCHAR));
+    NTSTATUS status = IoSetDevicePropertyData(dev->Pdo, &DEVPKEY_Device_FriendlyName,
+        LOCALE_NEUTRAL, PLUGPLAY_PROPERTY_PERSISTENT, DEVPROP_TYPE_STRING, bytes, dev->Name);
+    if (!NT_SUCCESS(status))
+        KdPrintEx((DPFLTR_IHVAUDIO_ID, DPFLTR_WARNING_LEVEL,
+            "oa2dpaudio: publishing device name failed 0x%08X\n", status));
+    for (ULONG i = 0; i < RTL_NUMBER_OF(interfaces); ++i) {
+        UNICODE_STRING ref, link;
+        RtlInitUnicodeString(&ref, interfaces[i].Reference);
+        status = IoRegisterDeviceInterface(dev->Pdo, interfaces[i].Category, &ref, &link);
+        if (NT_SUCCESS(status)) {
+            status = IoSetDeviceInterfacePropertyData(&link, &DEVPKEY_DeviceInterface_FriendlyName,
+                LOCALE_NEUTRAL, PLUGPLAY_PROPERTY_PERSISTENT, DEVPROP_TYPE_STRING, bytes, dev->Name);
+            RtlFreeUnicodeString(&link);
+        }
+        if (!NT_SUCCESS(status))
+            KdPrintEx((DPFLTR_IHVAUDIO_ID, DPFLTR_WARNING_LEVEL,
+                "oa2dpaudio: publishing interface name %lu failed 0x%08X\n", i, status));
     }
 }
 
@@ -256,8 +259,6 @@ Routine Description:
     PPORT       port = NULL;
 
     *OutPort = NULL;
-
-    SetInterfaceName(dev, Name);
 
     // Create the port driver object
     ntStatus = PcNewPort(&port, PortClassId);
@@ -368,6 +369,12 @@ InstallFilters
     PUNKNOWN            topoPort = NULL;
     PUNKNOWN            wavePort = NULL;
     CMiniportWaveRT    *miniWave = NULL;
+
+    // Restore metadata before PortCls exposes the filters. A driver reinstall
+    // may have restored the INF defaults even when our cached name is unchanged.
+    Oa2dpLock(&dev->ControlLock);
+    Oa2dpPublishNameLocked(dev);
+    Oa2dpUnlock(&dev->ControlLock);
 
     if (dev->WavePort != NULL)
     {

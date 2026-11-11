@@ -598,28 +598,20 @@ static NTSTATUS SetName(_Inout_ OA2DP_AUDIO_DEVICE *dev, _In_ const OA2DP_ENDPOI
 {
     OA2DP_ENDPOINT_NAME n = *in;
     size_t len = 0;
-    NTSTATUS status;
 
     n.Name[RTL_NUMBER_OF(n.Name) - 1] = L'\0';
     if (!NT_SUCCESS(RtlStringCchLengthW(n.Name, RTL_NUMBER_OF(n.Name), &len)) || len == 0)
         return STATUS_INVALID_PARAMETER;
 
     Oa2dpLock(&dev->ControlLock);
-    if (wcscmp(dev->Name, n.Name) == 0) {
-        Oa2dpUnlock(&dev->ControlLock);
-        return STATUS_SUCCESS;
+    if (wcscmp(dev->Name, n.Name) != 0) {
+        RtlStringCchCopyW(dev->Name, RTL_NUMBER_OF(dev->Name), n.Name);
+        SaveValue(dev, NAME_VALUE, REG_SZ, n.Name, (ULONG)((len + 1) * sizeof(WCHAR)));
     }
-    RtlStringCchCopyW(dev->Name, RTL_NUMBER_OF(dev->Name), n.Name);
+    // Cache equality does not prove the Windows properties survived reinstall
+    // or a previous failed publication. Retry metadata without bouncing audio.
+    Oa2dpPublishNameLocked(dev);
     Oa2dpUnlock(&dev->ControlLock);
-
-    SaveValue(dev, NAME_VALUE, REG_SZ, n.Name, (ULONG)((len + 1) * sizeof(WCHAR)));
-    /* Sound settings shows "<endpoint> (<device friendly name>)". */
-    status = IoSetDevicePropertyData(dev->Pdo, &DEVPKEY_Device_FriendlyName, LOCALE_NEUTRAL,
-                                     PLUGPLAY_PROPERTY_PERSISTENT, DEVPROP_TYPE_STRING,
-                                     (ULONG)((len + 1) * sizeof(WCHAR)), n.Name);
-    if (!NT_SUCCESS(status))
-        KdPrintEx((DPFLTR_IHVAUDIO_ID, DPFLTR_WARNING_LEVEL,
-                   "oa2dpaudio: setting the friendly name failed 0x%08X\n", status));
     // Naming is metadata. Never unregister a working endpoint to refresh it;
     // existing DirectSound/WASAPI clients must keep their device identity.
     return STATUS_SUCCESS;

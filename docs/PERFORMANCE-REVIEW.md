@@ -63,6 +63,44 @@ It was not installed during these tests and is not presented as a fix for the
 earlier interruption. Sleep/resume, simultaneous applications, physical
 synchronization and supported-format transitions still need separate evidence.
 
+### PotPlayer video scenario and observed source/mix mismatch
+
+The user then switched to PotPlayer and supplied its playback-information
+screen. It reports FLAC input, 48,000 -> 48,000 Hz, 24 -> 24 bits, two -> two
+channels, and DirectSound Audio Renderer. In the same scenario, read-only
+endpoint/session observations show PotPlayerMini64 active with nonzero signal,
+a 96 kHz Windows shared mix, and 96 kHz LDAC HQ transmission with 24 useful
+bits in a 32-bit integer container. Thus this source undergoes 48 -> 96 kHz
+conversion before the driver; the automatic policy follows the endpoint PCM,
+not the original FLAC file. Upsampling does not add source detail. A matching
+48 kHz shared format would avoid this rate conversion for this source, but
+this observation does not measure an audible advantage. No setting was changed
+while the user was comparing playback scenarios. See Microsoft's
+[format-conversion and shared-mix contract](https://learn.microsoft.com/en-us/windows/win32/coreaudio/device-formats).
+
+A separate passive capture ran for 302.608 seconds, 20:04:30–20:09:32 local
+time, on the same unchanged 0.3.61 runtime. All 20 application snapshots found
+PotPlayer as the active audio application and the native endpoint default for
+all three render roles. Results:
+
+| Observed metric | PotPlayer result |
+|---|---:|
+| Decoded ETW events / lost events / lost buffers | 57,033 / 0 / 0 |
+| Media-send completions / failed completions | 56,726 / 0 |
+| Completion latency p50 / p95 / p99 / maximum | 0.796 / 2.297 / 6.941 / 23.908 ms |
+| Completion interval p99 / maximum | 9.0 / 28.2 ms |
+| Peak buffered PCM / maximum data-event wait | 423 frames (4.41 ms) / 4.155 ms |
+| Ring overrun frames, excluding first PCM window | 0 |
+| Media rate including protocol headers | 1,009,501 bit/s |
+| Service CPU, tracing included | 1.547 seconds (0.511% of one logical CPU) |
+
+The two captured KS property calls also completed successfully. There was one
+PCM stream generation, no new service error or teardown, and no service restart.
+The capture stopped normally. Part of it overlapped an independent local build;
+it is not a controlled performance comparison. The transport result is evidence
+for this interval, not an audible lip-sync assessment, a measured zero-underrun
+result at the headset, or simultaneous-player acceptance.
+
 ## 0.3.60: keep the presentation clock monotonic across delay updates
 
 The driver estimated presentation position by subtracting the latest transport

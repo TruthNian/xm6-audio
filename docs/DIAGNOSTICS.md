@@ -108,3 +108,40 @@ codes overwritten by later cancellation checks, and buffer retention until
 terminal completion. The full native Release build and all 28 local checks
 passed. This is a diagnostic improvement, not proof that the earlier
 interruption is fixed. It was not deployed during the user's 0.3.61 tests.
+
+## Endpoint name publication (unreleased source change)
+
+Read-only queries on the active 0.3.61 host found the following mismatch while
+audio was playing normally:
+
+| Property | Observed value |
+|---|---|
+| Stored `Oa2dpName` and both `KSCATEGORY_AUDIO` interfaces | `WH-1000XM6` |
+| `KSCATEGORY_RENDER` / `KSCATEGORY_REALTIME` wave interface | `XM6 Audio Wave` |
+| `KSCATEGORY_TOPOLOGY` interface | `XM6 Audio Topology` |
+| Render PDO `DEVPKEY_Device_FriendlyName` | Absent |
+| Active MMDevice endpoint name | `Headphones (XM6 Audio Topology)` (localized prefix) |
+
+The startup code only published names under `KSCATEGORY_AUDIO`. `SetName` also
+returned early when the cached name matched, even when Windows properties were
+absent or reset to INF defaults. The source now uses one publisher for the PDO
+and all five interface/reference pairs declared in the INF. It runs before
+filter registration on startup and retries on a same-name service request.
+`ControlLock` serializes cached-name updates and publication. A failed property
+does not prevent the remaining properties from being attempted, and interface
+strings are freed on property-write failure too.
+
+This changes metadata only: no filter removal/re-registration, endpoint-ID
+replacement, default-output change or audio-process restart. The actual
+production publisher, SetName body and startup call are exercised by a focused
+fixture for cached startup, stale/missing properties, individual API failures,
+retry, Unicode names and empty-name rejection. The full native Release build
+and all 29 local checks pass. This source fix has not been deployed during the
+user's playback testing; EndpointBuilder's visible refresh still needs checking
+after a later controlled activation.
+
+Microsoft documents the separate
+[audio interface registrations](https://learn.microsoft.com/en-us/windows-hardware/drivers/audio/installing-device-interfaces-for-an-audio-adapter)
+and the [interface name property](https://learn.microsoft.com/en-us/windows-hardware/drivers/install/devpkey-deviceinterface-friendlyname).
+Do not overwrite the user's MMDevice property store to conceal a missing driver
+publication, or reset a working audio endpoint solely to rename it.
