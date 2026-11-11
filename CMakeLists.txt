@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(XM6Audio VERSION 0.3.57 LANGUAGES C CXX)
+project(XM6Audio VERSION 0.3.58 LANGUAGES C CXX)
 
 # The loaded binary's version must agree with the configured project and INF.
 # Generate resources in the build tree rather than keeping a stale copy.
@@ -186,6 +186,11 @@ if(OA2DP_BUILD_TESTS)
     add_executable(test_disconnect_status tools/test-disconnect-status.cpp)
     target_include_directories(test_disconnect_status PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
     add_test(NAME disconnect_status COMMAND test_disconnect_status)
+    xm6_test_body(service/src/session.cpp "void Session::refresh_transport_power("
+        "\nvoid Session::handle(" power-refresh)
+    add_executable(test_power_refresh tools/test-power-refresh.cpp)
+    target_include_directories(test_power_refresh PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
+    add_test(NAME power_refresh COMMAND test_power_refresh)
     xm6_test_body(service/src/session.cpp "bool Session::start_stream("
         "\nvoid Session::suspend_stream(" stream-start)
     xm6_test_body(service/src/session.cpp "void Session::begin_streaming("

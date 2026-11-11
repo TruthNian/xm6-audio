@@ -72,6 +72,7 @@ private:
     void post(const Command &c);
     bool pump(DWORD timeout_ms);  // feed one received SDU, false on timeout
     void refresh_transport_power();
+    void retry_transport_power();
     bool request(int label, oa2dp_avdtp_event &out, DWORD timeout_ms = 4000);
     void handle(const Command &c);
     bool connect_signaling();
@@ -124,6 +125,8 @@ private:
     bool media_drain_pending_ = false;
     bool transport_suspended_ = false;
     ULONG power_serial_ = 0;
+    bool power_refresh_pending_ = false;
+    DWORD next_power_refresh_ = 0;
     bool rx_failed_ = false;   // owned by the signalling thread
 
     // negotiated stream

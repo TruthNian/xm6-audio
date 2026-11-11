@@ -739,11 +739,18 @@ bool Session::publish_disconnected_state()
 
 void Session::refresh_transport_power()
 {
+    if (stopping_) return;
     OA2DP_DEVICE_INFO current{};
     if (!tr_.get_info(current) || current.Version != OA2DP_IOCTL_VERSION) {
-        LOGW("cannot read transport power state");
+        // The event is already consumed. Retain the query, not a guessed power
+        // value: a failed resume query must not leave the session suspended
+        // forever when no later notification arrives.
+        power_refresh_pending_ = true;
+        next_power_refresh_ = GetTickCount() + 1000;
+        LOGW("cannot read transport power state; will retry");
         return;
     }
+    power_refresh_pending_ = false;
     const bool suspended = (current.Flags & OA2DP_DEVICE_SUSPENDED) != 0;
     if (current.PowerSerial == power_serial_ && suspended == transport_suspended_) return;
     power_serial_ = current.PowerSerial;
@@ -753,6 +760,13 @@ void Session::refresh_transport_power()
     teardown(suspended ? "transport power suspended" : "transport power resumed");
     next_reconnect_ = GetTickCount();
     publish(suspended ? "power-suspended" : "power-resuming");
+}
+
+void Session::retry_transport_power()
+{
+    if (power_refresh_pending_ && !stopping_ &&
+        is_after(GetTickCount(), next_power_refresh_))
+        refresh_transport_power();
 }
 
 void Session::handle(const Command &c)
@@ -994,6 +1008,7 @@ void Session::main_loop()
     DWORD next_status_write = GetTickCount() + 1000;
 
     while (!stopping_) {
+        retry_transport_power(); // also runs while suspended or without an audio endpoint
         if (is_after(GetTickCount(), next_status_write)) {
             LiveStatus snapshot;
             {

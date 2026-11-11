@@ -1,5 +1,35 @@
 # Native lifecycle review
 
+## 0.3.58: retain failed power-state queries
+
+Power notifications tell the service to query the current driver state rather
+than replay an old suspend/resume value. Previously, a failed GET_INFO consumed
+that notification without retaining the query. If the last known state was
+suspended, the reconnect gates could then remain closed indefinitely unless
+another power notification arrived. This also applies to the power refresh
+used when recovering an overflowed transport-event backlog.
+
+Remember a failed query and retry it from the existing main loop after one
+second, independently of endpoint availability and the last known power state.
+Every success clears the retry, even when the serial/state are unchanged.
+A newer notification may resolve it sooner. Successful queries reconcile the
+latest serial/state using the existing teardown path; failures do not invent
+a power transition. The retry does not enable a user-disconnected connection.
+Stop prevents further queries. Healthy operation adds no driver query, thread
+or timer; the existing loop checks a false pending flag.
+
+The production refresh/retry fixture controls only the driver query and clock.
+It covers a lone failed resume query, consecutive failures, newer state during
+retry, early notification recovery, unchanged state, a coalesced power epoch,
+version mismatch, tick wrap and stop. Substituting the previous production
+refresh body fails the retained-query assertion before any retry executes.
+The corrected body passes, including recovery without an endpoint or another
+notification. These checks do not establish Windows sleep behavior, a wall
+clock recovery deadline, or the cause of the reported Chrome/UI symptoms.
+
+The local native x64 Release build and all 28 checks pass. Exact-source CI
+and runtime activation are recorded separately after verification.
+
 ## 0.3.57: reconcile startup discovery with removal notifications
 
 The service registers interface notifications before enumerating existing

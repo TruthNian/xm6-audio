@@ -1,10 +1,16 @@
 # Event, notification and transport review
 
-Reviewed 2026-11-11 against the 0.3.50–0.3.55 production source. The headset
+Reviewed 2026-11-11 against the 0.3.50–0.3.58 production source. The headset
 was unavailable. Runtime conclusions below concern the disconnected Windows
 path; protocol fixtures do not substitute for connected hardware acceptance.
 
 ## Confirmed corrections
+
+The [0.3.56–0.3.58 lifecycle corrections](LIFECYCLE-REVIEW.md) carry session
+stop through control-I/O submission, prevent stale startup enumeration from
+recreating removed interfaces, and retain failed power-state queries until
+the latest driver state is read successfully. Each has a production-body
+regression check. They do not establish physical sleep/reconnect acceptance.
 
 The [0.3.55 lifecycle correction](LIFECYCLE-REVIEW.md) adds the missing
 incoming-OPEN failure chain: attempt binding, terminal closed event and
@@ -44,7 +50,8 @@ contract. Connected Windows/radio acceptance remains pending.
 
 | Path | Authority, delivery and completion | Evidence and limit |
 |---|---|---|
-| Radio/PnP arrival -> service session | Register interface notifications before enumerating; deduplicate arrivals; retire removed sessions outside the callback and join before SCM stop. | Source inspection of main.cpp; real device-interface-triggered startup observed on the host. Whole sleep/reconnect acceptance remains open. |
+| Radio/PnP arrival -> service session | Register before enumerating; reconcile startup removals with snapshot entries; deduplicate genuine arrivals; retire removed sessions outside the callback and join before SCM stop. | Production DeviceManager orderings cover stale snapshots, real replacement, unrelated devices and startup retry. Real device-interface-triggered startup observed on the host; whole sleep/reconnect acceptance remains open. |
+| Power notification -> latest-state query -> reconnect gates | Query current power serial/flags; retain a failed query independently of endpoint readiness or the cached suspend state. Retry on the existing loop, clearing intent on success and honoring service stop. | Production refresh/retry bodies cover lost-query recovery, coalesced state, duplicate notification, tick wrap and stop with controlled driver/time. Actual sleep/resume and a host recovery deadline remain unaccepted. |
 | HCI ACL hint -> reconnect scheduling | Hints are address-filtered and coalesced. They may accelerate retry but cannot declare audio connected or override explicit disconnect. Notification unregister waits for callbacks outside the spin lock. | Source inspection of link.c; channel/policy truth remains mandatory. Actual remote ACL arrival is untested in this session. |
 | L2CAP callback -> service command | Channel and connection generations reject obsolete opens/closes. The bounded event backlog explicitly emits StateLost on overflow; removal replaces pending history. Wait insertion rechecks pending work. | New production event-queue fixture covers wrap, insertion race, canceled waiter, invalid buffer, stale generations, hint floods, overflow and removal. WDF APIs are controlled boundaries. |
 | Windows profile request -> policy/acknowledgment | Request serials and connection generations distinguish policy intent from transport completion. External publication is serialized outside channel locks; reentry cannot retire a replacement request. | Existing production MPM/publication tests cover reentry and stale-state repair. BtaMpm is an observed Windows10 private ABI, not a published cross-version guarantee. |
