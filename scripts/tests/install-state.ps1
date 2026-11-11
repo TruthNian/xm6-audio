@@ -37,7 +37,9 @@ if (-not $updateDefinition) { throw 'Render update procedure is missing.' }
 function pnputil.exe {
     param([string]$AddDriver,[string]$InfPath,[string]$Install)
     if ($AddDriver -ne '/add-driver' -or $InfPath -ne $script:ExpectedInf -or $Install -ne '/install') { throw 'Unexpected PnP command.' }
-    $global:LASTEXITCODE=$script:PnpResult
+    # Keep fake native exits inside this test script. CI's calling PowerShell
+    # checks its own LASTEXITCODE after all scripts have returned.
+    $script:LASTEXITCODE=$script:PnpResult
 }
 function Get-PnpDevice {
     [CmdletBinding()] param([string]$InstanceId,[switch]$PresentOnly)
