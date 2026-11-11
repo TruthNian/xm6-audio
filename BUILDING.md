@@ -8,6 +8,11 @@ git submodule update --init --recursive
 
 The gitlinks pin Sony/AOSP libldac, BlueZ libsbc and FindWDK. The default Windows build provides LDAC, SBC and Windows Media Foundation AAC. aptX dependencies are not downloaded (XM6 does not support aptX). The optional developer GUI is off by default.
 
+Windows CI fetches SBC through the [kernel mirror](https://kernel.googlesource.com/pub/scm/bluetooth/sbc/)
+after repeated HTTP 502 failures from the canonical host. The canonical URL
+remains in `.gitmodules`; CI verifies the fetched commit against the existing
+gitlink. This changes the download route, not the pinned codec revision.
+
 ## Windows user mode
 
 Visual Studio 2019/2022 with C++ and Windows SDK:

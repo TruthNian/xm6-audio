@@ -19,9 +19,19 @@ jobs:
   windows-native:
     runs-on: windows-2022
     steps:
+      - name: Use kernel mirror for the pinned SBC source
+        shell: powershell
+        run: git config --global 'url.https://kernel.googlesource.com/pub/scm/bluetooth/sbc.insteadOf' 'https://git.kernel.org/pub/scm/bluetooth/sbc.git'
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+      - name: Verify mirrored SBC matches the source gitlink
+        shell: powershell
+        run: |
+          $expectedSbc = (git rev-parse HEAD:third_party/sbc).Trim()
+          if ($LASTEXITCODE) { throw 'Cannot read pinned SBC gitlink' }
+          $actualSbc = (git -C third_party/sbc rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -or $actualSbc -ne $expectedSbc) { throw 'SBC checkout does not match its pinned gitlink' }
       - name: Configure native service, LDAC encoder and kernel drivers
         run: cmake -S . -B build/native -G "Visual Studio 17 2022" -A x64 -DOA2DP_BUILD_DRIVERS=ON -DXM6_BUILD_GUI=OFF
       - name: Build
