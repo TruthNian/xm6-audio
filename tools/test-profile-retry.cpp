@@ -142,6 +142,7 @@ struct Session {
     std::mutex status_mu_;
     struct {
         unsigned bitrate = 0;
+        std::string encoder_input;
     } status_;
     std::string state;
     unsigned starts = 0;

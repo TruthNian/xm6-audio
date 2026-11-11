@@ -52,14 +52,16 @@ void print_status(unsigned long long addr)
         wprintf(L"  %ls: not connected through XM6 Audio\n", addr_str(addr).c_str());
         return;
     }
-    wprintf(L"  %ls: %ls, %ls %lu Hz %lu ch, encoder input %lu bit, transport %lu kbit/s, quality level %lu, headset delay "
+    wprintf(L"  %ls: %ls, %ls %lu Hz %lu ch, transport %lu kbit/s, quality level %lu, headset delay "
             L"%lu ms\n",
             addr_str(addr).c_str(), st.state.c_str(), st.codec.empty() ? L"-" : st.codec.c_str(),
-            st.sample_rate, st.channels, st.bits, st.bitrate / 1000, st.abr_level,
+            st.sample_rate, st.channels, st.bitrate / 1000, st.abr_level,
             st.delay_us / 1000);
     if (st.input_container_bits)
         wprintf(L"    endpoint PCM: %lu-bit container / %lu valid bits, %ls\n",
                 st.input_container_bits, st.input_valid_bits, st.input_encoding == 1 ? L"float" : L"integer");
+    wprintf(L"    encoder adapter input: %ls\n",
+            st.encoder_input.empty() ? L"not reported / no active encoder" : st.encoder_input.c_str());
 }
 
 int cmd_sbc_bitrate(int argc, wchar_t **argv)

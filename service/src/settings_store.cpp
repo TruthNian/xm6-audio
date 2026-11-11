@@ -94,6 +94,7 @@ void publish_status(uint64_t bt_addr, const LiveStatus &st)
         return;
     set_sz(k, L"State", widen(st.state));
     set_sz(k, L"Codec", widen(st.codec));
+    set_sz(k, L"EncoderInputFormat", widen(st.encoder_input));
     set_dw(k, L"SampleRate", st.sample_rate);
     set_dw(k, L"Channels", st.channels);
     set_dw(k, L"Bits", st.bits);

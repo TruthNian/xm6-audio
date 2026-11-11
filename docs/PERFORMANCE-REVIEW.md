@@ -24,6 +24,17 @@ rejection/retry and peer-command tests still pass. No kernel behavior, audio
 samples, rate policy or steady-state processing loop changes.
 The complete native Release build and 31/31 local checks pass after this change.
 
+The status presentation also needed correction after native S32/F32 support:
+`Bits` still described the legacy codec precision selection, but the CLI called
+it "encoder input" and the optional GUI displayed it as an unqualified bit depth.
+The service now publishes `EncoderInputFormat` from the created adapter's actual
+`info.input_format`, clears it when that encoder retires, and keeps endpoint
+container/valid bits separate. The CLI and optional GUI display this field;
+older services report it as unknown. The legacy `Bits` value is retained for
+compatibility and must not be interpreted as the native adapter representation,
+source-file precision or lossless wireless precision. This changes reporting,
+not PCM, codec selection, shared mixing or Bluetooth bandwidth.
+
 ## 0.3.63: precision-only changes also delimit PCM epochs
 
 A controlled regression on the preceding production body reproduced packed

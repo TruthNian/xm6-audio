@@ -20,6 +20,7 @@ bool save_settings(uint64_t bt_addr, const oa2dp_settings &s);
 struct LiveStatus {
     std::string state;     // "connecting", "configured", "streaming", ...
     std::string codec;     // "LDAC"
+    std::string encoder_input; // actual adapter contract; empty without an encoder
     uint32_t sample_rate = 0;
     uint32_t channels = 0;
     uint32_t bits = 0;

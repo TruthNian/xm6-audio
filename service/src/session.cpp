@@ -1183,6 +1183,10 @@ void Session::begin_streaming()
     ResetEvent(stream_stop_event_);
     if (++stream_generation_ == 0) ++stream_generation_;
     context.generation = stream_generation_;
+    {
+        std::lock_guard<std::mutex> lock(status_mu_);
+        status_.encoder_input.clear();
+    }
     stream_ = std::thread([this, context] { stream_loop(context); });
     publish("streaming");
 }
@@ -1197,6 +1201,7 @@ void Session::end_streaming()
     {
         std::lock_guard<std::mutex> lock(status_mu_);
         status_.bitrate = 0;
+        status_.encoder_input.clear();
     }
     publish("open");
 }
@@ -1292,6 +1297,11 @@ void Session::stream_loop(const StreamContext &stream)
         return;
     }
     HANDLE pcm_waits[] = {stream_stop_event_, stop_event_, audio_.data_event()};
+    {
+        std::lock_guard<std::mutex> lock(status_mu_);
+        status_.encoder_input = info.input_format == OA2DP_ENCODER_INPUT_F32 ? "float32" :
+            info.input_format == OA2DP_ENCODER_INPUT_S32 ? "int32" : "S24 scale";
+    }
 
     std::vector<uint8_t> pkt(stream.mtu), out(info.max_output);
     std::vector<int32_t> pcm(static_cast<size_t>(spc) * std::max<uint16_t>(ring_ch, 2));
@@ -1471,6 +1481,10 @@ void Session::stream_loop(const StreamContext &stream)
     if (!tr_.drain_media())
         LOGW("media drain budget expired; retaining pending I/O buffers");
     oa2dp_encoder_destroy(enc);
+    {
+        std::lock_guard<std::mutex> lock(status_mu_);
+        status_.encoder_input.clear();
+    }
 }
 
 }  // namespace oa2dp

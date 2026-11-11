@@ -66,6 +66,7 @@ LSTATUS reset_settings(unsigned long long addr);
 struct LiveStatus {
     std::wstring state;
     std::wstring codec;
+    std::wstring encoder_input;
     DWORD sample_rate = 0;
     DWORD channels = 0;
     DWORD bits = 0;

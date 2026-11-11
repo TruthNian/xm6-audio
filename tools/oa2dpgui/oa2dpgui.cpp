@@ -427,10 +427,11 @@ void update_status()
         } else {
             wchar_t b[256];
             swprintf(b, 256,
-                     L"%ls: %ls \u00b7 %ls \u00b7 %ls, %lu-bit, %lu ch \u00b7 %lu kbit/s "
+                     L"%ls: %ls \u00b7 %ls \u00b7 %ls, adapter input %ls, %lu ch \u00b7 %lu kbit/s "
                      L"\u00b7 quality level %lu \u00b7 headset delay %lu ms",
                      h->name.c_str(), st.state.c_str(), st.codec.empty() ? L"-" : st.codec.c_str(),
-                     khz(st.sample_rate).c_str(), st.bits, st.channels, st.bitrate / 1000,
+                     khz(st.sample_rate).c_str(), st.encoder_input.empty() ? L"not reported" : st.encoder_input.c_str(),
+                     st.channels, st.bitrate / 1000,
                      st.abr_level, st.delay_us / 1000);
             text = b;
         }

@@ -285,6 +285,10 @@ bool read_status(unsigned long long addr, LiveStatus *st)
     n = sizeof(text) - sizeof(wchar_t);
     RegGetValueW(HKEY_LOCAL_MACHINE, path.c_str(), L"Codec", RRF_RT_REG_SZ, nullptr, text, &n);
     st->codec = text;
+    text[0] = 0;
+    n = sizeof(text) - sizeof(wchar_t);
+    RegGetValueW(HKEY_LOCAL_MACHINE, path.c_str(), L"EncoderInputFormat", RRF_RT_REG_SZ, nullptr, text, &n);
+    st->encoder_input = text; // older service: leave unknown instead of inferring from Bits
     auto dw = [&](const wchar_t *name, DWORD &v) {
         DWORD sz = sizeof(v);
         v = 0;

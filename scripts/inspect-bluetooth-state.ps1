@@ -125,7 +125,7 @@ try {
         $key = 'HKLM:\SOFTWARE\OpenA2DP\Status\' + $address
         if (Test-Path -LiteralPath $key) {
             $sessions += Get-ItemProperty -LiteralPath $key | Select-Object State, Codec, SampleRate,
-                Channels, Bits, InputContainerBits, InputValidBits, InputEncoding, Bitrate
+                Channels, Bits, InputContainerBits, InputValidBits, InputEncoding, EncoderInputFormat, Bitrate
         }
     }
     $report.NativeAudio.Sessions = $sessions
