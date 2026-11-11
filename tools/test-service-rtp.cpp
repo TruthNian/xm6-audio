@@ -5,6 +5,7 @@
 #ifdef XM6_TEST_WITH_CODECS
 #include "oa2dp/encoder.h"
 #endif
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -23,6 +24,15 @@
 static uint32_t be32(const uint8_t *p) {
     return uint32_t(p[0]) << 24 | uint32_t(p[1]) << 16 | uint32_t(p[2]) << 8 | p[3];
 }
+using DWORD=uint32_t;
+using HANDLE=unsigned;
+constexpr bool FALSE=false;
+constexpr DWORD WAIT_OBJECT_0=0, WAIT_FAILED=0xffffffffu, INFINITE=0xffffffffu;
+struct LARGE_INTEGER { int64_t QuadPart=0; };
+static void QueryPerformanceCounter(LARGE_INTEGER *value) {
+    static int64_t ticks=0;
+    value->QuadPart=++ticks;
+}
 struct Packetizer {
     std::vector<uint8_t> pkt;
     std::vector<std::vector<uint8_t>> sent;
@@ -30,7 +40,10 @@ struct Packetizer {
     uint32_t spf;
     bool flush_each;
     bool streaming_ = true;
+    bool fail_send = false;
     unsigned failures = 0;
+    DWORD wake = WAIT_OBJECT_0+2;
+    std::vector<size_t> packets_before_wait;
     void fail_stream() { ++failures; }
     Packetizer(oa2dp_codec_id codec, size_t mtu, uint32_t samples, bool flush)
         : pkt(mtu), spf(samples), flush_each(flush) {
@@ -38,14 +51,36 @@ struct Packetizer {
     }
     void send_packet(size_t len) {
         REQUIRE(len <= pkt.size());
-        if (len)
+        if (len && streaming_) {
+            if (fail_send) {
+                fail_stream();streaming_=false;
+                return;
+            }
             sent.emplace_back(pkt.begin(), pkt.begin() + len);
+        }
     }
     void add(const std::vector<uint8_t> &out, uint8_t frames) {
         const size_t len = out.size();
 #include "service-rtp-under-test.inc"
     }
     void flush() { send_packet(oa2dp_rtp_flush(&rtp)); }
+    DWORD WaitForMultipleObjects(unsigned count,HANDLE *handles,bool all,DWORD timeout) {
+        REQUIRE(count==3 && handles[0]==1 && handles[1]==2 && handles[2]==3);
+        REQUIRE(!all && timeout==INFINITE);
+        packets_before_wait.push_back(sent.size());
+        return wake;
+    }
+    void no_pcm(int read_status=OA2DP_OK) {
+        const uint32_t read_frames=0;
+        const bool timing=true;
+        const LARGE_INTEGER clock_rate{1000000};
+        uint64_t max_wait_us=0,wait_count=0;
+        HANDLE pcm_waits[]={1,2,3};
+        // One real service wait branch; OS waits and PCM availability controlled.
+        for (unsigned pass=0; pass<1 && streaming_; ++pass) {
+#include "service-pcm-wait-under-test.inc"
+        }
+    }
 };
 static void verify_ldac(const Packetizer &p, uint32_t represented, uint32_t first = 0) {
     uint32_t expected = first;
@@ -66,6 +101,52 @@ static void verify_ldac(const Packetizer &p, uint32_t represented, uint32_t firs
     REQUIRE(p.rtp.timestamp == first + represented && expected == first + represented);
 }
 static void synthetic() {
+    {
+        // A complete SBC tail must leave before waiting for nonexistent input.
+        Packetizer p(OA2DP_CODEC_SBC, 370, 128, false);
+        p.add(std::vector<uint8_t>(119, 0x5a), 1);
+        REQUIRE(p.sent.empty());
+        p.no_pcm();
+        REQUIRE(p.sent.size()==1 && p.packets_before_wait==std::vector<size_t>{1});
+        REQUIRE(p.sent[0].size()==132 && p.sent[0][12]==1 && be32(p.sent[0].data()+4)==0);
+        REQUIRE(p.rtp.timestamp==128 && !p.rtp.frames && !p.failures);
+        p.no_pcm(); // empty wakeups cannot resend the tail or advance RTP time
+        REQUIRE(p.sent.size()==1 && p.rtp.timestamp==128);
+        p.add(std::vector<uint8_t>(119, 0xa5), 1);
+        p.no_pcm();
+        REQUIRE(p.sent.size()==2 && be32(p.sent[1].data()+4)==128 && p.rtp.timestamp==256);
+    }
+    {
+        Packetizer p(OA2DP_CODEC_SBC, 370, 128, false);
+        for(unsigned i=0;i<3;++i)p.add(std::vector<uint8_t>(119, 0x5a), 1);
+        p.no_pcm();
+        REQUIRE(p.sent.size()==1 && p.sent[0].size()==370 && p.sent[0][12]==3);
+        REQUIRE(p.rtp.timestamp==384 && !p.failures);
+    }
+    {
+        Packetizer p(OA2DP_CODEC_SBC, 370, 128, false);
+        p.add(std::vector<uint8_t>(119, 0x5a), 1);
+        p.no_pcm(OA2DP_ERR_BUSY); // format snapshot is unresolved: do not flush
+        REQUIRE(p.sent.empty() && p.rtp.frames==1 && p.rtp.timestamp==0);
+        REQUIRE(p.packets_before_wait==std::vector<size_t>{0});
+        p.no_pcm();
+        REQUIRE(p.sent.size()==1 && !p.failures);
+    }
+    {
+        Packetizer p(OA2DP_CODEC_SBC, 370, 128, false);
+        p.add(std::vector<uint8_t>(119, 0x5a), 1);
+        p.fail_send=true;p.no_pcm();
+        REQUIRE(p.failures==1 && !p.streaming_ && p.sent.empty());
+        REQUIRE(p.packets_before_wait.empty()); // failed output cannot enter an infinite data wait
+    }
+    {
+        Packetizer p(OA2DP_CODEC_LDAC, 679, 128, true);
+        p.add(std::vector<uint8_t>(330, 0x5a), 1);
+        p.no_pcm();
+        REQUIRE(p.sent.size()==1 && p.rtp.timestamp==128 && !p.failures);
+        p.wake=WAIT_FAILED;p.no_pcm();
+        REQUIRE(p.failures==1 && p.sent.size()==1);
+    }
     {
         // LDAC explicitly disallows RTP fragmentation. An oversized encoder
         // output must reach the failure path, not silently drop PCM forever.
@@ -178,5 +259,5 @@ int main(int argc, char **argv) {
 #ifdef XM6_TEST_WITH_CODECS
     real_ldac();
 #endif
-    std::puts("production service RTP timestamp checks passed (no transport I/O)");
+    std::puts("production service RTP timestamp/tail-before-wait checks passed (transport and waits controlled)");
 }

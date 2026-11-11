@@ -1,10 +1,16 @@
 # Event, notification and transport review
 
-Reviewed 2026-11-11 against the 0.3.50–0.3.58 production source. The headset
+Reviewed 2026-11-11 against the 0.3.50–0.3.59 production source. The headset
 was unavailable. Runtime conclusions below concern the disconnected Windows
 path; protocol fixtures do not substitute for connected hardware acceptance.
 
 ## Confirmed corrections
+
+The [0.3.59 buffering correction](PERFORMANCE-REVIEW.md) flushes complete
+batched RTP frames before waiting for more PCM. The old service wait branch
+withheld a short SBC tail; the expanded production-body fixture reproduces
+that omission. Format uncertainty, failed sends and actual LDAC packet clocks
+remain covered without claiming hardware timing or a Chrome-stutter fix.
 
 The [0.3.56–0.3.58 lifecycle corrections](LIFECYCLE-REVIEW.md) carry session
 stop through control-I/O submission, prevent stale startup enumeration from
@@ -59,7 +65,7 @@ contract. Connected Windows/radio acceptance remains pending.
 | Validated link -> Windows endpoint and device model | Parent validates both channels, then child commits connection state and notifies PnP plus KS jack consumers. Repeated state does not duplicate notifications; failed TRUE cannot connect the jack. | New production PnP/SetConnected tests and the actual disconnected display-model comparison. Connected UI/button completion still requires hardware. |
 | AVDTP completion/command -> sender admission | A timeout is a completion, not a remote command. Accepted START and local media readiness may arrive in either order; setup failure retains work. Final admission requires STREAMING, matching PCM epoch/rate, live media and current policy. | Production request/callback/admission fixtures with real AVDTP cores; START/reset/label reuse, readiness ordering and failed setup recovery covered. |
 | WaveRT clock -> ring -> encoder wake | Position and packet notifications share committed progress. Ring changes are sequenced; stale producer rate is rejected. Register data-ready event before checking the level; consumer rechecks before sleeping. | Existing production WaveRT/ring-notification tests and concurrent core ring tests. Actual DPC/MMCSS jitter and Chrome underruns are unaccepted. |
-| Encoder -> RTP -> overlapped media -> BTHPORT | Each output advances RTP by represented samples. Send buffers retain ownership until terminal completion; timeout/cancel alone does not release them. Packetization failure now reaches stream recovery. | Actual LDAC/RTP checks at supported rates/MTUs, error-path regressions and production media-wait budget/ownership checks. No RF success or audible stability is implied. |
+| Encoder -> RTP -> overlapped media -> BTHPORT | Each output advances RTP by represented samples. Complete batched frames flush before a valid PCM-underflow wait. Send buffers retain ownership until terminal completion; timeout/cancel alone does not release them. Packetization/send failures reach stream recovery. | Actual LDAC/RTP checks at supported rates/MTUs, short-SBC-tail/underflow regression, error-path regressions and production media-wait budget/ownership checks. No RF success or audible stability is implied. |
 | Stop/power/remove -> closed transport -> final publication | Gate admission, retire sender and receives, close generation-owned handles, publish closure, cancel/join waits before handle/mapping destruction. Failed closes retain ownership. | Existing production channel-close/disconnect/handle fixtures plus new delayed-notification checks. Full service restart/sleep/resume needs later acceptance. |
 | Headset/Windows volume and media controls | Windows retains AVRCP/HFP; the referenced hardware-volume cache notifies topology consumers. No simulated keys or per-player loopback. | Source inspection and earlier user acceptance only; no new headset-control test in this session. |
 

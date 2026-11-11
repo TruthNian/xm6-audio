@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(XM6Audio VERSION 0.3.58 LANGUAGES C CXX)
+project(XM6Audio VERSION 0.3.59 LANGUAGES C CXX)
 
 # The loaded binary's version must agree with the configured project and INF.
 # Generate resources in the build tree rather than keeping a stale copy.
@@ -252,6 +252,8 @@ if(OA2DP_BUILD_TESTS)
     add_test(NAME peer_format COMMAND test_peer_format)
     xm6_test_body(service/src/session.cpp "        int r = oa2dp_rtp_add_frames("
         "\n        DWORD now = GetTickCount();" service-rtp)
+    xm6_test_body(service/src/session.cpp "        if (read_status == OA2DP_ERR_BUSY ||"
+        "\n        if (read_status != OA2DP_OK || read_frames != spc)" service-pcm-wait)
     add_executable(test_service_rtp tools/test-service-rtp.cpp)
     target_include_directories(test_service_rtp PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
     target_link_libraries(test_service_rtp PRIVATE oa2dp_core)

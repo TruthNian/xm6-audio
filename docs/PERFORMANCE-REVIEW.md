@@ -1,8 +1,40 @@
 # PCM computation and output-lifetime review
 
-Reviewed 2026-11-11 against source 0.3.54. The headset was unavailable.
+Reviewed 2026-11-11 against source 0.3.54 and 0.3.59. The headset was unavailable.
 Computational measurements below exclude Windows rendering, scheduling under
 audio load, Bluetooth transmission and headphone playback.
+
+## 0.3.59: send complete batched frames before waiting for PCM
+
+SBC accumulates complete encoded frames in the RTP packet buffer. The service
+previously flushed that buffer only when another encoded output filled the
+packet. If the PCM ring then lacked one full encoder input block, the sender
+waited indefinitely for new PCM while the complete tail stayed unsent. With
+no later input, eventual stream retirement discarded it. This is a distinct
+buffering omission, not an observed explanation of Chrome's LDAC stutter.
+
+After a successful ring read reports insufficient input, flush any already
+complete RTP frames before waiting. Keep aggregation while PCM is available.
+An unresolved BUSY format snapshot does not authorize a flush; failed sends
+use the existing recovery path and leave before entering the data wait.
+No new timer, worker, PCM padding, sample conversion or codec change is added.
+Sparse SBC input can produce smaller packets; this exchanges batching
+efficiency for timely delivery of already complete audio. Radio throughput
+and audible latency under this policy have not been measured.
+
+The existing service RTP fixture now executes the actual PCM-wait branch with
+the real RTP core and controlled input availability, send result and OS wait.
+The previous production body fails the single-SBC-frame submission assertion.
+The corrected body sends that 132-byte packet (119 encoded bytes plus 13 bytes
+of headers) before waiting, preserves its timestamp and advances the next one
+by 128 samples. Coverage includes a three-frame MTU-sized tail, empty wakeups,
+subsequent input, BUSY state, send failure and wait failure. Actual compiled
+LDAC checks still pass at four sample rates, two precision settings and three
+MTUs; its existing per-output packet flushing is unchanged. These checks do
+not establish whole-stream timing, RF reception, or headset rendering.
+
+The local native x64 Release build and all 28 checks pass. Exact-source CI
+and runtime activation are recorded separately after verification.
 
 ## Integer preparation: preserve the samples, remove repeated division
 

@@ -1305,6 +1305,13 @@ void Session::stream_loop(const StreamContext &stream)
         }
         if (read_status == OA2DP_ERR_BUSY ||
             (read_status == OA2DP_OK && !read_frames)) {
+            // Batching codecs may have complete frames without a full packet.
+            // Do not hold that tail until more PCM arrives (possibly never).
+            // BUSY has no validated format snapshot, so only flush on OK.
+            if (read_status == OA2DP_OK && rtp.frames) {
+                send_packet(oa2dp_rtp_flush(&rtp));
+                if (!streaming_) break;
+            }
             LARGE_INTEGER before{}, after{};
             if (timing) QueryPerformanceCounter(&before);
             const DWORD wake = WaitForMultipleObjects(3, pcm_waits, FALSE, INFINITE);
