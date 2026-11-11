@@ -565,3 +565,10 @@ availability probes while an encoder is alive. No host memory-growth incident
 or actual events-only output from the installed AAC MFT was observed; these
 are reproduced API-edge corrections, not a claimed explanation of user audio
 stutter. The changes add no runtime worker, watchdog or polling loop.
+
+## Investigation scope update (2026-11-12)
+
+The user closed investigation of the two historical audio interruptions.
+The earlier evidence above is retained, but neither interruption is assigned
+a new root cause or marked fixed. Work for 0.4.0 is limited to endpoint-name
+migration, verification and a coherent package deployment.

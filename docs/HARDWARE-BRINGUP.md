@@ -4,12 +4,12 @@ The controlled developer trial targets WH-1000XM6 on Windows 10 x64, build 19045
 
 Current runtime uses **0.3.64 kernel drivers and the 0.3.65 service**, each
 verified against its recorded local package. Native LDAC input and complete PCM
-format epochs are deployed; Core Audio's displayed endpoint name is unresolved.
+format epochs are deployed; the legacy Core Audio name was subsequently repaired through a selected-device reinstall; see the 0.4.0 record below.
 The user's acceptance of **Paired while disconnected** and correct Settings
 connect/disconnect display belongs to 0.3.61 and remains recorded below.
 Passive Chrome/QQ Music and PotPlayer observations were also collected on
-0.3.61; a short post-activation trace was collected on 0.3.62. An earlier
-interruption remains unexplained. See the
+0.3.61; a short post-activation trace was collected on 0.3.62. The two historical interruption investigations are now closed at the user's
+request, without assigning a cause or claiming a fix. See the
 [timing evidence and limits](PERFORMANCE-REVIEW.md).
 Earlier runtime observations apply to 0.3.44. After its authorized
 deployment and a user restart, both actual loaded kernel images and the running
@@ -17,6 +17,23 @@ service matched the verified local test-signed candidate. The service process
 started approximately twelve seconds after boot without a manual start in the
 post-boot session. This establishes automatic service startup, not complete
 automatic audio/reconnect acceptance.
+
+## 0.4.0 preparation and endpoint migration (2026-11-12)
+
+The user's reboot reproduced the old endpoint name. Reinstalling the same
+verified 0.3.64 render package via `DiInstallDevice` at 00:05 local time corrected
+the Core Audio/PnP name to `Headphones (WH-1000XM6)`. Windows generated a new
+endpoint ID, migrated all render defaults and retained capture defaults,
+96 kHz float32 stereo mix, master volume and mute. The existing PotPlayer
+process had an active session and nonzero signal without reopening the player.
+After actual kernel unload/reload and re-enabling the child, the correct name
+and LDAC transmission returned. See the [naming review](ENDPOINT-IDENTITY-REVIEW.md)
+for the bounded failed probes and persistence-test limitation.
+
+The two historical audio-interruption investigations are closed at the user's
+request. This is a scope decision, not a diagnosis or a claim of repair.
+Unified 0.4.0 package activation and exact loaded-image verification follow
+the source/CI checks; preparation is not recorded as completed deployment.
 
 ## 0.3.65 user-mode activation, retaining 0.3.64 drivers (2026-11-11)
 

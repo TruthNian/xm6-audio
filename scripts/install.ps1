@@ -32,21 +32,104 @@ function Test-NativeDeviceState([string]$InstanceId) {
     }
 }
 function Update-NativeRenderDriver([string]$InfPath,[string]$InstanceId) {
-    & pnputil.exe /add-driver $InfPath /install
-    $result = $LASTEXITCODE
-    if ($result -eq 3010) { $script:RestartRequired = $true; return }
-    if ($result -eq 0) { return }
-    if ($result -ne 259) { throw "Render driver update failed ($result)." }
-    # PnPUtil also returns ERROR_NO_MORE_ITEMS when the matching device already
-    # uses this package. Do not accept 259 for an absent or differently bound
-    # child, or for other commands: establish the exact selected INF first.
+    # PnPUtil /add-driver /install can succeed without reinstalling a package
+    # already selected by this child. That preserves EndpointBuilder's old
+    # interface name even across reboot. Run the documented per-device install
+    # lifecycle once; Windows migrates settings and rebuilds endpoint metadata.
+    if ($InstanceId -notmatch '^OA2DP\\Render\\[0-9A-Fa-f]{12}$') {
+        throw 'Refusing a non-native render target.'
+    }
     $child = Get-PnpDevice -InstanceId $InstanceId -PresentOnly -ErrorAction Stop
-    if (-not $child) { throw 'Cannot verify the unchanged render device.' }
+    if (-not $child -or @((Get-PnpDeviceProperty -InstanceId $InstanceId -KeyName DEVPKEY_Device_HardwareIds).Data) -notcontains 'OA2DP\Render') {
+        throw 'Selected child is not an OA2DP render device.'
+    }
+    if (-not ('Xm6Audio.RenderBinding.Installer' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+namespace Xm6Audio.RenderBinding {
+    [StructLayout(LayoutKind.Sequential)]
+    struct DeviceInfo {
+        public uint cbSize; public Guid ClassGuid; public uint DevInst; public UIntPtr Reserved;
+    }
+    [StructLayout(LayoutKind.Sequential, CharSet=CharSet.Unicode)]
+    struct InstallParams {
+        public uint cbSize, Flags, FlagsEx;
+        public IntPtr hwndParent, InstallMsgHandler, InstallMsgHandlerContext, FileQueue;
+        public UIntPtr ClassInstallReserved; public uint Reserved;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst=260)] public string DriverPath;
+    }
+    [StructLayout(LayoutKind.Sequential, CharSet=CharSet.Unicode)]
+    struct DriverInfo {
+        public uint cbSize, DriverType; public UIntPtr Reserved;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst=256)] public string Description;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst=256)] public string MfgName;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst=256)] public string ProviderName;
+        public System.Runtime.InteropServices.ComTypes.FILETIME DriverDate;
+        public ulong DriverVersion;
+    }
+    public static class Installer {
+        [DllImport("setupapi.dll", SetLastError=true)]
+        static extern IntPtr SetupDiCreateDeviceInfoList(IntPtr guid, IntPtr parent);
+        [DllImport("setupapi.dll", CharSet=CharSet.Unicode, SetLastError=true)]
+        static extern bool SetupDiOpenDeviceInfoW(IntPtr set, string id, IntPtr parent, uint flags, ref DeviceInfo dev);
+        [DllImport("setupapi.dll", CharSet=CharSet.Unicode, SetLastError=true)]
+        static extern bool SetupDiGetDeviceInstallParamsW(IntPtr set, ref DeviceInfo dev, ref InstallParams p);
+        [DllImport("setupapi.dll", CharSet=CharSet.Unicode, SetLastError=true)]
+        static extern bool SetupDiSetDeviceInstallParamsW(IntPtr set, ref DeviceInfo dev, ref InstallParams p);
+        [DllImport("setupapi.dll", SetLastError=true)]
+        static extern bool SetupDiBuildDriverInfoList(IntPtr set, ref DeviceInfo dev, uint type);
+        [DllImport("setupapi.dll", CharSet=CharSet.Unicode, SetLastError=true)]
+        static extern bool SetupDiEnumDriverInfoW(IntPtr set, ref DeviceInfo dev, uint type, uint index, ref DriverInfo driver);
+        [DllImport("setupapi.dll", SetLastError=true)]
+        static extern bool SetupDiDestroyDriverInfoList(IntPtr set, ref DeviceInfo dev, uint type);
+        [DllImport("setupapi.dll", SetLastError=true)]
+        static extern bool SetupDiDestroyDeviceInfoList(IntPtr set);
+        [DllImport("newdev.dll", ExactSpelling=true, SetLastError=true)]
+        static extern bool DiInstallDevice(IntPtr parent, IntPtr set, ref DeviceInfo dev, ref DriverInfo driver, uint flags, out bool reboot);
+        static void Check(bool ok) {
+            if (!ok) throw new Win32Exception(Marshal.GetLastWin32Error());
+        }
+        // A compatible list restricted to one verified INF; no radio/global rebinding.
+        public static bool Run(string instance, string inf, bool install) {
+            IntPtr set = SetupDiCreateDeviceInfoList(IntPtr.Zero, IntPtr.Zero);
+            if (set == new IntPtr(-1)) throw new Win32Exception(Marshal.GetLastWin32Error());
+            var dev = new DeviceInfo(); dev.cbSize = (uint)Marshal.SizeOf(typeof(DeviceInfo));
+            bool built = false;
+            try {
+                Check(SetupDiOpenDeviceInfoW(set, instance, IntPtr.Zero, 0, ref dev));
+                var p = new InstallParams(); p.cbSize = (uint)Marshal.SizeOf(typeof(InstallParams));
+                Check(SetupDiGetDeviceInstallParamsW(set, ref dev, ref p));
+                p.Flags |= 0x00010000; // DI_ENUMSINGLEINF: only the verified render INF
+                p.FlagsEx |= 0x00000800; // DI_FLAGSEX_ALLOWEXCLUDEDDRVS
+                p.DriverPath = inf;
+                Check(SetupDiSetDeviceInstallParamsW(set, ref dev, ref p));
+                Check(SetupDiBuildDriverInfoList(set, ref dev, 2)); built = true;
+                var driver = new DriverInfo(); driver.cbSize = (uint)Marshal.SizeOf(typeof(DriverInfo));
+                Check(SetupDiEnumDriverInfoW(set, ref dev, 2, 0, ref driver));
+                if (!String.Equals(driver.ProviderName, "XM6 Audio Project", StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException("Unexpected render-driver provider.");
+                bool reboot = false;
+                if (install) Check(DiInstallDevice(IntPtr.Zero, set, ref dev, ref driver, 0, out reboot));
+                return reboot;
+            } finally {
+                if (built) SetupDiDestroyDriverInfoList(set, ref dev, 2);
+                SetupDiDestroyDeviceInfoList(set);
+            }
+        }
+    }
+}
+'@
+    }
+    $resolved = (Resolve-Path -LiteralPath $InfPath -ErrorAction Stop).Path
+    $restart = [Xm6Audio.RenderBinding.Installer]::Run($InstanceId,$resolved,$true)
+    if ($restart) { $script:RestartRequired = $true; return }
     $published = (Get-PnpDeviceProperty -InstanceId $InstanceId -KeyName DEVPKEY_Device_DriverInfPath -ErrorAction Stop).Data
     if ($published -notmatch '^oem[0-9]+\.inf$') { throw 'Unexpected render driver INF.' }
     $selected = Join-Path $env:windir ('INF\'+$published)
     if ((Get-FileHash -LiteralPath $selected -Algorithm SHA256).Hash -ne
-        (Get-FileHash -LiteralPath $InfPath -Algorithm SHA256).Hash) {
+        (Get-FileHash -LiteralPath $resolved -Algorithm SHA256).Hash) {
         throw 'The render device does not select the requested driver package.'
     }
     Test-NativeDeviceState $InstanceId

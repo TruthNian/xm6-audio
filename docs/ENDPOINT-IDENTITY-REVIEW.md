@@ -114,10 +114,62 @@ This regression does not establish the cause of the earlier audible PCM gap.
 The prior 0.3.64 candidate was not installed; both repairs are consolidated into
 the same deployment.
 
-## Remaining scope
+## Historical 0.3.64 scope
 
 This change addresses the two reproduced name-publication defects. It does not
 claim all bugs are eliminated, audible fidelity has improved, or every Windows
 cache/lifecycle path has been accepted. The earlier unexplained PCM supply gap,
 hardware format transitions, sleep/resume and Microsoft production signing
 retain their separate evidence and status.
+
+## Legacy endpoint migration verified before 0.4.0 (2026-11-12)
+
+A user reboot still left the Core Audio adapter label at `XM6 Audio Topology`.
+The current render PDO and all five KS interfaces already published
+`WH-1000XM6`. The topology jack container matched the PnP container. A readonly
+inspection of the exact Windows binaries with matching Microsoft public PDBs
+showed that the generated Core Audio label preferred a retained interface-name
+field over the updated device name. These observations distinguish correct
+driver metadata from successful migration of an existing Windows endpoint.
+
+An ordinary device restart, a completed disable/enable cycle and removal of the
+software endpoint followed by restart all retained the old name. A temporary
+driver-owned EP property probe did not migrate it and was removed. Public
+property writes were rejected; no MMDevice cache field, ACL or system binary
+was modified. These unsuccessful approaches are not shipped.
+
+Reinstalling the **same verified render INF** through the documented
+`DiInstallDevice` API corrected both public Core Audio name properties and the
+PnP endpoint label. This was an installation-lifecycle repair, not a user-name
+override. The successful operation requested no computer restart. Windows
+created a new ordinary endpoint ID, migrated all three default render roles,
+retained capture defaults, float32/96 kHz stereo mix, volume and mute, and the
+existing player's process produced nonzero signal through native LDAC again.
+
+The installer now uses a compatible driver list restricted to the verified
+render INF and calls `DiInstallDevice` for the selected `OA2DP\Render` child.
+It checks the instance pattern, hardware ID, provider, selected-INF hash and
+started/pending-restart state. Merely staging an already-selected package is
+no longer reported as successful endpoint installation. There is no periodic
+rename, private-cache edit, hard-coded headset name or runtime reinstall.
+
+The fixture executes the production installer function and compiles its real
+native boundary. It covers same-package reinstall, unrelated/missing devices,
+wrong selected package, unsafe published-INF path, native install failure and
+pending restart. Fixtures do not emulate the Windows endpoint cache; the live
+before/after evidence above supplies that separate acceptance.
+
+A subsequent child-disable request required deferred completion; after a
+Bluetooth radio cycle unloaded both kernel images, the selected child was
+explicitly re-enabled and its problem/configuration flags returned to zero.
+The correctly named endpoint returned, with unchanged format/volume/mute and
+96 kHz LDAC transmission. This verifies re-enumeration persistence on this
+host, **not a new post-fix computer reboot or every Windows version**.
+
+The two older audio-interruption investigations are closed at the user's
+request. Their causes remain unassigned; this naming repair is not evidence
+that either historical interruption was fixed.
+
+References: [per-device installation](https://learn.microsoft.com/en-us/windows/win32/api/newdev/nf-newdev-diinstalldevice),
+[interface metadata before registration](https://learn.microsoft.com/en-us/windows-hardware/drivers/audio/setting-properties-and-registry-values),
+[Core Audio device properties](https://learn.microsoft.com/en-us/windows/win32/coreaudio/device-properties).
