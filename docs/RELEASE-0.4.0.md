@@ -19,6 +19,11 @@ ordered before filter registration.
 The 0.3.65 concurrent stop/rate-selection fix and actual encoder-input reporting
 are included in the same version as both drivers.
 
+Both catalog-covered INFs identify the exact source commit. This prevents an
+older candidate with identical version numbers and INF text from being silently
+reused by Driver Store while a newer candidate is being validated. Deployment
+still verifies the actual payload hashes; a version string alone is insufficient.
+
 ## Acceptance scope
 
 The legacy name was corrected on the Windows 10 development host before the

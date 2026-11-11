@@ -9,6 +9,8 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $repo = Split-Path $PSScriptRoot -Parent
+$sourceCommit = (& git -C $repo rev-parse HEAD).Trim()
+if ($LASTEXITCODE -ne 0 -or $sourceCommit -notmatch '^[0-9a-f]{40}$') { throw 'Cannot identify package source.' }
 $build = (Resolve-Path -LiteralPath $BuildDirectory).Path
 $versionMatch = [regex]::Match([IO.File]::ReadAllText((Join-Path $build 'CMakeCache.txt')),
     '(?m)^CMAKE_PROJECT_VERSION:STATIC=([0-9]+\.[0-9]+\.[0-9]+)\s*$')
@@ -34,6 +36,11 @@ foreach ($driver in @('oa2dp','oa2dpaudio')) {
         Copy-Item -LiteralPath "$build\Release\$driver.$ext" -Destination $dst
     }
     $infText = [IO.File]::ReadAllText("$dst\$driver.inf")
+    # Different candidates can share DriverVer while being validated for one
+    # release. Windows may otherwise reuse an older package with identical INF
+    # bytes. Bind the catalog-covered INF to this exact source for both drivers.
+    $infText += "`r`n; XM6 Audio source: $sourceCommit`r`n"
+    [IO.File]::WriteAllText("$dst\$driver.inf", $infText, [Text.UTF8Encoding]::new($false))
     $infVersion = [regex]::Match($infText, '(?mi)^DriverVer\s*=\s*[^,\r\n]+,\s*([0-9.]+)\s*$')
     if ($infVersion.Groups[1].Value -ne $fileVersion -or
         (Get-Item -LiteralPath "$dst\$driver.sys").VersionInfo.FileVersion -ne $fileVersion) {
@@ -67,7 +74,7 @@ Get-ChildItem -LiteralPath $output -Recurse -File | ForEach-Object {
 }
 $manifest = [ordered]@{
     project = 'XM6 Audio'; version = $version; architecture = 'x64'
-    commit = (& git -C $repo rev-parse HEAD)
+    commit = $sourceCommit
     upstream = 'RafiMota/open-a2dp@167ebc0e2c89fec570eec535fefdade72bd9e416'
     libldac = (& git -C "$repo\third_party\libldac" rev-parse HEAD)
     libsbc = (& git -C "$repo\third_party\sbc" rev-parse HEAD)
