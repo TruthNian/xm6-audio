@@ -33,8 +33,12 @@ LDAC checks still pass at four sample rates, two precision settings and three
 MTUs; its existing per-output packet flushing is unchanged. These checks do
 not establish whole-stream timing, RF reception, or headset rendering.
 
-The local native x64 Release build and all 28 checks pass. Exact-source CI
-and runtime activation are recorded separately after verification.
+The local native x64 Release build, all 28 checks and
+[exact-source CI](https://github.com/TruthNian/xm6-audio/actions/runs/43007583981)
+pass. Version59 is activated without a computer restart; both actual kernel
+images and the running service match the signed local package. The
+[runtime record](HARDWARE-BRINGUP.md) retains the separate hardware-acceptance
+limits; no connected SBC playback or latency measurement was performed.
 
 ## Integer preparation: preserve the samples, remove repeated division
 
