@@ -11,6 +11,7 @@
 #include <future>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <thread>
 #include <string>
 #include <vector>
@@ -38,17 +39,30 @@ class DeviceManager {
 public:
     bool start()
     {
+        {
+            std::lock_guard<std::mutex> lock(mu_);
+            enumerating_initial_ = true;
+            initial_removals_.clear();
+        }
         CM_NOTIFY_FILTER filter{};
         filter.cbSize = sizeof(filter);
         filter.FilterType = CM_NOTIFY_FILTER_TYPE_DEVICEINTERFACE;
         filter.u.DeviceInterface.ClassGuid = GUID_DEVINTERFACE_OA2DP_TRANSPORT;
         if (CM_Register_Notification(&filter, this, &DeviceManager::on_notify, &notify_) !=
             CR_SUCCESS) {
+            std::lock_guard<std::mutex> lock(mu_);
+            enumerating_initial_ = false;
+            initial_removals_.clear();
             LOGE("CM_Register_Notification failed");
             return false;
         }
         for (const auto &path : enumerate_interfaces(GUID_DEVINTERFACE_OA2DP_TRANSPORT))
-            add(path);
+            add(path, true);
+        {
+            std::lock_guard<std::mutex> lock(mu_);
+            enumerating_initial_ = false;
+            initial_removals_.clear();
+        }
         return true;
     }
 
@@ -84,11 +98,17 @@ private:
         return ERROR_SUCCESS;
     }
 
-    void add(const std::wstring &path)
+    void add(const std::wstring &path, bool initial_snapshot = false)
     {
         std::lock_guard<std::mutex> lock(mu_);
+        const auto key = lower(path);
+        // Notifications are registered before enumeration. A removal may beat
+        // consumption of its stale snapshot entry, even without a Session yet.
+        // Only snapshot additions are suppressed; genuine arrivals still win.
+        if (initial_snapshot && initial_removals_.count(key))
+            return;
         for (const auto &s : sessions_)
-            if (lower(s->path()) == lower(path))
+            if (lower(s->path()) == key)
                 return;
         LOGI("headset interface arrived: %ls", path.c_str());
         sessions_.push_back(std::make_unique<Session>(path));
@@ -100,8 +120,11 @@ private:
         std::unique_ptr<Session> gone;
         {
             std::lock_guard<std::mutex> lock(mu_);
+            const auto key = lower(path);
+            if (enumerating_initial_)
+                initial_removals_.insert(key);
             auto it = std::find_if(sessions_.begin(), sessions_.end(), [&](const auto &s) {
-                return lower(s->path()) == lower(path);
+                return lower(s->path()) == key;
             });
             if (it == sessions_.end())
                 return;
@@ -120,6 +143,8 @@ private:
 
     HCMNOTIFICATION notify_ = nullptr;
     std::mutex mu_;
+    bool enumerating_initial_ = false;
+    std::set<std::wstring> initial_removals_; // released after startup reconciliation
     std::vector<std::unique_ptr<Session>> sessions_;
     std::vector<std::future<void>> retired_; // joined before SCM reports stopped
 };

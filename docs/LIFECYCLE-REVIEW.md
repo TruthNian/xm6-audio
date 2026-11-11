@@ -1,5 +1,37 @@
 # Native lifecycle review
 
+## 0.3.57: reconcile startup discovery with removal notifications
+
+The service registers interface notifications before enumerating existing
+interfaces, as required by the
+[CM registration contract](https://learn.microsoft.com/en-us/windows/win32/api/cfgmgr32/nf-cfgmgr32-cm_register_notification).
+That order allows notifications to interleave with consumption of the initial
+snapshot. Previously, removal of a path without a Session was ignored; the
+stale snapshot could then create a Session for that removed interface and
+leave its transient-open retry running until another removal or service stop.
+This ordering defect was reproduced in our production-body fixture; it is
+not a claim that Microsoft documents this specific bug.
+
+During startup reconciliation only, remember removed paths under the existing
+manager mutex. Skip their snapshot additions even when no Session existed at
+removal time. Real arrival notifications remain eligible to create a fresh
+Session, and unrelated snapshot entries remain eligible. Release the removal
+history when enumeration ends or registration fails. There is no new worker,
+poll, timer, kernel ABI or connected-state publication path.
+
+The fixture runs the actual DeviceManager with controlled CM callbacks and
+Sessions and real asynchronous retirement. The previous code fails the first
+check by starting a removed interface. Coverage includes removal during
+registration or after snapshot capture, duplicate/case-insensitive arrivals,
+arrival then removal, removal then genuine arrival, unrelated devices, runtime
+replacement, stop/restart and registration failure followed by retry.
+This proves these discovery orderings, not Windows callback timing, rendered
+Settings labels, headset reconnection or audible playback. In particular,
+this fix has not been established as the cause of the reported UI symptom.
+
+The local native x64 Release build and all 27 checks pass. Deployment and
+exact-source CI are recorded separately after verification.
+
 ## 0.3.56: carry stop through control-I/O submission
 
 Session stop signals a persistent event and cancels currently submitted I/O.

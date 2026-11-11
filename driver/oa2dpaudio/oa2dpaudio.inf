@@ -15,7 +15,7 @@ Class       = MEDIA
 ClassGuid   = {4d36e96c-e325-11ce-bfc1-08002be10318}
 Provider    = %ProviderName%
 CatalogFile = oa2dpaudio.cat
-DriverVer   = 11/11/2026,0.3.56.0
+DriverVer   = 11/11/2026,0.3.57.0
 PnpLockdown = 1
 
 [DestinationDirs]
