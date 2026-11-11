@@ -29,8 +29,13 @@ This proves these discovery orderings, not Windows callback timing, rendered
 Settings labels, headset reconnection or audible playback. In particular,
 this fix has not been established as the cause of the reported UI symptom.
 
-The local native x64 Release build and all 27 checks pass. Deployment and
-exact-source CI are recorded separately after verification.
+The local native x64 Release build, all 27 checks and
+[exact-source CI](https://github.com/TruthNian/xm6-audio/actions/runs/43005001589)
+pass. Version57 is activated with both actual kernel images and the running
+service matching the signed local package, without a computer restart. The
+offline state remains paired/disconnected; the
+[runtime record](HARDWARE-BRINGUP.md) distinguishes the internal state and
+expected Paired resource from rendered text/buttons, which remain unobserved.
 
 ## 0.3.56: carry stop through control-I/O submission
 

@@ -2,14 +2,43 @@
 
 The controlled developer trial targets WH-1000XM6 on Windows 10 x64, build 19045. It uses a local development signature under explicitly authorized test signing. This is separate from the production installer, which still requires Microsoft-signed catalogs.
 
-Latest source audit: [0.3.56 control-I/O stop review](LIFECYCLE-REVIEW.md).
-Version 0.3.56 is activated with verified loaded images; see the following record.
+Latest source audit: [0.3.57 startup discovery review](LIFECYCLE-REVIEW.md).
+Version 0.3.57 is activated with verified loaded images; see the following record.
 Earlier runtime observations apply to 0.3.44. After its authorized
 deployment and a user restart, both actual loaded kernel images and the running
 service matched the verified local test-signed candidate. The service process
 started approximately twelve seconds after boot without a manual start in the
 post-boot session. This establishes automatic service startup, not complete
 automatic audio/reconnect acceptance.
+
+## 0.3.57 startup discovery correction activation (2026-11-11)
+
+Source `1d036f987462178368477ec6797a4851432cb179` passed all 27 local checks
+and [Linux/Windows source CI](https://github.com/TruthNian/xm6-audio/actions/runs/43005001589).
+The actual DeviceManager fixture reproduces stale startup enumeration
+recreating a removed interface and verifies the corrected event orderings.
+This is not evidence that it caused the earlier rendered Settings symptom.
+
+The candidate was signed using the existing local test certificate and
+activated through one Bluetooth radio cycle. Both actual loaded kernel images
+and the running service match the protected signed payload. No computer
+restart, boot/trust or privacy change was made. Current transport/render
+install flags request no restart. Automatic PCM rate/precision, LDAC/AAC/SBC,
+LDAC HQ and ABR off were read back from the running installation.
+
+All 557 offline display-model events decoded with zero event/buffer loss.
+The last target state was Disconnected(3) at approximately 5659 ms, followed
+by another 4993 ms of observation. AEP Paired=True/Connected=False, container
+Connected=False and native disconnected/zero-bitrate state agreed. Installed
+Windows resources map this disconnected state to the English label **Paired**.
+An approximately one-second transient Connected remains; the retained inbox
+driver trace has the same transient, so it alone does not establish a native
+driver fault. The final state must still settle to paired, not connected.
+
+The Settings window could be listed but accessibility text was empty and
+window capture timed out twice after reselecting it. No rendered label or
+button was observed and no Settings click was performed. Rendered UI,
+connected headset recovery, playback and Chrome stability remain unaccepted.
 
 ## 0.3.56 control-I/O stop correction activation (2026-11-11)
 
