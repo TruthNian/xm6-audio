@@ -1,6 +1,31 @@
 # Endpoint name and identity review
 
-Reviewed 2026-11-11. Installed baseline: 0.3.63; source candidate: 0.3.64.
+Reviewed 2026-11-11. Naming changes activated in 0.3.64.
+
+## Live outcome and remaining migration problem
+
+Both loaded kernel images and the running service match source
+`ebe5c0739caeac37c35c9537f509b76bb1537095`. Five current native KS interface
+properties and their legacy `FriendlyName` values contain `WH-1000XM6`.
+Nevertheless Core Audio reports interface name `XM6 Audio Topology` and endpoint
+name `耳机 (XM6 Audio Topology)`. This was observed both offline and after the
+headset reconnected. Thus the fixes below do **not** establish that existing
+endpoint metadata has migrated correctly.
+
+An administrator can open this endpoint's property store read/write, but
+`SetValue` for both name keys returns `E_ACCESSDENIED`; even setting the endpoint
+name to its existing value is rejected. The previously used Windows audio policy
+COM path also rejected the interface-name write. No property-store update was
+committed. A bounded change of the driver's topology interface property type
+from STRING to STRING_INDIRECT retained the same headset name and did not refresh
+Core Audio; the original type was restored. Therefore changing property type is
+not an established remedy. No ACL, private MMDevice cache, endpoint identity,
+user name, default or format was overwritten.
+
+A proposed single targeted PnP refresh was stopped by its active-session guard
+before stopping any service or device, because playback had resumed. The existing
+endpoint migration/refresh path remains unresolved; new-install source fixtures
+do not simulate AudioEndpointBuilder's persistence or prove fresh-host behavior.
 
 ## Two reproduced name-publication defects
 

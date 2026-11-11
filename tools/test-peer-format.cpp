@@ -218,6 +218,15 @@ struct Session {
     void reconfigure_rate(uint32_t rate);
     void reconcile_peer_configuration();
 };
+// The real rate selector is pure. Inject an external Session::stop() at its
+// return boundary to make the asynchronous shutdown race deterministic.
+static std::function<void()> after_rate_selection;
+static int select_rate_with_stop(oa2dp_codec_caps *next, const oa2dp_codec_caps *remote,
+                                 uint32_t rate) {
+    const int result = oa2dp_codec_set_rate(next, remote, rate);
+    if (after_rate_selection) after_rate_selection();
+    return result;
+}
 // clang-format off
 #include "peer-events-under-test.inc"
 // Compile the production waiting method alongside the immediate helper used
@@ -227,11 +236,29 @@ struct Session {
 #undef request
 #include "latency-publication-under-test.inc"
 #include "endpoint-formats-under-test.inc"
+#define oa2dp_codec_set_rate select_rate_with_stop
 #include "peer-stream-procedures-under-test.inc"
+#undef oa2dp_codec_set_rate
 #include "peer-reconciliation-under-test.inc"
 // clang-format on
 
 int main() {
+    for (bool cached_caps : {false, true}) {
+        Session s;
+        now = 100;
+        s.peer_configure_and_start(96000);
+        s.reconcile_peer_configuration();
+        CHECK(s.streaming_ && s.admissions == 1);
+        s.have_remote_caps_ = cached_caps;
+        s.audio_format_.SampleRate = 48000;
+        const auto publications = s.audio_.publications;
+        after_rate_selection = [&] { s.stopping_ = true; };
+        s.reconfigure_rate(48000);
+        after_rate_selection = {};
+        CHECK(s.stopping_ && s.suspends == 0 && s.reconfigures == 0);
+        CHECK(s.audio_.publications == publications && s.admissions == 1);
+        CHECK(oa2dp_codec_sample_rate(&s.config_) == 96000);
+    }
     for (bool before : {false, true}) {
         Session s;
         now = 100;

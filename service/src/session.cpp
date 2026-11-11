@@ -660,7 +660,12 @@ void Session::reconfigure_rate(uint32_t rate)
     if (oa2dp_codec_set_rate(&next, &remote_caps_, rate) != OA2DP_OK)
         return; // no negotiated support; never send mismatched-rate PCM
 
-    bool was_streaming = current()->state == OA2DP_SEP_STREAMING;
+    // Session::stop() can set stopping_ from another thread while selecting
+    // the rate. Revalidate before dereferencing; an earlier successful check
+    // does not make this later current() non-null.
+    sep = current();
+    if (!sep) return;
+    bool was_streaming = sep->state == OA2DP_SEP_STREAMING;
     if (was_streaming)
         suspend_stream();
     sep = current();

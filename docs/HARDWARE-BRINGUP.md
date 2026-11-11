@@ -2,7 +2,7 @@
 
 The controlled developer trial targets WH-1000XM6 on Windows 10 x64, build 19045. It uses a local development signature under explicitly authorized test signing. This is separate from the production installer, which still requires Microsoft-signed catalogs.
 
-Current runtime is **0.3.63**, with the loaded kernel images and running service
+Current runtime is **0.3.64**, with the loaded kernel images and running service
 verified against the local signed package. Native LDAC input and complete PCM
 format epochs are deployed; Core Audio's displayed endpoint name is unresolved.
 The user's acceptance of **Paired while disconnected** and correct Settings
@@ -17,6 +17,33 @@ service matched the verified local test-signed candidate. The service process
 started approximately twelve seconds after boot without a manual start in the
 post-boot session. This establishes automatic service startup, not complete
 automatic audio/reconnect acceptance.
+
+## 0.3.64 activation: name publication and offline epoch (2026-11-11)
+
+Exact source `ebe5c0739caeac37c35c9537f509b76bb1537095` passed the full native
+Release build, 31/31 local tests and
+[Linux sanitizer / Windows native CI](https://github.com/TruthNian/xm6-audio/actions/runs/43041395985).
+The downloaded artifact digest, manifest, payload hashes and local catalog
+membership were verified. Both loaded drivers and the running service match
+this final package, not the earlier naming-only candidate. One Bluetooth radio
+cycle activated it without a computer restart, boot-policy change or certificate
+trust change. Both install-restart flags are clear. The protected activation
+receipt records source, loaded images, running image and remaining limitations.
+
+At activation the headset was offline: AEP Paired=True/Connected=False,
+container Connected=False, session `disconnected`. The old repeated suspension
+publication error and `state-update-pending` were absent in that inspection.
+All defaults remained as before activation (render defaults were then the
+monitor). Later read-only observations found the headset connected, the native
+endpoint active at a 96 kHz shared mix, and then a nonzero playback signal.
+This is not a listening test. No sustained trace or test tone was started.
+
+Core Audio still exposes the obsolete topology name despite correct PnP/KS
+metadata. See the [name investigation](ENDPOINT-IDENTITY-REVIEW.md). No user
+acceptance of 0.3.64's naming, audible quality, format transitions, multi-app
+recovery or sleep/resume is claimed. The historical 0.3.61 Settings acceptance
+is preserved. The later 0.3.65 source fixes a separately reproduced concurrent
+shutdown/rate-selection crash; it is not part of this deployed package.
 
 ## 0.3.63 activation: PCM precision fixes (2026-11-11)
 

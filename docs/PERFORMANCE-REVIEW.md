@@ -5,6 +5,25 @@ observations below include a connected headset. Earlier computational reviews
 were performed without the headset and exclude Windows rendering, scheduling
 under audio load, Bluetooth transmission and headphone playback.
 
+## 0.3.65: concurrent stop during rate selection
+
+`Session::reconfigure_rate` checked session ownership, selected a codec rate,
+then dereferenced `current()->state` without checking the second result.
+`Session::stop` can set the atomic stop flag on another thread between those
+operations. The second `current()` then returns null, even though the earlier
+check succeeded. This can crash the service while changing sample rate during
+shutdown or session removal; it is not a demonstrated cause of the earlier
+playback gap.
+
+The production-body regression injects shutdown immediately after the real
+codec rate selector returns. Original code exits with `0xC0000005` on Windows.
+The fixed code retains and checks the new pointer before accessing its state.
+Both cached and freshly queried capability paths return without SUSPEND,
+RECONFIGURE, endpoint publication or another encoder admission. Existing rate
+rejection/retry and peer-command tests still pass. No kernel behavior, audio
+samples, rate policy or steady-state processing loop changes.
+The complete native Release build and 31/31 local checks pass after this change.
+
 ## 0.3.63: precision-only changes also delimit PCM epochs
 
 A controlled regression on the preceding production body reproduced packed
