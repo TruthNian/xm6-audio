@@ -23,6 +23,10 @@ Both catalog-covered INFs identify the exact source commit. This prevents an
 older candidate with identical version numbers and INF text from being silently
 reused by Driver Store while a newer candidate is being validated. Deployment
 still verifies the actual payload hashes; a version string alone is insufficient.
+The transport selector also restricts its compatible driver list to the INF
+beside the verified packaged tool. Selecting by provider, date and version
+alone could choose an older 0.4.0 candidate on a tie. Microsoft inbox recovery
+clears that restriction and remains independent of the native package.
 
 ## Acceptance scope
 

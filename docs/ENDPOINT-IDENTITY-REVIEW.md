@@ -135,6 +135,16 @@ first. The production-INF regression fails on the old fresh-key behavior and
 passes on the new sections, preserving existing names and KS/endpoint settings.
 Final package-upgrade acceptance is recorded in the hardware record.
 
+Upgrade validation also rejected two package-identity defects before final
+acceptance. Identical INF text let Driver Store reuse an earlier candidate;
+both catalog-covered INFs now include the source commit. The CLI's provider,
+date and version ranking could then select an older same-version transport
+package. Native selection now enumerates only the INF adjacent to the verified
+tool, while inbox recovery explicitly clears that scope. A fixture compiles
+the production selector and covers tied packages, recovery and failed path/API
+boundaries. Deployment checks the selected package, service path and loaded
+image hashes rather than treating matching version numbers as sufficient.
+
 A user reboot still left the Core Audio adapter label at `XM6 Audio Topology`.
 The current render PDO and all five KS interfaces already published
 `WH-1000XM6`. The topology jack container matched the PnP container. A readonly

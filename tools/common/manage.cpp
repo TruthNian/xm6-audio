@@ -140,8 +140,10 @@ Headset *DeviceList::find(const std::wstring &arg)
 
 namespace {
 
-// Newest compatible driver for the device from our package (ours) or from
-// Microsoft. Leaves the driver info list built; the caller destroys it.
+// Native selection is pinned to the INF beside this packaged tool. Ordering
+// by date/version cannot distinguish two candidates for the same release.
+// Microsoft recovery still selects the newest compatible inbox driver.
+// Leaves the driver info list built; the caller destroys it.
 bool pick_driver(HDEVINFO set, SP_DEVINFO_DATA &dev, bool ours, SP_DRVINFO_DATA_W *chosen)
 {
     SP_DEVINSTALL_PARAMS_W params{};
@@ -149,7 +151,30 @@ bool pick_driver(HDEVINFO set, SP_DEVINFO_DATA &dev, bool ours, SP_DRVINFO_DATA_
     if (!SetupDiGetDeviceInstallParamsW(set, &dev, &params))
         return false;
     params.FlagsEx |= DI_FLAGSEX_ALLOWEXCLUDEDDRVS;
-    SetupDiSetDeviceInstallParamsW(set, &dev, &params);
+    if (ours) {
+        wchar_t module[MAX_PATH]{};
+        DWORD length = GetModuleFileNameW(nullptr, module, MAX_PATH);
+        if (!length || length >= MAX_PATH)
+            return false;
+        std::wstring inf(module, length);
+        auto separator = inf.find_last_of(L"\\/");
+        if (separator == std::wstring::npos)
+            return false;
+        inf.resize(separator + 1);
+        inf += L"oa2dp.inf";
+        DWORD attributes = GetFileAttributesW(inf.c_str());
+        if (inf.size() >= sizeof(params.DriverPath) / sizeof(params.DriverPath[0]) ||
+            attributes == INVALID_FILE_ATTRIBUTES || (attributes & FILE_ATTRIBUTE_DIRECTORY))
+            return false;
+        params.Flags |= DI_ENUMSINGLEINF;
+        std::copy(inf.begin(), inf.end(), params.DriverPath);
+        params.DriverPath[inf.size()] = L'\0';
+    } else {
+        params.Flags &= ~DI_ENUMSINGLEINF;
+        params.DriverPath[0] = L'\0';
+    }
+    if (!SetupDiSetDeviceInstallParamsW(set, &dev, &params))
+        return false;
     if (!SetupDiBuildDriverInfoList(set, &dev, SPDIT_COMPATDRIVER))
         return false;
 
