@@ -80,9 +80,12 @@ generator, file saving, KMDF.
    Windows validates that local delay against its cyclic buffer size;
    including a remote headset's delay can reject an otherwise valid buffer.
    Downstream `TransportUs + DeviceUs`, supplied by
-   `IOCTL_OA2DP_AUDIO_SET_LATENCY`, is instead subtracted from
-   `KSPROPERTY_RTAUDIO_PRESENTATION_POSITION`, preserving the remote
-   presentation clock. End-to-end video timing still needs hardware testing.
+   `IOCTL_OA2DP_AUDIO_SET_LATENCY`, is instead subtracted from transferred
+   frames to estimate `KSPROPERTY_RTAUDIO_PRESENTATION_POSITION`. The committed
+   estimate never decreases within a stream epoch, freezes at PAUSE and resets
+   on STOP; updated delay cannot undo an already reported position. The KS
+   timestamp retains raw QPC ticks. End-to-end video timing still needs hardware
+   testing because this estimate does not observe the receiver's actual output.
 6. **Control interface.** Deviation from the earlier plan (a KMDF
    miniport-mode control device): a control device object cannot carry a
    per-PDO device interface, and the service picks the endpoint of a headset

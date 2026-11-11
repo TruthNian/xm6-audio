@@ -2,14 +2,39 @@
 
 The controlled developer trial targets WH-1000XM6 on Windows 10 x64, build 19045. It uses a local development signature under explicitly authorized test signing. This is separate from the production installer, which still requires Microsoft-signed catalogs.
 
-Latest source audit: [0.3.59 complete RTP tail review](PERFORMANCE-REVIEW.md).
-Version 0.3.59 is activated with verified loaded images; see the following record.
+Latest source audit: [0.3.60 presentation-clock review](PERFORMANCE-REVIEW.md).
+Version 0.3.60 is activated with verified loaded images; see the following record.
 Earlier runtime observations apply to 0.3.44. After its authorized
 deployment and a user restart, both actual loaded kernel images and the running
 service matched the verified local test-signed candidate. The service process
 started approximately twelve seconds after boot without a manual start in the
 post-boot session. This establishes automatic service startup, not complete
 automatic audio/reconnect acceptance.
+
+## 0.3.60 presentation-clock correction activation (2026-11-11)
+
+Source `a3abe1f8b6e18db1e755704389d283fa27fd8271` passed all 28 local checks
+and [Linux/Windows source CI](https://github.com/TruthNian/xm6-audio/actions/runs/43008980426).
+The actual WaveRT presentation body reproduced a 2640 -> 960 frame backward
+step at 48 kHz under controlled delay updates. The corrected body covers four
+sample rates, pause-time commit/freeze, resume/reset and raw QPC units at three
+frequencies. This is not a measured backward step in a player on this host.
+
+The locally built candidate was signed with the existing test certificate and
+activated through one Bluetooth radio cycle. Both actual loaded kernel images
+and the running service match the protected signed package. No computer restart,
+boot/trust or privacy changes were made. Current transport/render install flags
+request no restart. Automatic PCM rate/precision, LDAC/AAC/SBC, LDAC HQ and ABR
+off were read back from the running installation.
+
+All 731 offline display-model events decoded with zero event/buffer loss.
+The last target state was Disconnected(3) at approximately 5529 ms, followed
+by another 5005 ms of observation. AEP Paired=True/Connected=False, container
+Connected=False and native disconnected/zero-bitrate state agreed. The expected
+English label remains **Paired**, with rendered text/buttons unobserved.
+Physical audio/video synchronization, real headset reconnect, playback and
+Chrome stability remain unaccepted; estimated presentation position is not
+an observation of receiver output.
 
 ## 0.3.59 complete RTP tail correction activation (2026-11-11)
 

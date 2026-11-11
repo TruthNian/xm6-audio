@@ -40,8 +40,12 @@ physical lip sync or resolution of the reported Chrome audio stutter. The
 estimate still depends on reported headset delay and does not measure actual
 radio, encoder and receiver queue latency.
 
-The local native x64 Release build and all 28 checks pass. Exact-source CI
-and runtime activation are recorded separately after verification.
+The local native x64 Release build, all 28 checks and
+[exact-source CI](https://github.com/TruthNian/xm6-audio/actions/runs/43008980426)
+pass. Version60 is activated without a computer restart; both actual kernel
+images and the running service match the signed local package. The
+[runtime record](HARDWARE-BRINGUP.md) keeps connected audio and synchronization
+acceptance separate from the controlled clock regression and offline activation.
 
 ## 0.3.59: send complete batched frames before waiting for PCM
 
