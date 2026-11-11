@@ -2,13 +2,44 @@
 
 The controlled developer trial targets WH-1000XM6 on Windows 10 x64, build 19045. It uses a local development signature under explicitly authorized test signing. This is separate from the production installer, which still requires Microsoft-signed catalogs.
 
-Latest source audit: [0.3.49 lifecycle review](LIFECYCLE-REVIEW.md), not deployed.
-The current installed and observed runtime is 0.3.44. After its authorized
+Latest source audit: [0.3.49 lifecycle review](LIFECYCLE-REVIEW.md). Version
+0.3.49 is now activated with verified loaded images; see the following record.
+Earlier runtime observations apply to 0.3.44. After its authorized
 deployment and a user restart, both actual loaded kernel images and the running
 service matched the verified local test-signed candidate. The service process
 started approximately twelve seconds after boot without a manual start in the
 post-boot session. This establishes automatic service startup, not complete
 automatic audio/reconnect acceptance.
+
+## 0.3.49 activation and controlled state comparison (2026-11-11)
+
+Source `541917cbed05d8fc706888bf685d5c049a3dbbb1` was locally built and
+test-signed with the existing development certificate. All 19 local checks,
+INF validation, catalog-member and package-hash checks passed. Both driver
+images and the service match that protected package. Initial render update
+requested a restart; a Bluetooth radio cycle unloaded the old image and
+activated both 0.3.49 drivers without a computer restart. The service started
+through its existing device-interface trigger. Current node/install checks
+showed no pending restart. No boot policy, certificate trust or radio privacy
+setting was changed. This is a local test deployment, not Microsoft signing.
+
+A valid Bluetooth API record reported the headset disconnected. A controlled
+native -> Microsoft inbox A2DP -> native comparison retained pairing and found
+AEP Connected=False, DeviceContainer Connected=True in every phase. The
+restored native image hashes were checked. Container state alone therefore
+does not identify a custom-driver defect. Settings capture remained unavailable;
+its displayed label and per-device disconnect/reconnect were not accepted.
+
+PnPUtil also returned 259 for an up-to-date render binding. The updated
+installer procedure was exercised against that actual unchanged binding:
+259 was accepted only after checking the present device, exact published INF
+hash and started/pending state; no restart was required. Fake-API cases cover
+missing/wrong/unsafe INF, failed start and genuine install errors. This fixes
+an erroneous installation failure path, not the Bluetooth label problem.
+
+There is no new audible, control, format-transition or Chrome-stability
+acceptance for 0.3.49. Earlier user confirmations remain scoped to their
+recorded versions.
 
 ## 0.3.44 post-restart user acceptance (2026-11-11)
 
@@ -34,8 +65,9 @@ test-signed; they are not claimed to be the CI artifact or production-signed.
   service reported suspended. It supplies no active-playback CPU/jitter result
   and does not reproduce or resolve the Chrome fault.
 
-The user subsequently requested source-only investigation and has no time for
-further physical testing. No new package is deployed for the 0.3.45–0.3.49 source work.
+The user subsequently requested source-only investigation and had no time for
+further physical testing. Later authorization enabled the 0.3.49 deployment
+recorded above; the source-review results alone did not establish acceptance.
 
 Earlier activation history: versions
 0.3.23 through 0.3.30 were not deployed. A controlled 0.3.31 warm-binding trial

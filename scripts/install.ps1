@@ -31,6 +31,26 @@ function Test-NativeDeviceState([string]$InstanceId) {
         throw ('Native device is not started: problem {0}, status 0x{1:X8}.' -f $problem,[uint32]$problemStatus)
     }
 }
+function Update-NativeRenderDriver([string]$InfPath,[string]$InstanceId) {
+    & pnputil.exe /add-driver $InfPath /install
+    $result = $LASTEXITCODE
+    if ($result -eq 3010) { $script:RestartRequired = $true; return }
+    if ($result -eq 0) { return }
+    if ($result -ne 259) { throw "Render driver update failed ($result)." }
+    # PnPUtil also returns ERROR_NO_MORE_ITEMS when the matching device already
+    # uses this package. Do not accept 259 for an absent or differently bound
+    # child, or for other commands: establish the exact selected INF first.
+    $child = Get-PnpDevice -InstanceId $InstanceId -PresentOnly -ErrorAction Stop
+    if (-not $child) { throw 'Cannot verify the unchanged render device.' }
+    $published = (Get-PnpDeviceProperty -InstanceId $InstanceId -KeyName DEVPKEY_Device_DriverInfPath -ErrorAction Stop).Data
+    if ($published -notmatch '^oem[0-9]+\.inf$') { throw 'Unexpected render driver INF.' }
+    $selected = Join-Path $env:windir ('INF\'+$published)
+    if ((Get-FileHash -LiteralPath $selected -Algorithm SHA256).Hash -ne
+        (Get-FileHash -LiteralPath $InfPath -Algorithm SHA256).Hash) {
+        throw 'The render device does not select the requested driver package.'
+    }
+    Test-NativeDeviceState $InstanceId
+}
 function Assert-Administrator {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
     if (-not ([Security.Principal.WindowsPrincipal]$identity).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
@@ -131,7 +151,7 @@ try {
     Test-NativeDeviceState $headset[0].InstanceId
     # Staging alone leaves an existing child bound to its previous package.
     # The preflight rejects another present native headset before this update.
-    Invoke-Checked pnputil.exe @('/add-driver',"$package\drivers\oa2dpaudio\oa2dpaudio.inf",'/install')
+    Update-NativeRenderDriver "$package\drivers\oa2dpaudio\oa2dpaudio.inf" ('OA2DP\Render\'+$address)
     Test-NativeDeviceState $headset[0].InstanceId
     $child = Get-PnpDevice -InstanceId ('OA2DP\Render\'+$address) -PresentOnly -ErrorAction SilentlyContinue
     if ($child) { Test-NativeDeviceState $child.InstanceId }

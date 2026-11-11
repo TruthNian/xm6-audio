@@ -38,8 +38,24 @@ A local investigation on 2026-11-11 found Bluetooth Off, XM6 not present,
 its device container disconnected, but its AEP Connected flag still True.
 Three other paired Classic endpoints reported False. This is evidence of
 inconsistent Windows state, not proof of the responsible publisher or a fix.
-It was observed on runtime 0.3.44; source 0.3.45–0.3.49 remains uninstalled.
-Audio, controls, reconnect and performance acceptance are still separate.
+It was observed on runtime 0.3.44. Version 0.3.49 was subsequently activated
+and its loaded images verified. Audio, controls, reconnect and performance
+acceptance are still separate.
+
+With radio On and a valid disconnected Bluetooth device record, a controlled
+native -> Microsoft inbox A2DP -> native comparison on that system reported
+AEP Connected=False but DeviceContainer Connected=True in all three phases.
+The native package was restored and its real loaded images checked. Therefore
+container Connected=True alone does not establish a custom-driver fault or
+justify overwriting that property. The actual Settings label and its failed
+per-device operation remain unresolved.
+
+A render-package update also reproduced PnPUtil exit 259 while reporting that
+the device already uses the up-to-date driver. The installer accepts this
+specific result only after finding the present target child, comparing its
+published OEM INF hash with the requested INF and classifying its device state.
+Missing devices, another selected package and genuine install errors still
+fail. This does not assert that a selected INF is the loaded kernel image.
 
 Windows PowerShell may expose WinRT properties as a COM map. The script
 enumerates key/value entries rather than treating failed dictionary projection
