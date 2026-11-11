@@ -25,6 +25,12 @@ submission/cancellation contract, not a universal shutdown deadline: lower
 Windows/Bluetooth I/O must still reach terminal completion. Actual connected
 recovery and audio stability remain separate acceptance requirements.
 
+Version56 was activated through a radio cycle without rebooting the computer.
+Both actual kernel images and the running service match the signed payload.
+All 26 local checks and [source CI](https://github.com/TruthNian/xm6-audio/actions/runs/43003121997)
+passed. The offline state remains paired/disconnected; the
+[runtime record](HARDWARE-BRINGUP.md) preserves the limits of this observation.
+
 ## 0.3.55: complete failed incoming OPEN notifications
 
 Outgoing channel failures already bind and finish the pending Windows connect

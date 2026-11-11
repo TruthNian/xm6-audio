@@ -2,14 +2,36 @@
 
 The controlled developer trial targets WH-1000XM6 on Windows 10 x64, build 19045. It uses a local development signature under explicitly authorized test signing. This is separate from the production installer, which still requires Microsoft-signed catalogs.
 
-Latest source audit: [0.3.55 incoming-OPEN lifecycle review](LIFECYCLE-REVIEW.md).
-Version 0.3.55 is activated with verified loaded images; see the following record.
+Latest source audit: [0.3.56 control-I/O stop review](LIFECYCLE-REVIEW.md).
+Version 0.3.56 is activated with verified loaded images; see the following record.
 Earlier runtime observations apply to 0.3.44. After its authorized
 deployment and a user restart, both actual loaded kernel images and the running
 service matched the verified local test-signed candidate. The service process
 started approximately twelve seconds after boot without a manual start in the
 post-boot session. This establishes automatic service startup, not complete
 automatic audio/reconnect acceptance.
+
+## 0.3.56 control-I/O stop correction activation (2026-11-11)
+
+Source `51d9b814346255dce0b08bb722b2845fde7e12f5` passed all 26 local checks
+and [Linux/Windows source CI](https://github.com/TruthNian/xm6-audio/actions/runs/43003121997).
+The production call-chain fixture reproduces the old stop-before-submit gap
+and verifies stop during submission, completion ownership and normal output.
+Its simulated timeout is not a measurement of actual host shutdown speed.
+
+The locally built candidate was signed with the existing test certificate
+and activated through one Bluetooth radio cycle, without a computer restart
+or boot/trust/privacy change. Both actual loaded kernel images and the running
+service match the protected signed package. Current install flags requested
+no restart. Auto PCM format, LDAC/AAC/SBC, LDAC HQ and ABR off were read back.
+
+All 464 offline display events decoded with zero event/buffer loss. The last
+target state was Disconnected(3) at approximately 5471 ms, followed by another
+4986 ms of observation. AEP Paired=True/Connected=False, container Connected=False
+and native disconnected/zero-bitrate state agreed. The corresponding installed
+English resource is **Paired**. Rendered text/buttons, real connected recovery,
+headset playback, shutdown timing under load and Chrome stability remain
+unaccepted; no audio-performance result follows from this offline activation.
 
 ## 0.3.55 incoming-OPEN failure recovery activation (2026-11-11)
 
