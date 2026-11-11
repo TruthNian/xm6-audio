@@ -1252,18 +1252,19 @@ void Session::stream_loop(const StreamContext &stream)
     };
     const oa2dp_codec_caps cfg = stream.config;
     oa2dp_settings set = stream.settings;
-    if (!set.bits)
-        set.bits = oa2dp_pcm_format_ldac_bits(&stream.pcm);
     oa2dp_pcm_ring *ring = stream.ring;
 
     oa2dp_encoder *enc = nullptr;
-    int err = oa2dp_encoder_create(&cfg, &set, stream.mtu, &enc);
+    int err = oa2dp_encoder_create_for_pcm(&cfg, &set, stream.mtu, &stream.pcm, &enc);
     if (err != OA2DP_OK) {
         LOGE("encoder for %s failed: %s", oa2dp_codec_name(cfg.codec), oa2dp_strerror(err));
         fail_stream();
         return;
     }
     const oa2dp_encoder_info info = enc->info;
+    const bool native_pcm = info.input_format != OA2DP_ENCODER_INPUT_S24;
+    if (!set.bits)
+        set.bits = oa2dp_pcm_format_ldac_bits(&stream.pcm);
     const uint8_t encoder_bits = oa2dp_codec_pcm_bits(&cfg, &set);
     const uint32_t spc = info.samples_per_call;
     const uint32_t spf = info.samples_per_frame ? info.samples_per_frame : spc;
@@ -1300,8 +1301,9 @@ void Session::stream_loop(const StreamContext &stream)
     uint64_t wait_count = 0, max_wait_us = 0;
     uint32_t peak_frames = 0;
     uint64_t previous_overruns = oa2dp_ring_overruns(ring);
-    LOGI("streaming %s: %u Hz, %u ch, %u samples/call", oa2dp_codec_name(cfg.codec),
-         info.sample_rate, ch, spc);
+    LOGI("streaming %s: %u Hz, %u ch, %u samples/call, adapter input %s", oa2dp_codec_name(cfg.codec),
+         info.sample_rate, ch, spc, info.input_format == OA2DP_ENCODER_INPUT_F32 ? "float32" :
+         info.input_format == OA2DP_ENCODER_INPUT_S32 ? "int32" : "S24 scale");
 
     auto send_packet = [&](size_t len) {
         if (len && streaming_) {
@@ -1365,8 +1367,12 @@ void Session::stream_loop(const StreamContext &stream)
             break;
         }
         // Prepare codec PCM: channel layout before final precision.
-        if (oa2dp_pcm_prepare_encoder(&ring_format, pcm.data(), input_bytes,
-                pcm.data(), pcm.size(), spc, ch, encoder_bits) != OA2DP_OK) {
+        const int prepared = native_pcm ?
+            oa2dp_pcm_prepare_native32(&ring_format, pcm.data(), input_bytes,
+                pcm.data(), pcm.size(), spc, ch) :
+            oa2dp_pcm_prepare_encoder(&ring_format, pcm.data(), input_bytes,
+                pcm.data(), pcm.size(), spc, ch, encoder_bits);
+        if (prepared != OA2DP_OK) {
             LOGE("invalid PCM preparation metadata or buffer size");
             fail_stream();
             break;

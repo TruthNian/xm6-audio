@@ -6,6 +6,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <cmath>
+#include <limits>
 #include <vector>
 #define REQUIRE(x)                                                                                 \
     do {                                                                                           \
@@ -18,7 +20,8 @@
 #include "pcm-adapter-s16-under-test.inc"
 
 static std::vector<int32_t> session_prepare(const void *source, uint16_t type, uint16_t ring_ch,
-                                            uint8_t ch, uint8_t encoder_bits, uint32_t spc) {
+                                            uint8_t ch, uint8_t encoder_bits, uint32_t spc,
+                                            bool native_pcm = false) {
     oa2dp_ring_format ring_format{};
     ring_format.channels = ring_ch;
     ring_format.format = type;
@@ -36,6 +39,43 @@ static std::vector<int32_t> session_prepare(const void *source, uint16_t type, u
     return pcm;
 }
 int main() {
+    const int32_t native_words[] = {INT32_MIN, INT32_MAX, 1, -1, 127, -127, 383, -383};
+    auto native = session_prepare(native_words, OA2DP_RING_FMT_S32_FULL, 2, 2, 24, 4, true);
+    REQUIRE(std::memcmp(native.data(), native_words, sizeof(native_words)) == 0);
+    native = session_prepare(native_words, OA2DP_RING_FMT_S32_FULL, 1, 2, 24, 8, true);
+    for (size_t i = 0; i < 8; ++i)
+        REQUIRE(native[2*i] == native_words[i] && native[2*i+1] == native_words[i]);
+    const int32_t wide_pairs[] = {INT32_MIN, INT32_MIN, INT32_MAX, INT32_MAX,
+                                  INT32_MIN, INT32_MAX, 0, 1, 0, -1};
+    const int32_t wide_expected[] = {INT32_MIN, INT32_MAX, -1, 1, -1};
+    native = session_prepare(wide_pairs, OA2DP_RING_FMT_S32_FULL, 2, 1, 24, 5, true);
+    REQUIRE(std::memcmp(native.data(), wide_expected, sizeof(wide_expected)) == 0);
+    const float fine_native[] = {0x1p-26f, -0x1p-26f, 0.25f, -0.0f};
+    const auto quantized = session_prepare(fine_native, OA2DP_RING_FMT_FLOAT32, 1, 2, 24, 4);
+    REQUIRE(quantized[0] == 0 && quantized[2] == 0); // Old S24 boundary loses these inputs.
+    native = session_prepare(fine_native, OA2DP_RING_FMT_FLOAT32, 1, 2, 24, 4, true);
+    for (size_t i = 0; i < 4; ++i) {
+        REQUIRE(std::memcmp(native.data()+2*i, fine_native+i, sizeof(float)) == 0);
+        REQUIRE(std::memcmp(native.data()+2*i+1, fine_native+i, sizeof(float)) == 0);
+    }
+    const float native_headroom[] = {1.5f, -0.5f, INFINITY, -INFINITY, INFINITY, 0, NAN, 0};
+    const float native_expected[] = {0.5f, 0.0f, 1.0f, 0.0f};
+    native = session_prepare(native_headroom, OA2DP_RING_FMT_FLOAT32, 2, 1, 24, 4, true);
+    REQUIRE(std::memcmp(native.data(), native_expected, sizeof(native_expected)) == 0);
+    oa2dp_ring_format native_format{};
+    native_format.channels = 1; native_format.format = OA2DP_RING_FMT_S32_FULL;
+    uint8_t unaligned[sizeof(native_words)+1];
+    std::memcpy(unaligned+1, native_words, sizeof(native_words));
+    int32_t native_guard[10]; std::fill_n(native_guard, 10, 0x12345678);
+    REQUIRE(oa2dp_pcm_prepare_native32(&native_format, unaligned+1, sizeof(native_words),
+        native_guard+1, 8, 8, 1) == OA2DP_OK);
+    REQUIRE(std::memcmp(native_guard+1, native_words, sizeof(native_words)) == 0);
+    REQUIRE(native_guard[0] == 0x12345678 && native_guard[9] == 0x12345678);
+    REQUIRE(oa2dp_pcm_prepare_native32(&native_format, native_words, 3, native_guard, 10, 1, 1) == OA2DP_ERR_INVAL);
+    REQUIRE(oa2dp_pcm_prepare_native32(&native_format, native_words, sizeof(native_words), native_guard, 1, 2, 1) == OA2DP_ERR_NOSPC);
+    REQUIRE(oa2dp_pcm_prepare_native32(&native_format, nullptr, 0, nullptr, 0, 0, 2) == OA2DP_OK);
+    native_format.format = OA2DP_RING_FMT_S32;
+    REQUIRE(oa2dp_pcm_prepare_native32(&native_format, native_words, sizeof(native_words), native_guard, 10, 1, 1) == OA2DP_ERR_INVAL);
     const float fine[] = {0.1f / 32768, 0.8f / 32768};
     auto mono = session_prepare(fine, OA2DP_RING_FMT_FLOAT32, 2, 1, 16, 1);
     int16_t encoded;

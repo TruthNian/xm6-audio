@@ -57,6 +57,26 @@ int oa2dp_encoder_create(const oa2dp_codec_caps *c, const oa2dp_settings *s,
     }
 }
 
+int oa2dp_encoder_create_for_pcm(const oa2dp_codec_caps *c, const oa2dp_settings *s,
+                                 size_t mtu, const oa2dp_pcm_format *pcm, oa2dp_encoder **out)
+{
+    if (!out) return OA2DP_ERR_INVAL;
+    *out = NULL;
+    if (!c || !s || !oa2dp_pcm_format_valid(pcm)) return OA2DP_ERR_INVAL;
+    if (pcm->SampleRate != oa2dp_codec_sample_rate(c)) return OA2DP_ERR_INVAL;
+    oa2dp_settings effective = *s;
+    if (!effective.bits) effective.bits = oa2dp_pcm_format_ldac_bits(pcm);
+#ifdef OA2DP_WITH_LIBLDAC
+    if (c->codec == OA2DP_CODEC_LDAC && (!s->bits || s->bits == 32) &&
+        pcm->BitsPerSample == 32 && pcm->ValidBitsPerSample > 16) {
+        const oa2dp_encoder_input input = pcm->Encoding == OA2DP_PCM_FLOAT ?
+            OA2DP_ENCODER_INPUT_F32 : OA2DP_ENCODER_INPUT_S32;
+        return oa2dp_ldac_encoder_create_native(c, &effective, mtu, input, out);
+    }
+#endif
+    return oa2dp_encoder_create(c, &effective, mtu, out);
+}
+
 void oa2dp_pcm_to_s16(const int32_t *in, int16_t *out, size_t n)
 {
     for (size_t i = 0; i < n; i++) {

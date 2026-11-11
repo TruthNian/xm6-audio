@@ -120,6 +120,13 @@ int oa2dp_pcm_prepare_encoder(const oa2dp_ring_format *format,
                               const void *input, size_t input_bytes,
                               int32_t *output, size_t output_samples,
                               uint32_t frames, uint16_t output_channels, uint8_t bits);
+/* Preserve FLOAT32/full S32 representation for a native-input encoder. Channel
+ * mapping precedes float sanitization/clipping; no fixed 16/24-bit quantization.
+ * Integer downmix rounds once to full S32. Same-buffer expansion is supported. */
+int oa2dp_pcm_prepare_native32(const oa2dp_ring_format *format,
+                               const void *input, size_t input_bytes,
+                               int32_t *output, size_t output_samples,
+                               uint32_t frames, uint16_t output_channels);
 /* Interleaved stereo -> mono average, in place allowed (out may == in). */
 void oa2dp_pcm_downmix_to_mono(const int32_t *in, int32_t *out, size_t frames);
 

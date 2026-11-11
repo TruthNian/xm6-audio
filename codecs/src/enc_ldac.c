@@ -51,11 +51,14 @@ static int ldac_enc_encode(oa2dp_encoder *e, const int32_t *pcm, uint8_t *out, s
     if (cap < LDAC_MAX_OUTPUT)
         return OA2DP_ERR_NOSPC;
     size_t samples = (size_t)e->info.samples_per_call * e->info.channels;
-    if (x->input16)
+    void *input = x->pcm;
+    if (e->info.input_format != OA2DP_ENCODER_INPUT_S24)
+        input = (void *)pcm; /* libldac reads/copies its input; it does not modify it. */
+    else if (x->input16)
         oa2dp_pcm_to_s16(pcm, x->pcm, samples);
     else
         oa2dp_pcm_to_s32(pcm, x->pcm, samples);
-    if (ldacBT_encode(x->h, x->pcm, &used, out, &size, &nframes) < 0)
+    if (ldacBT_encode(x->h, input, &used, out, &size, &nframes) < 0)
         return OA2DP_ERR_IO;
     if (size && x->expected_frame_bytes &&
         (size != nframes * (int)x->expected_frame_bytes))
@@ -110,22 +113,32 @@ static const oa2dp_encoder_ops ldac_ops = {
 int oa2dp_ldac_encoder_create(const oa2dp_codec_caps *c, const oa2dp_settings *s,
                               size_t mtu, oa2dp_encoder **out)
 {
-    if (c->codec != OA2DP_CODEC_LDAC)
+    return oa2dp_ldac_encoder_create_native(c, s, mtu, OA2DP_ENCODER_INPUT_S24, out);
+}
+
+int oa2dp_ldac_encoder_create_native(const oa2dp_codec_caps *c, const oa2dp_settings *s,
+                                     size_t mtu, oa2dp_encoder_input input, oa2dp_encoder **out)
+{
+    if (c->codec != OA2DP_CODEC_LDAC || input > OA2DP_ENCODER_INPUT_F32 ||
+        input < OA2DP_ENCODER_INPUT_S24)
         return OA2DP_ERR_INVAL;
     ldac_enc *x = calloc(1, sizeof(*x));
     if (!x)
         return OA2DP_ERR_NOSPC;
     uint8_t ch = oa2dp_codec_channels(c);
-    x->input16 = s->bits == 16;
-    x->pcm = malloc((x->input16 ? sizeof(int16_t) : sizeof(int32_t)) * LDAC_SAMPLES_PER_CALL * ch);
+    x->base.info.input_format = input;
+    x->input16 = input == OA2DP_ENCODER_INPUT_S24 && s->bits == 16;
+    if (input == OA2DP_ENCODER_INPUT_S24)
+        x->pcm = malloc((x->input16 ? sizeof(int16_t) : sizeof(int32_t)) * LDAC_SAMPLES_PER_CALL * ch);
     x->h = ldacBT_get_handle();
-    if (!x->pcm || !x->h) {
+    if ((!x->pcm && input == OA2DP_ENCODER_INPUT_S24) || !x->h) {
         ldac_enc_destroy(&x->base);
         return OA2DP_ERR_NOSPC;
     }
     /* The channel-mode bits of the A2DP element equal LDACBT_CHANNEL_MODE_*. */
     if (ldacBT_init_handle_encode(x->h, (int)mtu, eqmid_for(s->ldac_quality),
-                                  c->u.ldac.chmode, x->input16 ? LDACBT_SMPL_FMT_S16 : LDACBT_SMPL_FMT_S32,
+                                  c->u.ldac.chmode, input == OA2DP_ENCODER_INPUT_F32 ? LDACBT_SMPL_FMT_F32 :
+                                  x->input16 ? LDACBT_SMPL_FMT_S16 : LDACBT_SMPL_FMT_S32,
                                   (int)oa2dp_codec_sample_rate(c)) < 0) {
         ldac_enc_destroy(&x->base);
         return OA2DP_ERR_INVAL;

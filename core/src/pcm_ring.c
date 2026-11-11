@@ -417,6 +417,55 @@ static int64_t load_integer_sample(const uint8_t *input, size_t sample)
     return value;
 }
 
+int oa2dp_pcm_prepare_native32(const oa2dp_ring_format *format,
+                               const void *input, size_t input_bytes,
+                               int32_t *output, size_t output_samples,
+                               uint32_t frames, uint16_t output_channels)
+{
+    if (!format || !format->channels || format->channels > 2 ||
+        !output_channels || output_channels > 2 ||
+        (format->format != OA2DP_RING_FMT_FLOAT32 && format->format != OA2DP_RING_FMT_S32_FULL) ||
+        (frames && (!input || !output)))
+        return OA2DP_ERR_INVAL;
+    if (frames > input_bytes / sizeof(int32_t) / format->channels)
+        return OA2DP_ERR_INVAL;
+    if (frames > output_samples / output_channels)
+        return OA2DP_ERR_NOSPC;
+    const uint8_t *source = (const uint8_t *)input;
+    const uint16_t channels = format->channels;
+    if (format->format == OA2DP_RING_FMT_S32_FULL && channels == output_channels) {
+        if (frames && input != output)
+            memcpy(output, input, (size_t)frames * channels * sizeof(int32_t));
+        return OA2DP_OK;
+    }
+    const int downmix = channels == 2 && output_channels == 1;
+    const int reverse = output_channels > channels;
+    for (size_t i = 0; i < frames; ++i) {
+        const size_t frame = reverse ? frames - 1 - i : i;
+        const size_t src = frame * channels, dst = frame * output_channels;
+        for (uint16_t ch = 0; ch < output_channels; ++ch) {
+            const size_t offset = src + (channels == 1 ? 0 : ch);
+            if (format->format == OA2DP_RING_FMT_FLOAT32) {
+                double value = load_float_sample(source, offset);
+                if (downmix) value = (value + load_float_sample(source, src + 1)) * 0.5;
+                if (!(value == value)) value = 0.0;
+                if (value > 1.0) value = 1.0;
+                if (value < -1.0) value = -1.0;
+                const float sample = (float)value;
+                memcpy(output + dst + ch, &sample, sizeof(sample));
+            } else {
+                int64_t value = load_integer_sample(source, offset);
+                if (downmix) {
+                    value += load_integer_sample(source, src + 1);
+                    value = value < 0 ? -((-value + 1) / 2) : (value + 1) / 2;
+                }
+                output[dst + ch] = (int32_t)value;
+            }
+        }
+    }
+    return OA2DP_OK;
+}
+
 int oa2dp_pcm_prepare_encoder(const oa2dp_ring_format *format,
                               const void *input, size_t input_bytes,
                               int32_t *output, size_t output_samples,

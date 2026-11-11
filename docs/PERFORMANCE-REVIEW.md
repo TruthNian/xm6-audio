@@ -5,6 +5,53 @@ observations below include a connected headset. Earlier computational reviews
 were performed without the headset and exclude Windows rendering, scheduling
 under audio load, Bluetooth transmission and headphone playback.
 
+## Unreleased: remove fixed S24 quantization before native LDAC input
+
+The common adapter contract previously rounded full int32/float32 input onto
+a fixed 24-bit integer grid, then shifted those samples into libldac's S32
+container. The pinned Sony library also accepts S32 and F32 directly: its
+`setpcm_ldac.c` scales those samples into its internal scalar representation.
+Its advertised wireless precision is not a requirement to quantize all PCM
+onto the same fixed 24-bit grid before invoking that API.
+
+Format-aware encoder creation now selects native S32/F32 input for 32-bit
+endpoint containers in automatic mode, including 24-in-32. Explicit 16/24-bit
+settings retain their conversion boundary; automatic input with at most 16
+valid integer bits keeps the S16 route. Other codecs retain the existing
+adapter contract. Source/codec sample-rate mismatches are rejected. No new
+resampler, gain adjustment, EQ, codec negotiation or radio behavior is added.
+
+Native preparation preserves representation while mapping one/two channels.
+Float sanitization/clipping follows channel mixing; integer downmix uses a
+wide sum and rounds once to full int32. Equal-channel int32 input already in
+the service buffer requires no conversion loop or copy. The LDAC adapter no
+longer allocates/converts an intermediate PCM buffer for these native inputs.
+This is an input-fidelity and work-reduction change, not a measured audible
+improvement, end-to-end CPU speedup, or 32-bit/lossless Bluetooth claim.
+
+The production preparation fixture checks full integer extremes, signed
+half-sample downmix, low-level float preservation, same-buffer mono expansion,
+unaligned input, bounds, NaN/infinities and mixing before clipping. It also
+shows that the previous S24 boundary maps +/-2^-26 float samples to zero,
+whereas native preparation retains them. Such levels do not establish an
+audible benefit. The actual LDAC adapter matches direct pinned-libldac output
+byte for byte over 1,536 calls, covering four supported rates, mono/stereo,
+full S32/F32/24-in-32, input immutability, HQ frame sizes and explicit precision
+selection. The native Release build and all 29 local checks pass. A preliminary
+check run overlapped compilation and could not launch a locked executable;
+the reported complete run was repeated only after the build exited successfully.
+
+This source has **not been installed or heard on the headset**. The currently
+loaded source remains `292a0c98b07b545c8c8b377eeef307056ab0b5fb` (0.3.62).
+At the quality inspection, Windows used a 96 kHz shared mix and supplied
+24 valid integer bits in a 32-bit device container. Native input cannot recover
+detail already removed upstream. Media/Movie/GameMedia effects enumeration
+returned no advertised effect, the active endpoint had no FxProperties key,
+and Equalizer APO's configuration contained only a bypass comment. This does
+not inspect player-specific processing or the headset's stored DSP settings.
+The shared-mix rate and EQ were left unchanged; automatic per-file rate
+selection is still absent, as described in the main format-policy section.
+
 ## 0.3.62: short passive observation after activation
 
 Both actual kernel images and the running service match signed source
