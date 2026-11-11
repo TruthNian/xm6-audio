@@ -1210,7 +1210,12 @@ bool Session::update_suspend_state()
     if (!audio_ready_) return false;
     const bool unavailable = !connection_enabled_ || transport_suspended_ ||
         suspend_requested_ || !sig_open_ || !media_open_;
-    const bool accepted = audio_.set_suspended(unavailable, suspend_serial_, sig_generation_);
+    // Failed outgoing OPENs can advance the kernel epoch without returning it
+    // to this service. With no open signalling link, use the existing no-link
+    // token: the driver's gate accepts zero only while its channel is Closed.
+    // A newly opening/open replacement still rejects this stale publication.
+    const ULONG connection = sig_open_ ? sig_generation_ : 0;
+    const bool accepted = audio_.set_suspended(unavailable, suspend_serial_, connection);
     suspend_publication_pending_ = !accepted;
     if (!accepted)
         next_profile_retry_ = GetTickCount() + 1000;

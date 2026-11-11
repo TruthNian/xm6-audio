@@ -57,6 +57,18 @@ static oa2dp_avdtp_sep *oa2dp_avdtp_sep_get(FakeAvdtp *av, int seid) {
 static int oa2dp_avdtp_start(FakeAvdtp *, int) { return 1; }
 static uint32_t oa2dp_codec_sample_rate(const FakeConfig *cfg) { return cfg->rate; }
 
+namespace epoch_gate {
+using BOOLEAN = bool;
+constexpr bool FALSE = false, TRUE = true;
+constexpr unsigned Oa2dpChannelSignaling = 0, ChannelClosed = 0, ChannelOpening = 1, ChannelOpen = 2;
+struct OA2DP_CHANNEL { struct { unsigned State = ChannelClosed; ULONG ConnectionGeneration = 0; } Life; };
+struct OA2DP_DEVICE_CONTEXT { bool MpmStopping = false, PolicySuspended = false; OA2DP_CHANNEL Channels[1]; };
+static bool ConnectionStatusCurrent(OA2DP_DEVICE_CONTEXT *dev, bool connected, ULONG connection) {
+    return connected && dev->Channels[0].Life.State == ChannelOpen && connection == dev->Channels[0].Life.ConnectionGeneration;
+}
+#include "suspend-epoch-admission-under-test.inc"
+}
+
 struct Session {
     struct Transport {
         bool drained = true;
@@ -77,6 +89,8 @@ struct Session {
         bool suspended = false;
         ULONG serial = 0, connection = 0;
         std::function<void()> during_publication;
+        bool check_driver_epoch = false;
+        epoch_gate::OA2DP_DEVICE_CONTEXT driver_epoch;
         Audio() : storage((oa2dp_ring_bytes(16, 2) + 7) / 8) {
             REQUIRE(oa2dp_ring_init(ring(), 16, 48000, 2, OA2DP_RING_FMT_S32) == OA2DP_OK);
         }
@@ -88,6 +102,8 @@ struct Session {
             connection = epoch;
             if (during_publication)
                 during_publication();
+            if (check_driver_epoch && !epoch_gate::SuspendStatusCurrent(&driver_epoch, value, epoch))
+                return false;
             if (!failures)
                 return true;
             --failures;
@@ -433,5 +449,25 @@ int main() {
         s.retry_profile_state();
         REQUIRE(s.streaming_ && s.starts == 1);
     }
-    std::puts("production profile retry checks passed (external APIs fake, no headset)");
+    {
+        Session s;
+        s.sig_generation_ = 1; // last successful link
+        s.sig_open_ = s.media_open_ = false;
+        s.audio_.check_driver_epoch = true;
+        auto &life = s.audio_.driver_epoch.Channels[0].Life;
+        life.ConnectionGeneration = 7; // later outgoing OPEN timed out before service got its generation
+        life.State = epoch_gate::ChannelClosed;
+        REQUIRE(s.update_suspend_state() && !s.suspend_publication_pending_);
+        REQUIRE(s.audio_.suspended);
+        // An incoming replacement has not reached the service yet. A no-link
+        // publication must not suspend it using an obsolete connection identity.
+        life.ConnectionGeneration = 8; life.State = epoch_gate::ChannelOpening;
+        REQUIRE(!s.update_suspend_state() && s.suspend_publication_pending_);
+        life.State = epoch_gate::ChannelOpen;
+        REQUIRE(!s.update_suspend_state());
+        s.sig_open_ = s.media_open_ = true; s.sig_generation_ = 8;
+        REQUIRE(s.update_suspend_state() && !s.suspend_publication_pending_);
+        REQUIRE(!s.audio_.suspended && s.audio_.connection == 8);
+    }
+    std::puts("production profile retry and closed-link epoch admission checks passed (external APIs fake)");
 }

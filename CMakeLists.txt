@@ -216,6 +216,8 @@ if(OA2DP_BUILD_TESTS)
         "\nvoid Session::suspend_stream(" stream-start)
     xm6_test_body(service/src/session.cpp "void Session::begin_streaming("
         "\nvoid Session::stream_loop(" stream-admission)
+    xm6_test_body(driver/oa2dp/mpm.c "static BOOLEAN SuspendStatusCurrent("
+        "\nstatic NTSTATUS NTAPI ConnectionRequest(" suspend-epoch-admission)
     xm6_test_body(service/src/session.cpp "bool Session::update_latency("
         "\nbool Session::update_suspend_state(" latency-publication)
     xm6_test_body(service/src/session.cpp "bool Session::request("

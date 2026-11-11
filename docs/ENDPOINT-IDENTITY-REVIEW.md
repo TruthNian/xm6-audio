@@ -66,6 +66,29 @@ and actual application recovery. Third-party applications that retain an old
 ordinary ID must handle normal endpoint notifications; driver source cannot
 prove their recovery without evidence from those clients.
 
+## Offline publication after failed connection attempts
+
+A subsequent one-shot log inspection found repeated suspend-publication error
+21 and `state-update-pending` after the headset went offline. A failed outgoing
+OPEN can advance the driver's connection generation without returning that new
+generation to the service. The service retained the last successful link's
+generation and kept using it for suspension reports, which the driver's
+generation guard correctly rejected.
+
+A controlled regression combines the actual service publication body with the
+actual kernel `SuspendStatusCurrent` gate. Last successful generation 1 followed
+by a closed, failed generation 7 reproduces the rejection. When the service has
+no open signalling link, it now sends the already-defined no-link token (zero).
+The unchanged kernel gate accepts that token only while its channel is Closed.
+An incoming replacement in Opening or Open still rejects it, until the service
+receives and uses that replacement's real generation. This fixes the stale
+publication loop without weakening connection-epoch checks, adding a timer,
+changing the IOCTL or suppressing errors from a real live replacement.
+
+This regression does not establish the cause of the earlier audible PCM gap.
+The prior 0.3.64 candidate was not installed; both repairs are consolidated into
+the same deployment.
+
 ## Remaining scope
 
 This change addresses the two reproduced name-publication defects. It does not
