@@ -21,7 +21,7 @@ bool oa2dp_encoder_available(oa2dp_codec_id id)
 #endif
 #ifdef OA2DP_WITH_MFAAC
     case OA2DP_CODEC_AAC:
-        return true;
+        return oa2dp_aac_mf_available();
 #endif
     default:
         return false;

@@ -959,10 +959,18 @@ void Session::main_loop()
     oa2dp_avdtp_init(&av_, &cb, this, 672);
     for (uint8_t i = 0; i < settings_.priority_count; i++) {
         oa2dp_codec_id id = settings_.priority[i];
-        if (!oa2dp_encoder_available(id))
-            continue;
-        oa2dp_codec_caps local{};
+        oa2dp_codec_caps local{}, possible{};
         oa2dp_codec_local_caps(id, &local);
+        if (oa2dp_codec_select(&local, &local, &settings_, &possible) != OA2DP_OK ||
+            oa2dp_codec_check_settings(&possible, &settings_) != 0) {
+            LOGW("codec %s cannot satisfy the current format policy; not advertising its SEP",
+                 oa2dp_codec_name(id));
+            continue;
+        }
+        if (!oa2dp_encoder_available(id)) {
+            LOGW("encoder backend unavailable for %s; not advertising its SEP", oa2dp_codec_name(id));
+            continue;
+        }
         oa2dp_avdtp_caps caps = make_config_caps(local, true);
         int seid = oa2dp_avdtp_add_sep(&av_, OA2DP_AVDTP_TSEP_SRC, OA2DP_MEDIA_TYPE_AUDIO, &caps);
         if (seid > 0)
@@ -970,6 +978,7 @@ void Session::main_loop()
     }
     if (sep_codec_.empty()) {
         LOGE("no encoder available");
+        publish("encoder-unavailable");
         tr_.close();
         return;
     }

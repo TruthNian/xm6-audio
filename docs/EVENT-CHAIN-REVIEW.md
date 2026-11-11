@@ -1,6 +1,6 @@
 # Event, notification and transport review
 
-Reviewed 2026-11-11 against the 0.3.50–0.3.52 production source. The headset
+Reviewed 2026-11-11 against the 0.3.50–0.3.53 production source. The headset
 was unavailable. Runtime conclusions below concern the disconnected Windows
 path; protocol fixtures do not substitute for connected hardware acceptance.
 
@@ -28,6 +28,10 @@ path; protocol fixtures do not substitute for connected hardware acceptance.
    failure. A single resume-intent bit identifies an interrupted local rate
    change; peer pause/configuration/close and teardown cancel obsolete intent.
    Each request boundary rechecks the connection/SEP before publication.
+6. **Codec offers must be usable.** Version53 filters offers by fixed policy
+   and actual AAC backend availability, and unifies AAC target selection with
+   the real MFT media type. See the [codec review](CODEC-REVIEW.md), including
+   the reproduced 64-to-96 kbit/s target overshoot and missing-backend cases.
 
 ## Producer-to-consumer contracts checked
 

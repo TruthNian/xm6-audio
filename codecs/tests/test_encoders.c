@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: MIT */
-/* Smoke test for every encoder adapter compiled into this build: feed one
+/* Smoke test for usable encoder backends in this build: feed one
  * second of a 1 kHz tone and check that well-formed frames come out. */
 #include <math.h>
 #include <stdio.h>
@@ -26,7 +26,7 @@ static void run_profile(oa2dp_codec_id id, const uint8_t *remote_ie, size_t ie_l
     oa2dp_encoder *enc = NULL;
 
     if (!oa2dp_encoder_available(id)) {
-        printf("%-18s skipped (not compiled in)\n", oa2dp_codec_name(id));
+        printf("%-18s skipped (backend unavailable)\n", oa2dp_codec_name(id));
         return;
     }
     oa2dp_settings_default(&s);

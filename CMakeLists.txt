@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(XM6Audio VERSION 0.3.52 LANGUAGES C CXX)
+project(XM6Audio VERSION 0.3.53 LANGUAGES C CXX)
 
 # The loaded binary's version must agree with the configured project and INF.
 # Generate resources in the build tree rather than keeping a stale copy.
@@ -122,6 +122,22 @@ if(OA2DP_BUILD_TESTS)
     add_executable(test_transport_events tools/test-transport-events.cpp)
     target_include_directories(test_transport_events PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
     add_test(NAME transport_events COMMAND test_transport_events)
+    xm6_test_body(codecs/src/enc_aac_mf.cpp "template <class T> void release("
+        "\nstruct AacState" aac-backend)
+    xm6_test_body(codecs/src/enc_aac_mf.cpp "extern \"C\" bool oa2dp_aac_mf_available("
+        "\nextern \"C\" int oa2dp_aac_mf_encoder_create(" aac-availability)
+    xm6_test_body(codecs/src/encoder.c "bool oa2dp_encoder_available("
+        "\nint oa2dp_encoder_create(" encoder-availability)
+    xm6_test_body(service/src/session.cpp "oa2dp_avdtp_caps make_config_caps("
+        "\nstd::string codec_label(" codec-capabilities)
+    xm6_test_body(service/src/session.cpp "    for (uint8_t i = 0; i < settings_.priority_count; i++) {"
+        "\n    if (sep_codec_.empty())" codec-advertisement)
+    xm6_test_body(codecs/src/enc_aac_mf.cpp "HRESULT set_types("
+        "\n// Pull every available output sample" aac-media-type)
+    add_executable(test_aac_backend tools/test-aac-backend.cpp)
+    target_include_directories(test_aac_backend PRIVATE "${CMAKE_CURRENT_BINARY_DIR}" codecs/include core/include)
+    target_link_libraries(test_aac_backend PRIVATE oa2dp_core)
+    add_test(NAME aac_backend COMMAND test_aac_backend)
     xm6_test_body(driver/oa2dpaudio/minwavertstream.cpp "static ULONGLONG HnsToFrames("
         "\n//=============================================================================\n#pragma code_seg(\"PAGE\")\nCMiniportWaveRTStream::~" wavert-time)
     xm6_test_body(driver/oa2dpaudio/minwavertstream.cpp "ULONGLONG CMiniportWaveRTStream::RunningHns("
@@ -216,6 +232,12 @@ target_link_libraries(oa2dp_codecs PUBLIC oa2dp_core)
 # AAC: Media Foundation, part of Windows.
 target_compile_definitions(oa2dp_codecs PUBLIC OA2DP_WITH_MFAAC)
 target_link_libraries(oa2dp_codecs PUBLIC mfplat mfuuid ole32)
+if(OA2DP_BUILD_TESTS)
+    add_executable(test_aac_media_type tools/test-aac-media-type.cpp)
+    target_include_directories(test_aac_media_type PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
+    target_link_libraries(test_aac_media_type PRIVATE oa2dp_codecs)
+    add_test(NAME aac_media_type COMMAND test_aac_media_type)
+endif()
 
 # SBC + FastStream: libsbc (LGPL-2.1+), built as a DLL to keep it replaceable.
 if(EXISTS ${OA2DP_THIRD_PARTY}/sbc/sbc/sbc.c)
@@ -313,7 +335,7 @@ if(MSVC)
     foreach(binary IN ITEMS oa2dp_core oa2dp_codecs oa2dp_manage oa2dpsvc oa2dpctl
                             oa2dpgui ldac sbc oa2dp_tests test_encoders verify_native_metadata test_ks_attributes
                             test_ring_concurrency test_profile_retry test_handle_lifetime test_endpoint_formats
-                            test_service_rtp test_peer_format)
+                            test_service_rtp test_peer_format test_aac_media_type test_aac_backend)
         if(TARGET ${binary})
             set_property(TARGET ${binary} PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
         endif()

@@ -44,7 +44,8 @@ struct oa2dp_encoder {
     oa2dp_encoder_info info;
 };
 
-/* True when the adapter for `id` was compiled in. */
+/* True for a linked backend. AAC also probes current OS COM/MF availability;
+ * this does not promise that a future configuration/allocation will succeed. */
 bool oa2dp_encoder_available(oa2dp_codec_id id);
 
 /* Create an encoder for a negotiated configuration. `mtu` is the media
@@ -80,6 +81,7 @@ int oa2dp_faststream_encoder_create(const oa2dp_codec_caps *c, const oa2dp_setti
 int oa2dp_aptx_encoder_create(const oa2dp_codec_caps *c, const oa2dp_settings *s, oa2dp_encoder **out);
 int oa2dp_ldac_encoder_create(const oa2dp_codec_caps *c, const oa2dp_settings *s, size_t mtu, oa2dp_encoder **out);
 int oa2dp_aac_mf_encoder_create(const oa2dp_codec_caps *c, const oa2dp_settings *s, oa2dp_encoder **out);
+bool oa2dp_aac_mf_available(void);
 
 #ifdef __cplusplus
 }

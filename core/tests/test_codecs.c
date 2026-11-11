@@ -131,6 +131,40 @@ static void aac(void)
     oa2dp_codec_local_caps(OA2DP_CODEC_AAC, &local);
     cfg.u.aac.vbr = true;
     CHECK_EQ(oa2dp_codec_check_config(&local, &cfg), OA2DP_A2DP_NOT_SUPPORTED_VBR);
+
+    /* The bundled MF backend has discrete CBR targets and no sub-96k mode.
+     * Negotiation must not promise a target it cannot encode within. */
+    static const uint32_t limits[] = {1, 64000, 95999, 96000, 127999, 128000,
+                                      159999, 160000, 191999, 192000, 320000, 0};
+    static const uint32_t targets[] = {0, 0, 0, 96000, 96000, 128000,
+                                       128000, 160000, 160000, 192000, 192000, 192000};
+    for (size_t i = 0; i < sizeof(limits) / sizeof(limits[0]); ++i) {
+        oa2dp_settings_default(&s);
+        remote.u.aac.bitrate = limits[i];
+        int result = oa2dp_codec_select(NULL, &remote, &s, &cfg);
+        CHECK_EQ(result, targets[i] ? OA2DP_OK : OA2DP_ERR_UNSUPPORTED);
+        if (targets[i]) CHECK_EQ(cfg.u.aac.bitrate, targets[i]);
+        remote.u.aac.bitrate = 320000;
+        s.aac_bitrate = limits[i];
+        result = oa2dp_codec_select(NULL, &remote, &s, &cfg);
+        CHECK_EQ(result, targets[i] ? OA2DP_OK : OA2DP_ERR_UNSUPPORTED);
+        if (targets[i]) CHECK_EQ(cfg.u.aac.bitrate, targets[i]);
+    }
+    oa2dp_settings_default(&s);
+    CHECK_EQ(oa2dp_codec_select(NULL, &remote, &s, &cfg), OA2DP_OK);
+    cfg.u.aac.bitrate = 64000;
+    CHECK_EQ(oa2dp_codec_check_config(&local, &cfg), OA2DP_A2DP_NOT_SUPPORTED_BIT_RATE);
+    cfg.u.aac.bitrate = 0; // peer did not specify a cap
+    s.aac_bitrate = 64000;
+    CHECK_EQ(oa2dp_codec_check_settings(&cfg, &s), OA2DP_A2DP_NOT_SUPPORTED_BIT_RATE);
+    oa2dp_settings_default(&s);
+    local.u.aac.bitrate = 0;
+    remote.u.aac.bitrate = 64000;
+    CHECK_EQ(oa2dp_codec_select(&local, &remote, &s, &cfg), OA2DP_ERR_UNSUPPORTED);
+    remote.u.aac.bitrate = 170000;
+    s.aac_bitrate = 130000;
+    CHECK_EQ(oa2dp_codec_select(&local, &remote, &s, &cfg), OA2DP_OK);
+    CHECK_EQ(cfg.u.aac.bitrate, 128000);
 }
 
 static void vendor(void)
@@ -230,11 +264,28 @@ static void best(void)
     CHECK_EQ(oa2dp_codec_choose_best(list, 1, &s, &cfg), 0);
     CHECK_EQ(cfg.codec, OA2DP_CODEC_SBC);
 
+    s.sample_rate = 96000;
+    CHECK_EQ(oa2dp_codec_choose_best(list, 3, &s, &cfg), OA2DP_ERR_NOTFOUND);
+    CHECK_EQ(oa2dp_codec_choose_best(list, 4, &s, &cfg), 3);
+    CHECK_EQ(oa2dp_codec_sample_rate(&cfg), 96000);
+    s.sample_rate = 48000;
+    s.bits = 24;
+    CHECK_EQ(oa2dp_codec_choose_best(list, 3, &s, &cfg), OA2DP_ERR_NOTFOUND);
+    CHECK_EQ(oa2dp_codec_choose_best(list, 4, &s, &cfg), 3);
+    s.sample_rate = 0;
+    s.bits = 0;
+
     s.priority[0] = OA2DP_CODEC_AAC;
     s.priority[1] = OA2DP_CODEC_SBC;
     s.priority_count = 2;
     CHECK_EQ(oa2dp_codec_choose_best(list, 4, &s, &cfg), 1);
     CHECK_EQ(oa2dp_codec_choose_best(list, 1, &s, &cfg), 0);
+
+    list[1].u.aac.bitrate = 64000;
+    CHECK_EQ(oa2dp_codec_choose_best(list, 4, &s, &cfg), 0);
+    CHECK_EQ(cfg.codec, OA2DP_CODEC_SBC); // unusable AAC must not prevent fallback
+    s.priority_count = 1;
+    CHECK_EQ(oa2dp_codec_choose_best(list, 4, &s, &cfg), OA2DP_ERR_NOTFOUND);
 
     s.priority[0] = OA2DP_CODEC_APTX_HD;
     s.priority_count = 1;

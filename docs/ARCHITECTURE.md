@@ -21,6 +21,17 @@ The catalog covers the kernel file, INF, service/tool executables and codec DLLs
 
 Reference: Microsoft's [Win32 services interacting with devices](https://learn.microsoft.com/en-us/windows-hardware/drivers/install/best-practices-win32services-interacting-with-devices) and [run from Driver Store](https://learn.microsoft.com/en-us/windows-hardware/drivers/develop/run-from-driver-store).
 
+## Codec offers and backend availability
+
+The service first excludes codecs that cannot satisfy explicit format policy,
+then checks backend availability before advertising their SEPs. AAC checks
+actual COM/MF startup and activation rather than a compile flag alone; its
+probe owns and releases its references without changing an active encoder.
+The shared AAC CBR selector constrains negotiated targets and actual MFT
+output types to peer/user limits. Automatic fallback may use another permitted
+codec; fixed policies do not become silently downgraded success. See the
+[codec capability review](CODEC-REVIEW.md) for reproduced failures and coverage.
+
 ## PCM and clock boundaries
 
 The service follows endpoint PCM, not file metadata. In automatic mode its

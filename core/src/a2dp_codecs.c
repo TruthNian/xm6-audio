@@ -490,6 +490,17 @@ static int select_sbc(const oa2dp_sbc_caps *l, const oa2dp_sbc_caps *r,
     return OA2DP_OK;
 }
 
+uint32_t oa2dp_aac_select_bitrate(uint32_t peer_limit, uint32_t user_limit)
+{
+    /* Microsoft MF AAC: 12000/16000/20000/24000 bytes per second. */
+    static const uint32_t rates[] = {192000, 160000, 128000, 96000};
+    for (size_t i = 0; i < COUNT(rates); ++i)
+        if ((!peer_limit || rates[i] <= peer_limit) &&
+            (!user_limit || rates[i] <= user_limit))
+            return rates[i];
+    return 0;
+}
+
 static int select_aac(const oa2dp_aac_caps *l, const oa2dp_aac_caps *r,
                       const oa2dp_settings *s, oa2dp_aac_caps *o)
 {
@@ -514,12 +525,10 @@ static int select_aac(const oa2dp_aac_caps *l, const oa2dp_aac_caps *r,
     o->vbr = s->aac_vbr && l->vbr && r->vbr;
 
     uint32_t br = l->bitrate;
-    if (r->bitrate && r->bitrate < br)
+    if (r->bitrate && (!br || r->bitrate < br))
         br = r->bitrate;
-    if (s->aac_bitrate && s->aac_bitrate < br)
-        br = s->aac_bitrate;
-    o->bitrate = br;
-    return OA2DP_OK;
+    o->bitrate = oa2dp_aac_select_bitrate(br, s->aac_bitrate);
+    return o->bitrate ? OA2DP_OK : OA2DP_ERR_UNSUPPORTED;
 }
 
 static uint8_t pick_aptx_ch(uint8_t ch, const oa2dp_settings *s)
@@ -623,6 +632,9 @@ uint8_t oa2dp_codec_check_settings(const oa2dp_codec_caps *config, const oa2dp_s
         return OA2DP_A2DP_NOT_SUPPORTED_CHANNEL_MODE;
     if (settings->bits && oa2dp_codec_pcm_bits(config, settings) != settings->bits)
         return OA2DP_A2DP_NOT_SUPPORTED_CODEC_PARAMETER;
+    if (config->codec == OA2DP_CODEC_AAC &&
+        !oa2dp_aac_select_bitrate(config->u.aac.bitrate, settings->aac_bitrate))
+        return OA2DP_A2DP_NOT_SUPPORTED_BIT_RATE;
     return 0;
 }
 
@@ -634,7 +646,8 @@ int oa2dp_codec_choose_best(const oa2dp_codec_caps *remote, size_t count,
     for (uint8_t p = 0; p < s->priority_count; p++)
         for (size_t i = 0; i < count; i++)
             if (remote[i].codec == s->priority[p] &&
-                oa2dp_codec_select(NULL, &remote[i], s, config) == OA2DP_OK)
+                oa2dp_codec_select(NULL, &remote[i], s, config) == OA2DP_OK &&
+                oa2dp_codec_check_settings(config, s) == 0)
                 return (int)i;
     return OA2DP_ERR_NOTFOUND;
 }
@@ -704,6 +717,10 @@ uint8_t oa2dp_codec_check_config(const oa2dp_codec_caps *local,
             return e;
         if (x->vbr && !l->vbr)
             return OA2DP_A2DP_NOT_SUPPORTED_VBR;
+        uint32_t limit = l->bitrate;
+        if (x->bitrate && (!limit || x->bitrate < limit)) limit = x->bitrate;
+        if (!oa2dp_aac_select_bitrate(limit, 0))
+            return OA2DP_A2DP_NOT_SUPPORTED_BIT_RATE;
         return 0;
     }
     case OA2DP_CODEC_APTX:

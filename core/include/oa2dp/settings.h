@@ -59,7 +59,7 @@ typedef struct {
     oa2dp_sbc_alloc sbc_alloc;
 
     /* AAC */
-    uint32_t aac_bitrate;  /* bit/s, 0 = highest the headset allows */
+    uint32_t aac_bitrate;  /* maximum bit/s; 0 = highest both backends allow */
     bool aac_vbr;
 
     /* LDAC */

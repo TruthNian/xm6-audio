@@ -72,3 +72,8 @@ Windows PowerShell may expose WinRT properties as a COM map. The script
 enumerates key/value entries rather than treating failed dictionary projection
 as an empty set of properties. It reports the queried values without attempting
 to overwrite cached connection flags or guess original music-file formats.
+
+Version53 may report `encoder-unavailable` when no linked/runtime backend can
+satisfy the current policy. This is distinct from a healthy active codec or a
+Bluetooth link failure. Missing AAC activation is checked before advertising
+that SEP; other codecs are used only when the user's enabled policy permits it.

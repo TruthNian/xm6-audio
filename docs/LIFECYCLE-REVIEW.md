@@ -1,5 +1,15 @@
 # Native lifecycle review
 
+## 0.3.53: constrain codec offers to actual backend and policy
+
+The [codec review](CODEC-REVIEW.md) reproduces AAC target overshoot with the
+actual Windows MFT, unavailable AAC being treated as usable, and candidate
+selection/advertisement that ignores fixed user constraints. Shared AAC target
+selection, balanced runtime backend probing and policy-filtered offers correct
+those contracts. New production-body and real-MFT checks cover the failure
+paths without opening a headset or audio endpoint. Hardware fallback and
+connected stability acceptance remain open.
+
 ## 0.3.52: recover interrupted sample-rate changes
 
 Two real AVDTP cores reproduce another lost intent: after a transient SUSPEND

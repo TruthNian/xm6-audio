@@ -199,6 +199,11 @@ int oa2dp_codec_build(const oa2dp_codec_caps *c, uint8_t *buf, size_t cap);
 /* What OpenA2DP can encode for a codec (used for our SEP capabilities). */
 void oa2dp_codec_local_caps(oa2dp_codec_id id, oa2dp_codec_caps *out);
 
+/* Highest supported CBR target for the bundled AAC backend within both
+ * limits. A zero limit is unspecified; zero return means no usable target.
+ * Keep negotiation and the actual MF output type on this same policy. */
+uint32_t oa2dp_aac_select_bitrate(uint32_t peer_limit, uint32_t user_limit);
+
 /* Choose a configuration for one codec from the remote capabilities and the
  * user settings. Returns OA2DP_OK or OA2DP_ERR_UNSUPPORTED when no common
  * configuration exists. `local` may be NULL to use oa2dp_codec_local_caps. */
