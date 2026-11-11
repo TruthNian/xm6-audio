@@ -85,6 +85,7 @@ struct OA2DP_AUDIO_DEVICE {
 };
 static bool locked, mapped;
 static LONGLONG now;
+static ULONG latency_us = 45000;
 static void (*before_lock)();
 static void KeAcquireSpinLock(int *, KIRQL *level) {
     REQUIRE(!locked);
@@ -136,7 +137,7 @@ static void Oa2dpReportStream(OA2DP_AUDIO_DEVICE *d, const OA2DP_FORMAT *, bool 
 }
 static ULONG Oa2dpLatencyUs(OA2DP_AUDIO_DEVICE *) {
     REQUIRE(!locked);
-    return 45000;
+    return latency_us;
 }
 struct PumpCall {
     ULONG Position, Frames;
@@ -165,6 +166,7 @@ class CMiniportWaveRTStream {
     ULONGLONG RunningHns(LARGE_INTEGER);
     VOID Pump(ULONGLONG);
     VOID UpdatePosition(LARGE_INTEGER);
+    VOID UpdatePresentationPosition(ULONG);
     VOID NotifyPackets();
     NTSTATUS GetPosition(KSAUDIO_POSITION *);
     NTSTATUS SetWritePacket(ULONG, DWORD, ULONG);
@@ -183,6 +185,7 @@ class CMiniportWaveRTStream {
     KSSTATE m_KsState;
     LARGE_INTEGER m_PerfFrequency, m_RunStartQpc;
     ULONGLONG m_hnsRunBase, m_ullLinearFrames, m_ullPumpedFrames, m_ullEosFrame;
+    ULONGLONG m_ullPresentationFrames;
     LONGLONG m_llPacketCounter;
     ULONG m_ulLastOsWritePacket;
     BOOLEAN m_bEoSReceived;
@@ -212,6 +215,7 @@ static void reset(CMiniportWaveRTStream &s, KSSTATE state = KSSTATE_RUN) {
     locked = false;
     mapped = true;
     now = 0;
+    latency_us = 45000;
     before_lock = nullptr;
     pumped.clear();
     current = &s;
@@ -351,5 +355,64 @@ int main() {
             s.m_KsState == KSSTATE_STOP);
     REQUIRE(device.Reports == std::vector<bool>({true, false, true, false}));
     REQUIRE(!locked);
-    std::puts("production WaveRT clock/packet checks passed (OS APIs fake)");
+
+    reset(s);
+    now = 100 * OA2DP_HNS_PER_MS;
+    REQUIRE(s.GetOutputStreamPresentationPosition(&presentation) == STATUS_SUCCESS);
+    REQUIRE(presentation.u64PositionInBlocks == 2640); // 100 ms elapsed, 45 ms latency
+    const auto first_presented = presentation.u64PositionInBlocks;
+    latency_us = 90000;
+    now = 110 * OA2DP_HNS_PER_MS;
+    REQUIRE(s.GetOutputStreamPresentationPosition(&presentation) == STATUS_SUCCESS);
+    if (presentation.u64PositionInBlocks < first_presented)
+        std::fprintf(stderr, "presentation regressed from %llu to %llu frames\n",
+            static_cast<unsigned long long>(first_presented),
+            static_cast<unsigned long long>(presentation.u64PositionInBlocks));
+    REQUIRE(presentation.u64PositionInBlocks == first_presented);
+    now = 150 * OA2DP_HNS_PER_MS;
+    REQUIRE(s.GetOutputStreamPresentationPosition(&presentation) == STATUS_SUCCESS);
+    REQUIRE(presentation.u64PositionInBlocks == 2880); // estimate has caught up
+    now = 160 * OA2DP_HNS_PER_MS;
+    REQUIRE(s.SetState(KSSTATE_PAUSE) == STATUS_SUCCESS);
+    now = 1000 * OA2DP_HNS_PER_MS;
+    latency_us = 0;
+    REQUIRE(s.GetOutputStreamPresentationPosition(&presentation) == STATUS_SUCCESS);
+    REQUIRE(presentation.u64PositionInBlocks == 3360); // committed at pause, not last query
+    latency_us = 10000000;
+    REQUIRE(s.GetOutputStreamPresentationPosition(&presentation) == STATUS_SUCCESS);
+    REQUIRE(presentation.u64PositionInBlocks == 3360); // paused latency changes cannot move the clock
+    latency_us = 0;
+    REQUIRE(s.SetState(KSSTATE_RUN) == STATUS_SUCCESS);
+    now += 10 * OA2DP_HNS_PER_MS;
+    REQUIRE(s.GetOutputStreamPresentationPosition(&presentation) == STATUS_SUCCESS);
+    REQUIRE(presentation.u64PositionInBlocks == 8160);
+    REQUIRE(s.SetState(KSSTATE_STOP) == STATUS_SUCCESS);
+    REQUIRE(s.GetOutputStreamPresentationPosition(&presentation) == STATUS_SUCCESS);
+    REQUIRE(presentation.u64PositionInBlocks == 0); // reset is the permitted epoch boundary
+
+    for (ULONG rate : {44100u, 48000u, 88200u, 96000u}) {
+        reset(s);
+        s.m_Format.SampleRate = rate;
+        latency_us = 40000;
+        now = 1000 * OA2DP_HNS_PER_MS;
+        REQUIRE(s.GetOutputStreamPresentationPosition(&presentation) == STATUS_SUCCESS);
+        const UINT64 expected = static_cast<UINT64>(rate) * 960 / 1000;
+        REQUIRE(presentation.u64PositionInBlocks == expected);
+        latency_us = 120000;
+        now = 1010 * OA2DP_HNS_PER_MS;
+        REQUIRE(s.GetOutputStreamPresentationPosition(&presentation) == STATUS_SUCCESS);
+        REQUIRE(presentation.u64PositionInBlocks == expected);
+        now = 1200 * OA2DP_HNS_PER_MS;
+        REQUIRE(s.GetOutputStreamPresentationPosition(&presentation) == STATUS_SUCCESS);
+        REQUIRE(presentation.u64PositionInBlocks == static_cast<UINT64>(rate) * 1080 / 1000);
+    }
+    for (LONGLONG hz : {3000000ll, 10000000ll, 24000000ll}) {
+        reset(s);
+        s.m_PerfFrequency.QuadPart = hz;
+        now = hz / 10; // 100 ms at this counter frequency
+        REQUIRE(s.GetOutputStreamPresentationPosition(&presentation) == STATUS_SUCCESS);
+        REQUIRE(presentation.u64PositionInBlocks == 2640);
+        REQUIRE(presentation.u64QPCPosition == static_cast<UINT64>(now)); // KS uses raw QPC ticks
+    }
+    std::puts("production WaveRT clock/packet/presentation checks passed (OS APIs fake)");
 }

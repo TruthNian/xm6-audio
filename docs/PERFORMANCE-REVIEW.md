@@ -1,8 +1,47 @@
-# PCM computation and output-lifetime review
+# Audio clock, PCM computation and output-lifetime review
 
-Reviewed 2026-11-11 against source 0.3.54 and 0.3.59. The headset was unavailable.
+Reviewed 2026-11-11 against source 0.3.54 and 0.3.59–0.3.60. The headset was unavailable.
 Computational measurements below exclude Windows rendering, scheduling under
 audio load, Bluetooth transmission and headphone playback.
+
+## 0.3.60: keep the presentation clock monotonic across delay updates
+
+The driver estimated presentation position by subtracting the latest transport
+and headset delay from the transferred frame count. Increasing the delay
+could therefore move the reported position backward. The old production body
+reproduces 2640 -> 960 frames at 48 kHz when a 45 ms delay becomes 90 ms while
+RUN time advances from 100 to 110 ms: a 35 ms backward clock step.
+While paused, changing the delay also changed the reported position even
+though the transferred position was frozen.
+
+Commit the presentation estimate under the existing position lock and retain
+the largest value within the stream epoch. When delay increases, the position
+waits for the new estimate to catch up. Commit at RUN -> PAUSE, including time
+since the last query, then freeze while paused. STOP clears the committed
+position; RUN resumes normal advancement. Read device latency before acquiring
+the position lock, so this change introduces no nested device/position locks.
+DMA position, packet counts, notification cadence and PCM samples are unchanged.
+
+This follows the upper-layer
+[audio clock contract](https://learn.microsoft.com/en-us/windows/win32/api/audioclient/nf-audioclient-iaudioclock-getposition)
+that successive device positions do not decrease and a stopped client clock
+is frozen until restart/reset. The WaveRT
+[presentation position](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/portcls/nf-portcls-iminiportwavertoutputstream-getoutputstreampresentationposition)
+is used by upper layers for synchronization. Keep the kernel structure's QPC
+field in [raw counter ticks](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ksmedia/ns-ksmedia-ksaudio_presentation_position);
+its units differ from the converted user-mode IAudioClock timestamp.
+
+The existing production WaveRT fixture reproduces the old backward step and
+checks delay growth/catch-up at 44.1/48/88.2/96 kHz, pause-time commit, changes
+while paused, resume, STOP reset and raw timestamps at three QPC frequencies.
+OS timing, latency reports and buffer transfers are controlled. This establishes
+the clock arithmetic and state contract, not accurate remote playback position,
+physical lip sync or resolution of the reported Chrome audio stutter. The
+estimate still depends on reported headset delay and does not measure actual
+radio, encoder and receiver queue latency.
+
+The local native x64 Release build and all 28 checks pass. Exact-source CI
+and runtime activation are recorded separately after verification.
 
 ## 0.3.59: send complete batched frames before waiting for PCM
 

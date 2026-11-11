@@ -59,6 +59,7 @@ private:
     // All below with m_PositionSpinLock held.
     ULONGLONG RunningHns(_In_ LARGE_INTEGER Qpc);
     VOID UpdatePosition(_In_ LARGE_INTEGER Qpc);
+    VOID UpdatePresentationPosition(_In_ ULONG LatencyUs);
     VOID Pump(_In_ ULONGLONG ToFrame);
     VOID NotifyPackets();
 
@@ -82,6 +83,7 @@ private:
     ULONGLONG                   m_hnsRunBase;       // time spent in RUN before m_RunStartQpc
     ULONGLONG                   m_ullLinearFrames;  // frames played since STOP
     ULONGLONG                   m_ullPumpedFrames;  // frames copied to the ring
+    ULONGLONG                   m_ullPresentationFrames; // monotonic within a stream epoch
     LONGLONG                    m_llPacketCounter;  // completed packets (event mode)
     ULONG                       m_ulLastOsWritePacket;
     BOOLEAN                     m_bEoSReceived;

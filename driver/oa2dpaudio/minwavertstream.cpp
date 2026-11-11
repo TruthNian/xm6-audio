@@ -103,6 +103,7 @@ CMiniportWaveRTStream::Init
     m_hnsRunBase = 0;
     m_ullLinearFrames = 0;
     m_ullPumpedFrames = 0;
+    m_ullPresentationFrames = 0;
     m_llPacketCounter = 0;
     m_ulLastOsWritePacket = ULONG_MAX;
     m_bEoSReceived = FALSE;
@@ -557,6 +558,18 @@ VOID CMiniportWaveRTStream::UpdatePosition(_In_ LARGE_INTEGER Qpc)
     NotifyPackets();
 }
 
+#pragma code_seg()
+VOID CMiniportWaveRTStream::UpdatePresentationPosition(_In_ ULONG LatencyUs)
+{
+    const ULONGLONG latencyFrames = HnsToFrames((ULONGLONG)LatencyUs * 10, m_Format.SampleRate);
+    const ULONGLONG presented = m_ullLinearFrames > latencyFrames ?
+        m_ullLinearFrames - latencyFrames : 0;
+    // A revised delay estimate cannot undo samples already reported as played.
+    // Keep the position until the new estimate catches up; STOP resets it.
+    if (presented > m_ullPresentationFrames)
+        m_ullPresentationFrames = presented;
+}
+
 //=============================================================================
 #pragma code_seg()
 STDMETHODIMP_(NTSTATUS)
@@ -676,11 +689,11 @@ CMiniportWaveRTStream::GetOutputStreamPresentationPosition
 {
     KIRQL oldIrql;
     LARGE_INTEGER qpc;
-    ULONGLONG linear;
-    ULONGLONG latencyFrames;
 
     ASSERT (pPresentationPosition);
 
+    // Read device latency before the position lock: never nest their locks.
+    const ULONG latencyUs = Oa2dpLatencyUs(m_Device);
     KeAcquireSpinLock(&m_PositionSpinLock, &oldIrql);
     // The call must be from event driven mode. Buffer release uses this lock.
     if (m_ulNotificationsPerBuffer == 0)
@@ -693,15 +706,11 @@ CMiniportWaveRTStream::GetOutputStreamPresentationPosition
     if (m_KsState == KSSTATE_RUN)
     {
         UpdatePosition(qpc);
+        UpdatePresentationPosition(latencyUs);
     }
-    linear = m_ullLinearFrames;
-    KeReleaseSpinLock(&m_PositionSpinLock, oldIrql);
-
-    // What the listener hears lags what we handed to the service by the
-    // transport and headset delay (lip sync, F4.4).
-    latencyFrames = HnsToFrames((ULONGLONG)Oa2dpLatencyUs(m_Device) * 10, m_Format.SampleRate);
-    pPresentationPosition->u64PositionInBlocks = linear > latencyFrames ? linear - latencyFrames : 0;
+    pPresentationPosition->u64PositionInBlocks = m_ullPresentationFrames;
     pPresentationPosition->u64QPCPosition = (UINT64)qpc.QuadPart;
+    KeReleaseSpinLock(&m_PositionSpinLock, oldIrql);
 
     return STATUS_SUCCESS;
 }
@@ -747,6 +756,7 @@ CMiniportWaveRTStream::SetState
 {
     KIRQL oldIrql;
     LARGE_INTEGER qpc;
+    const ULONG latencyUs = Oa2dpLatencyUs(m_Device);
     KeAcquireSpinLock(&m_PositionSpinLock, &oldIrql);
     const BOOLEAN wasRunning = (m_KsState == KSSTATE_RUN);
 
@@ -757,6 +767,7 @@ CMiniportWaveRTStream::SetState
             m_llPacketCounter = 0;
             m_ullLinearFrames = 0;
             m_ullPumpedFrames = 0;
+            m_ullPresentationFrames = 0;
             m_hnsRunBase = 0;
             // Reset OS write positions
             m_ulLastOsWritePacket = ULONG_MAX;
@@ -774,6 +785,7 @@ CMiniportWaveRTStream::SetState
                 // the timer after committing the new state below.
                 qpc = KeQueryPerformanceCounter(NULL);
                 UpdatePosition(qpc);
+                UpdatePresentationPosition(latencyUs); // freeze at pause, including time since the last query
                 m_hnsRunBase = RunningHns(qpc);
             }
             break;
