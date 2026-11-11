@@ -30,11 +30,15 @@ clears that restriction and remains independent of the native package.
 
 ## Acceptance scope
 
-The legacy name was corrected on the Windows 10 development host before the
-version bump. Core Audio and PnP both returned the headset name; defaults,
-format, volume and mute migrated, and an existing player resumed producing
-signal. Driver unload/reload retained the correct name. Exact 0.4.0 package and
-loaded-image verification belongs in the [hardware record](HARDWARE-BRINGUP.md).
+The final package from source `c3287bf56cbe989c7f2f51bfa4b736d9c5a47b28`
+is installed on the Windows 10 development host. Both actual kernel images and
+the running service match the same 0.4.0.0 package. After upgrade and a Bluetooth
+radio cycle, Core Audio, PnP and the underlying public interface name all identify
+WH-1000XM6. Default roles, mix format, volume and mute were preserved. A short
+controlled signal reached the endpoint and LDAC transport. The native build,
+32 local tests, installation/recovery fixtures and exact-source Linux/Windows CI
+passed. See the [hardware record](HARDWARE-BRINGUP.md) for evidence and scope.
+No computer restart, new certificate trust or boot-policy change was performed.
 
 The historical 0.3.61 Settings connection-state acceptance remains valid as
 historical evidence. This naming change does not establish new listening,

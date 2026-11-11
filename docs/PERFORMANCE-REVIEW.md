@@ -34,8 +34,9 @@ older services report it as unknown. The legacy `Bits` value is retained for
 compatibility and must not be interpreted as the native adapter representation,
 source-file precision or lossless wireless precision. This changes reporting,
 not PCM, codec selection, shared mixing or Bluetooth bandwidth.
-Both user-mode fixes are activated with the 0.3.65 service while retaining the
-unchanged 0.3.64 kernel drivers. Actual status reports native int32 input; see
+Both user-mode fixes were initially activated with the 0.3.65 service while
+retaining the unchanged 0.3.64 kernel drivers; the current deployment unifies
+both drivers and the service at 0.4.0.0. Actual status reports native int32 input; see
 the [activation and deliberate restart interval](HARDWARE-BRINGUP.md#0365-user-mode-activation-retaining-0364-drivers-2026-11-11).
 
 ## 0.3.63: precision-only changes also delimit PCM epochs

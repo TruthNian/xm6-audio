@@ -10,9 +10,9 @@ English · [简体中文](README.zh-CN.md)
 
 XM6 Audio adds an A2DP profile driver and a WaveRT render endpoint while Windows continues to own the Bluetooth radio, pairing, volume UI and AVRCP media-control stack. The WH-1000XM6 is the initial hardware acceptance target.
 
-> **Development status:** the native drivers, service and codec checks build in CI. Microsoft kernel signing and native headset acceptance are still pending. CI artifacts are unsigned development candidates, not installable releases for a normally protected Windows system.
+> **Development status:** 0.4.0 is deployed and verified on the development host using its existing local test signature. Microsoft production signing and broader hardware qualification remain outstanding. Public packages are unsigned developer artifacts, not installable releases for a normally protected Windows system.
 
-The [controlled developer trial](docs/HARDWARE-BRINGUP.md) established native playback and controls on 0.3.44, with reported YouTube audio stutter. Version 0.3.50 fixed the independently reproduced offline false-Connected path. On 0.3.61, the user confirmed **Paired before connection and correct Windows display after connecting and disconnecting**. Chrome audio stability remains unaccepted.
+The [controlled developer trial](docs/HARDWARE-BRINGUP.md) established native playback and controls on 0.3.44, with reported YouTube audio stutter. Version 0.3.50 fixed the independently reproduced offline false-Connected path. On 0.3.61, the user confirmed **Paired before connection and correct Windows display after connecting and disconnecting**, and later reported no renewed Chrome stutter during their tests. Those observations retain their recorded version and scope.
 
 Version **0.4.0** consolidates both native drivers and the codec service into one package. It adds selected-device installation that refreshes legacy endpoint names, including when reinstalling the same package. On the development host, Windows now reports **Headphones (WH-1000XM6)** through Core Audio and PnP; name persistence was checked after actual driver unload/reload. Windows migrated the default output and preserved the mix format, volume and mute. See the [name investigation](docs/ENDPOINT-IDENTITY-REVIEW.md), [0.4.0 scope](docs/RELEASE-0.4.0.md) and [deployment record](docs/HARDWARE-BRINGUP.md).
 

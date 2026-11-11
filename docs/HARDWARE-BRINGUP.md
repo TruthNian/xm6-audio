@@ -2,9 +2,10 @@
 
 The controlled developer trial targets WH-1000XM6 on Windows 10 x64, build 19045. It uses a local development signature under explicitly authorized test signing. This is separate from the production installer, which still requires Microsoft-signed catalogs.
 
-Current runtime uses **0.3.64 kernel drivers and the 0.3.65 service**, each
-verified against its recorded local package. Native LDAC input and complete PCM
-format epochs are deployed; the legacy Core Audio name was subsequently repaired through a selected-device reinstall; see the 0.4.0 record below.
+Current runtime uses **0.4.0.0 for both kernel drivers and the codec service**,
+verified against one exact source package. The legacy endpoint name is repaired
+in the installed 0.4.0 package; native LDAC input and complete PCM format epochs
+are retained. See the final activation record below.
 The user's acceptance of **Paired while disconnected** and correct Settings
 connect/disconnect display belongs to 0.3.61 and remains recorded below.
 Passive Chrome/QQ Music and PotPlayer observations were also collected on
@@ -18,7 +19,36 @@ started approximately twelve seconds after boot without a manual start in the
 post-boot session. This establishes automatic service startup, not complete
 automatic audio/reconnect acceptance.
 
-## 0.4.0 preparation and endpoint migration (2026-11-12)
+## 0.4.0 final activation and endpoint migration (2026-11-12)
+
+Final package source is `c3287bf56cbe989c7f2f51bfa4b736d9c5a47b28`.
+The native Release build and 32/32 local tests passed, together with installer
+and standalone recovery fixtures. The exact source passed
+[Linux sanitizer and Windows native CI](https://github.com/TruthNian/xm6-audio/actions/runs/43060710088).
+The unsigned artifact SHA-256 is
+`be074290ec2b98ff9c9aeeb2b562046fca298e300b0b809c9394cd2b0962daa6`.
+Local signing changed only the two SYS and two CAT files; catalog membership,
+protected staging, selected packages and running images were verified.
+
+At 00:44 local time, both loaded kernel drivers and the actual service executable
+matched this package at **0.4.0.0**. One Bluetooth radio cycle completed the
+driver replacement without restarting the computer. Both devices' current
+restart/reboot flags are clear. The selected transport, service registration and
+running service all resolve to this exact candidate, including when older
+0.4.0 candidates exist in Driver Store.
+
+After this upgrade and real kernel unload/reload, Core Audio and PnP both
+returned `耳机 (WH-1000XM6)`; the underlying public interface FriendlyName was
+`WH-1000XM6`. No active placeholder endpoint remained. All three render defaults
+pointed to the correct endpoint; capture defaults, 96 kHz float32 stereo mix,
+master volume and mute were preserved. With no music/video player running,
+a 12-second low-level controlled render signal produced a nonzero endpoint peak
+and LDAC transmission at 96 kHz, about 1.01 Mbit/s including protocol overhead.
+The existing HQ/no-ABR policy was retained. The test then stopped normally.
+This verifies the name, coherent runtime and signal/transport path; it is not
+a new listening test or a post-fix computer-reboot test.
+
+Earlier attempts and same-package migration:
 
 The user's reboot reproduced the old endpoint name. Reinstalling the same
 verified 0.3.64 render package via `DiInstallDevice` at 00:05 local time corrected
@@ -32,8 +62,9 @@ for the bounded failed probes and persistence-test limitation.
 
 The two historical audio-interruption investigations are closed at the user's
 request. This is a scope decision, not a diagnosis or a claim of repair.
-Unified 0.4.0 package activation and exact loaded-image verification follow
-the source/CI checks; preparation is not recorded as completed deployment.
+The final activation above supersedes the mixed 0.3.64/0.3.65 runtime.
+Hardware-specific lifecycle and format acceptance beyond this naming scope
+retain their separate status; the release is not general production certification.
 
 ## 0.3.65 user-mode activation, retaining 0.3.64 drivers (2026-11-11)
 
