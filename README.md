@@ -4,13 +4,13 @@
 
 [![Native build](https://github.com/TruthNian/xm6-audio/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/TruthNian/xm6-audio/actions/workflows/ci.yml)
 [![Core license: MIT](https://img.shields.io/badge/core_license-MIT-blue.svg)](LICENSE)
-[![Status: prototype](https://img.shields.io/badge/status-prototype-yellow.svg)](docs/ROADMAP.md)
+[![Status: stable for validated configuration](https://img.shields.io/badge/status-0.4.0%20stable%20%28validated%20configuration%29-green.svg)](docs/ROADMAP.md)
 
 English · [简体中文](README.zh-CN.md)
 
 XM6 Audio adds an A2DP profile driver and a WaveRT render endpoint while Windows continues to own the Bluetooth radio, pairing, volume UI and AVRCP media-control stack. The WH-1000XM6 is the initial hardware acceptance target.
 
-> **Development status:** 0.4.0 is deployed and verified on the development host using its existing local test signature. Microsoft production signing and broader hardware qualification remain outstanding. Public packages are unsigned developer artifacts, not installable releases for a normally protected Windows system.
+> **Release status:** 0.4.0 is the stable baseline for the validated WH-1000XM6 / Windows 10 x64 development-host configuration. Feature and platform expansion are paused by the project owner's decision on 2026-11-12. The installed package retains its existing local test signature. Public packages remain unsigned: normal protected Windows installation requires Microsoft production signing. Other headsets and Windows 11 are not qualified by this release.
 
 The [controlled developer trial](docs/HARDWARE-BRINGUP.md) established native playback and controls on 0.3.44, with reported YouTube audio stutter. Version 0.3.50 fixed the independently reproduced offline false-Connected path. On 0.3.61, the user confirmed **Paired before connection and correct Windows display after connecting and disconnecting**, and later reported no renewed Chrome stutter during their tests. Those observations retain their recorded version and scope.
 

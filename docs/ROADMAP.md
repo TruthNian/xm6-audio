@@ -1,6 +1,21 @@
 # Roadmap and acceptance
 
-The repository contains a buildable native prototype. The initial hardware target is WH-1000XM6 on Windows 10 x64. Updated 2026-11-11.
+Version 0.4.0 is the stable baseline for the validated WH-1000XM6 / Windows 10
+x64 development-host configuration. Updated 2026-11-12.
+
+## Current maintenance decision
+
+The project owner has paused feature expansion and additional headset/OS
+adaptation. There is no active effort to broaden support or pursue speculative
+optimization. Microsoft production signing remains a distribution prerequisite,
+separate from this stable designation; the public package is still unsigned.
+The tested source tag, artifacts and local deployment are unchanged. A newly
+reported defect or explicit owner direction can reopen development.
+
+The qualification items below are retained as evidence boundaries for any
+future wider release. They are deferred, not newly passed tests or active tasks.
+Earlier version observations remain historical; the current deployment is
+recorded in [HARDWARE-BRINGUP.md](HARDWARE-BRINGUP.md).
 
 ## Implemented and covered by build / focused checks
 
@@ -17,15 +32,15 @@ The repository contains a buildable native prototype. The initial hardware targe
 - Standalone inbox A2DP recovery, independent of native service registration and package integrity, with class-independent address-scoped selection.
 - Public CMake/MSVC/WDK CI, pinned dependencies, license bundle and source/hash manifest.
 
-## Required before native deployment is accepted
+## Remaining qualification for broader support (deferred)
 
-1. **A legitimate Microsoft-signed package.** The [free-signing inquiry](https://github.com/SignPath/fdn-website/issues/28) is open; no approval exists. Normal boot protection is retained.
+1. **A legitimate Microsoft-signed package.** The [free-signing inquiry](https://github.com/SignPath/fdn-website/issues/28) is recorded; no production signature has been obtained. The development host uses explicitly authorized test signing; normal protected Windows distribution still needs production signing.
 2. **Real audio and controls.** Controlled local trials confirmed audible QQ Music through native LDAC HQ, PotPlayer video sound, manual play/pause/previous/next, wearing-detection pause/resume and bidirectional headset/Windows master volume. Sound was also confirmed after the 0.3.18 restart. Mute and automatic recovery for existing clients remain unaccepted. Packet counters or reopening a player do not satisfy this requirement.
 3. **Format correctness.** Verify shared/exclusive streams, 32-bit integer/float and 24-in-32, supported sample-rate transitions and actual negotiated codec. The fixed LDAC 48 kHz/24-bit/HQ profile must produce its requested output or report failure.
 4. **Lifecycle.** Version 0.3.61 is activated with verified actual images and service, without a computer restart. The user confirmed **Paired before connection and correct display after connection/disconnection**; that Settings-state requirement is accepted on this host. One standard single-device disconnect/reconnect cleared AEP/container state and restored 96 kHz LDAC HQ submission without restarting players or the service. Ordinary disconnect now interrupts service control waits, preserving earlier lifecycle/PCM corrections. All 28 local checks and source CI pass. Audible existing-client recovery, broader reconnect conditions, Chrome audio stability and sleep/resume remain unaccepted. See the [lifecycle review](LIFECYCLE-REVIEW.md), [performance review](PERFORMANCE-REVIEW.md) and [event-chain review](EVENT-CHAIN-REVIEW.md).
 5. **Timing and driver behavior.** Version60 fixes a reproduced backward presentation-clock step during delay updates, with pause/freeze/reset and raw QPC checks. Version59 sends complete batched RTP tails before waiting for PCM. Physical synchronization, actual SBC packet efficiency, audible latency and Chrome stability remain unmeasured. Check video presentation timing and run appropriate driver diagnostics on a controlled system.
 
-## Future work, after the initial native path is validated
+## Deferred ideas, requiring renewed scope
 
 Improve measured latency and queue behavior, broaden tested headset/radio combinations, and evaluate additional Windows/architecture targets. LE Audio/LC3 requires a separate supported platform/transport path; an A2DP capability parser is not an LE Audio implementation.
 

@@ -1,5 +1,13 @@
 # XM6 Audio development
 
+As of the owner's 2026-11-12 decision, 0.4.0 is the stable baseline for the
+validated WH-1000XM6 / Windows 10 x64 host configuration. Feature expansion,
+speculative optimization and additional headset/OS adaptation are paused.
+Do not proactively rebuild or redeploy the working package. Resume development
+only for a newly reported defect or explicit user direction. Keep release
+stability, signing availability and hardware qualification as separate claims;
+the public artifact remains unsigned and the local deployment is test-signed.
+
 Implement a real Windows Bluetooth A2DP profile and standard XM6 render endpoint. Windows owns BTHUSB/BTHPORT, pairing, AVRCP/HFP and device discovery. Do not reintroduce WinUSB radio ownership, system loopback capture, simulated keyboard control or a runtime launcher/watchdog.
 
 Match the actual Windows PCM stream rather than forcing 48 kHz/24 bit. The user's latest corrections supersede the earlier fixed-format target and LDAC-only default. Support integer 16/24/32 and float32 PCM, distinguishing container width, useful precision and representation (including 24-in-32). Preserve supported sample rates and quantize once at the encoder's actual precision boundary. Prefer LDAC HQ, then AAC/SBC based on peer capabilities; retain explicit codec-only profiles, and always report actual negotiation. Keep LDAC HQ (909 kbps for 44.1/88.2 kHz, 990 kbps for 48/96 kHz) without ABR by default. Keep an explicit fixed 48 kHz/24-bit/LDAC-only profile for diagnostics. Never mistake a shared-mode mix format for original file metadata or call a downgrade the fixed-target success. File decoding belongs to the player/Windows pipeline; LC3 is LE Audio and is not an A2DP feature on this Windows 10 host.

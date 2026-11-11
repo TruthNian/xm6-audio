@@ -1,5 +1,10 @@
 # Native hardware bring-up
 
+On 2026-11-12 the project owner designated the installed 0.4.0 package as the
+stable baseline for this validated configuration and paused feature/platform
+expansion. This is a release decision, not additional test evidence. No binaries
+or deployment settings changed when the prerelease was promoted.
+
 The controlled developer trial targets WH-1000XM6 on Windows 10 x64, build 19045. It uses a local development signature under explicitly authorized test signing. This is separate from the production installer, which still requires Microsoft-signed catalogs.
 
 Current runtime uses **0.4.0.0 for both kernel drivers and the codec service**,

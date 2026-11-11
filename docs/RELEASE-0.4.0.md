@@ -1,9 +1,14 @@
 # XM6 Audio 0.4.0
 
 This version unifies the native transport driver, WaveRT endpoint driver and
-codec service. It is a developer release with a controlled, locally test-signed
-deployment. Public CI packages remain unsigned; Microsoft production signing
-and broad hardware qualification are not implied by the version number.
+codec service. On 2026-11-12, the project owner designated this exact package
+as the stable baseline for the validated WH-1000XM6 / Windows 10 x64 host
+configuration and paused feature expansion and additional device/OS adaptation.
+This changes release status only: source tag, binary artifacts, hashes and the
+installed package remain unchanged. Public packages remain unsigned; the host
+retains its existing local test signature. Normal protected Windows installation
+still requires Microsoft production signing. Stability classification does not
+extend the recorded hardware qualification or assert that unknown bugs cannot exist.
 
 ## Change
 
