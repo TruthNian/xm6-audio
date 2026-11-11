@@ -329,6 +329,24 @@ int main() {
     {
         Session s;
         now = 100;
+        s.peer_configure_and_start(96000);
+        s.reconcile_peer_configuration();
+        s.have_remote_caps_ = false;
+        s.audio_format_.SampleRate = 48000;
+        s.during_request = [&](uint8_t signal) {
+            if (signal != OA2DP_AVDTP_GET_ALL_CAPABILITIES) return;
+            CHECK(oa2dp_avdtp_suspend(&s.peer_, s.peer_seid_) >= 0);
+            auto pause = std::move(s.packets.back());
+            s.packets.pop_back();
+            s.packets.push_front(std::move(pause));
+        };
+        s.reconfigure_rate(48000); // peer pause crosses our capability request
+        CHECK(!s.streaming_ && !s.rate_resume_pending_ && !s.starts);
+        CHECK(oa2dp_codec_sample_rate(&s.config_) == 48000);
+    }
+    {
+        Session s;
+        now = 100;
         s.peer_configure_and_start(48000);
         s.reconcile_peer_configuration();
         s.suspend_stream();

@@ -27,6 +27,11 @@ backoff, and stop/replacement-connection/peer ABORT during either protocol
 boundary. The peer rejection and OS/encoder boundaries remain controlled;
 none establishes radio or audible acceptance.
 
+Version52 was then activated and its actual kernel/service payload hashes
+verified without rebooting the computer. All 21 local checks and source CI
+passed. The offline state and installed Paired-label resource were also
+verified separately; see [the runtime record](HARDWARE-BRINGUP.md).
+
 ## 0.3.51: timeout classification, delay delivery and RTP failure propagation
 
 The expanded [event-chain review](EVENT-CHAIN-REVIEW.md) found three additional

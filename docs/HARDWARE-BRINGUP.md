@@ -2,14 +2,34 @@
 
 The controlled developer trial targets WH-1000XM6 on Windows 10 x64, build 19045. It uses a local development signature under explicitly authorized test signing. This is separate from the production installer, which still requires Microsoft-signed catalogs.
 
-Latest source audit: [0.3.51 event-chain review](EVENT-CHAIN-REVIEW.md). Version
-0.3.51 is now activated with verified loaded images; see the following record.
+Latest source audit: [0.3.52 event-chain review](EVENT-CHAIN-REVIEW.md). Version
+0.3.52 is now activated with verified loaded images; see the following record.
 Earlier runtime observations apply to 0.3.44. After its authorized
 deployment and a user restart, both actual loaded kernel images and the running
 service matched the verified local test-signed candidate. The service process
 started approximately twelve seconds after boot without a manual start in the
 post-boot session. This establishes automatic service startup, not complete
 automatic audio/reconnect acceptance.
+
+## 0.3.52 activation and label-resource clarification (2026-11-11)
+
+Source `ca3761525ff28a6403b2afbb41918b6a63377dd3` adds failed-rate-change
+recovery. All 21 local checks and [source CI](https://github.com/TruthNian/xm6-audio/actions/runs/42982362029)
+passed. The locally built package was signed using the existing certificate
+and activated through a radio cycle; no computer reboot, boot/trust or privacy
+change was made. Both actual kernel images and the running service matched
+the signed version52 payload hashes. Current transport/render install flags
+requested no restart.
+
+All 267 display-trace events decoded with zero event/buffer loss. The final
+target transition was Disconnected(3) at approximately 5658 ms, with another
+5001 ms of observation afterward. AEP Paired=True/Connected=False, container
+Connected=False and the disconnected native session agreed. This enum is not
+literal UI text: the expected English label is **Paired**. SDK MakePRI read
+the installed Windows EN-US resources for both
+`SystemSettings_Device_Bluetooth_Disconnected` and `DisconnectedAudio`; both
+have value `Paired`. This verifies resource text, not the rendered window or
+button behavior. No new connected headset acceptance is claimed.
 
 ## 0.3.50/0.3.51 offline-state acceptance (2026-11-11)
 

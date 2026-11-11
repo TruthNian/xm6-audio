@@ -47,7 +47,7 @@ Failed rate transitions also retain configuration work. One local resume bit
 remembers that a rate change interrupted an accepted stream, without treating
 a peer pause as a request to restart. Retry uses the current PCM target and
 revalidates connection/SEP identity after protocol waits. An accepted rate
-with a failed START retries admission without repeating the rate change.
+with a failed START retries that START without repeating the rate change.
 
 The format contract distinguishes sample rate, channels, container width, valid precision and integer/float representation. Integer32 remains integer32 in the shared ring; 24-in-32 follows WAVEFORMATEXTENSIBLE's left-aligned precision convention. Conversion to 16/24 useful bits occurs at the selected encoder boundary.
 

@@ -6,7 +6,9 @@
 
 本机已验证 0.3.50 的两个实际加载驱动和运行中的服务，通过一次蓝牙关闭／开启完成激活，没有重启电脑。耳机不在场时，Windows 实际显示模型最终保持 Disconnected，修复了已独立复现的离线误显示 Connected 路径。用户此前对 QQ 音乐、PotPlayer、系统提示声及蓝牙控制的确认，以及 YouTube 音频卡顿报告，适用于 0.3.44。**真实连接后的单设备断开／重连、已有播放器恢复及 Chrome 稳定性仍待验收。**
 
-0.3.51 的[事件链审查](docs/EVENT-CHAIN-REVIEW.md)进一步修正了超时事件被当成耳机命令、延迟通知失败丢失和 RTP 错误静默丢音；发送线程自身也要求已接受 START 的 STREAMING 状态。全部 21 项本地检查及[源码 CI](https://github.com/TruthNian/xm6-audio/actions/runs/42979844718)通过。当前两个实际驱动及运行中的服务已核对为 0.3.51，Windows 离线状态仍正确保持未连接，无需重启电脑。总线 ABI 6 保持不变，未声称已测得 CPU／延迟或听感收益。详见[生命周期审查](docs/LIFECYCLE-REVIEW.md)和[开发记录](docs/HARDWARE-BRINGUP.md)。**不要加载 0.3.5 候选驱动**：该版属性表布局错误曾导致开发机蓝屏，0.3.6 已修正并增加离线 PE/PDB 检查。
+当前实际运行版本为 **0.3.52**，两个已加载驱动及运行中的服务均与本机签名包哈希核对一致，无需重启电脑。它在 SUSPEND／RECONFIGURE／START 失败后保留采样率切换请求，并尊重耳机主动暂停及连接替换。全部 21 项本地检查及[源码 CI](https://github.com/TruthNian/xm6-audio/actions/runs/42982362029)通过，包含 0.3.51 的超时分类、延迟通知及 RTP 错误修正。总线 ABI 6 保持不变，未声称已测得 CPU／延迟或听感收益。详见[事件链审查](docs/EVENT-CHAIN-REVIEW.md)、[生命周期审查](docs/LIFECYCLE-REVIEW.md)和[开发记录](docs/HARDWARE-BRINGUP.md)。**不要加载 0.3.5 候选驱动**：该版属性表布局错误曾导致开发机蓝屏，0.3.6 已修正并增加离线 PE/PDB 检查。
+
+已配对但未连接时，英文界面应显示 **Paired**。`Disconnected(3)` 是 Windows 内部状态枚举；已直接读取本机 Windows 资源，两个对应蓝牙未连接标签的英文值均为 `Paired`。内部状态、AEP／容器状态和资源文字已分别核对，实际屏幕标签及按钮仍需保留为独立验收项目。
 
 `follow_source_rate` 这个兼容配置名实际表示“跟随端点 PCM 采样率”，不读取播放器文件或 Hi-Res／SQ 标签。共享模式下，多个应用先按一个 Windows 端点格式混音；96 kHz 文件进入 48 kHz 混音时，驱动仍只收到 48 kHz。逐文件自动选择共享混音格式尚未实现。播放器可通过独占模式直接提交支持的格式，但会排除其他应用同时使用该端点。
 
