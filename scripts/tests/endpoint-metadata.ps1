@@ -33,7 +33,7 @@ try {
                 }
                 $actual = $case.GetValue('FriendlyName')
                 if($null -ne $name -and $actual -cne $name){throw "$section overwrote '$name' with '$actual'"}
-                if($null -eq $name -and [string]::IsNullOrEmpty($actual)){throw "$section has no clean-install fallback"}
+                if($null -eq $name -and $null -ne $actual){throw "$section injected a placeholder before the driver supplied a name: '$actual'"}
                 if(-not $case.GetValue('CLSID')){throw "$section lost KS proxy registration"}
                 if($section -eq 'Oa2dpAudio.I.Topology') {
                     $ep = $case.OpenSubKey('EP\0')
@@ -44,7 +44,7 @@ try {
             } finally {$case.Dispose()}
         }
     }
-    'Production INF: clean defaults and existing per-device names preserved (six isolated HKCU cases).'
+    'Production INF: fresh interfaces remain unnamed until driver publication; existing names and endpoint settings preserved (six isolated HKCU cases).'
 } finally {
     $root.Dispose()
     [Microsoft.Win32.Registry]::CurrentUser.DeleteSubKeyTree($relative,$false)

@@ -67,15 +67,15 @@ AddReg = Oa2dpAudio.I.Wave.AddReg
 
 [Oa2dpAudio.I.Wave.AddReg]
 HKR,,CLSID,,%Proxy.CLSID%
-; Preserve the per-headset name across driver updates (FLG_ADDREG_NOCLOBBER).
-HKR,,FriendlyName,0x00000002,%WaveName%
+; The driver supplies each headset's name before enabling its KS interfaces.
+; Do not seed a placeholder here: NOCLOBBER still writes it to a fresh
+; interface key during a package upgrade, where Windows can cache it.
 
 [Oa2dpAudio.I.Topology]
 AddReg = Oa2dpAudio.I.Topology.AddReg
 
 [Oa2dpAudio.I.Topology.AddReg]
 HKR,,CLSID,,%Proxy.CLSID%
-HKR,,FriendlyName,0x00000002,%TopologyName%
 HKR,EP\0,%PKEY_AudioEndpoint_Association%,,%KSNODETYPE_ANY%
 HKR,EP\0,%PKEY_AudioEndpoint_Supports_EventDriven_Mode%,0x00010001,0x1
 ; Initial shared-mode format: 48 kHz stereo float32. This is a default,
@@ -112,8 +112,6 @@ ProviderName = "XM6 Audio Project"
 DiskName     = "XM6 Audio Driver Package"
 DeviceDesc   = "XM6 Audio Bluetooth Headphones"
 ServiceDesc  = "XM6 Audio Endpoint"
-WaveName     = "XM6 Audio Wave"
-TopologyName = "XM6 Audio Topology"
 
 KSNAME_Wave     = "WaveOa2dp"
 KSNAME_Topology = "TopologyOa2dp"

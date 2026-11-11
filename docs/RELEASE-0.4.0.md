@@ -11,7 +11,11 @@ Installing an already-selected package could leave Windows displaying
 `Headphones (XM6 Audio Topology)` despite correct driver interface names and a
 computer reboot. The installer now performs a selected-device installation
 with the verified render INF, so Windows rebuilds its endpoint metadata and
-migrates settings. The existing name-publication ordering/NOCLOBBER fixes remain.
+migrates settings. Both INF placeholder names are removed: NOCLOBBER protected
+existing values but still seeded a wrong name when an upgrade created a fresh
+interface key. The driver already waits for the real name before exposing its
+filters, so the static fallback served no purpose. Name publication remains
+ordered before filter registration.
 The 0.3.65 concurrent stop/rate-selection fix and actual encoder-input reporting
 are included in the same version as both drivers.
 

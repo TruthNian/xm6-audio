@@ -124,6 +124,17 @@ retain their separate evidence and status.
 
 ## Legacy endpoint migration verified before 0.4.0 (2026-11-12)
 
+The first 0.4.0 upgrade candidate exposed a further gap: installing a **new**
+package reintroduced the INF placeholder, despite the successful same-package
+repair and unload/reload checks below. It was not accepted as the final release.
+NOCLOBBER only protects an existing registry value; it still creates a
+placeholder in a fresh interface key. Both static FriendlyName entries and
+their unused strings have now been removed from the render INF. Deferred
+filter creation already ensures the driver publishes the real headset name
+first. The production-INF regression fails on the old fresh-key behavior and
+passes on the new sections, preserving existing names and KS/endpoint settings.
+Final package-upgrade acceptance is recorded in the hardware record.
+
 A user reboot still left the Core Audio adapter label at `XM6 Audio Topology`.
 The current render PDO and all five KS interfaces already published
 `WH-1000XM6`. The topology jack container matched the PnP container. A readonly
