@@ -75,6 +75,58 @@ to a shared-read JSONL stream and writes the final array after closing it.
 These disjoint captures must not be reported as uninterrupted monitoring.
 Further rate-change observation continues separately from these completed results.
 
+### Continuous speed-change trace and an unresolved PCM supply gap
+
+A 612.796-second capture on the same 0.3.62 runtime ran from 20:56:53 to
+21:07:06. It included 120 paired Core Audio/GSMTC snapshots, approximately
+five seconds apart. Chrome was active with nonzero signal at every snapshot;
+QQ Music and PotPlayer were paused. The native endpoint ID and all three
+render defaults remained unchanged. Reported rates and sampled coverage were:
+
+| Chrome rate | Samples | Longest consecutive first-to-last sample span |
+|---|---:|---:|
+| 0.25x | 32 | 157.736 s |
+| 0.3x | 1 | Single observation |
+| 0.5x | 7 | 30.576 s |
+| 1x | 2 | 5.097 s |
+| 1.5x | 11 | 51.000 s |
+| 1.75x | 1 | Single observation |
+| 2x | 66 | 199.708 s |
+
+These spans are bounded by snapshots; they are not precise transition times or
+equal-duration acceptance tests. There were 115,105 decoded events, no trace
+loss, 114,491 successful media completions and no failed completion. Completion
+latency p99 was 8.235 ms and maximum 25.786 ms. Ring overrun was zero after the
+first window, with 932 peak buffered frames. Service CPU was 0.699% of one
+logical CPU with tracing included. The stream remained at 96 kHz LDAC HQ,
+24 useful input bits, one stream generation and one connection generation.
+
+**One approximately 2.178-second media-completion gap must not be hidden by
+the successful-send count.** It occurred around 20:59:54.099–20:59:56.277.
+The corresponding PCM window recorded a 2.171557-second data-event wait, zero
+overrun and 321 peak buffered frames. The neighboring windows had roughly
+3 ms maximum waits. The preceding GSMTC sample reported Playing at 2x;
+the next, about five seconds later, reported Playing at 1x. No service error,
+encoder restart or connection rebuild accompanied the gap.
+
+This localizes the stall to waiting for PCM availability rather than a slow or
+failed media-send completion. The evidence does not separate a deliberate
+pause/seek/video change from an upstream supply or notification problem.
+Five-second state snapshots cannot rule out a short pause between samples.
+The next observation samples playback state/rate every second while keeping
+Core Audio snapshots at five-second intervals; it also includes Windows audio
+GlitchDetection events. No driver or playback configuration was changed.
+
+A separate 120.290-second Windows audio trace at 21:03:48–21:05:48 enabled the
+installed Microsoft-Windows-Audio provider's GlitchDetection keyword
+`0x0400000000000000` at level 5. The provider was registered in audiodg and
+Chrome; the running session's provider/mask were verified. The installed
+manifest maps this keyword to engine starvation/overread and KS position/glitch
+events. The trace contained only its two headers, with zero lost events/buffers:
+no event from that selected keyword was recorded. It began after the earlier
+PCM gap and cannot explain it. This is a bounded observation, not proof that
+every detector path ran or that the headset rendered uninterrupted sound.
+
 ## 0.3.61: passive playback observations and remaining failure visibility
 
 Installed source `b378045332f704af05f07abc12c44772f9f985a1` was observed without
