@@ -85,6 +85,11 @@ void DriverHandle::cancel_all()
 DWORD DriverHandle::ioctl(DWORD code, const void *in, DWORD in_len, void *out, DWORD out_len,
                           DWORD *bytes, DWORD timeout_ms, HANDLE cancel)
 {
+    // CancelIoEx only covers requests already submitted. A sticky stop event
+    // also closes the gap before this submission; a later stop is included in
+    // the overlapped wait below. Cleanup calls deliberately omit cancellation.
+    if (cancel && WaitForSingleObject(cancel, 0) == WAIT_OBJECT_0)
+        return ERROR_CANCELLED;
     OVERLAPPED ov{};
     ov.hEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
     if (!ov.hEvent)
@@ -162,14 +167,15 @@ bool Transport::get_info(OA2DP_DEVICE_INFO &out)
            n == sizeof(out);
 }
 
-bool Transport::open_channel(OA2DP_CHANNEL_KIND kind, OA2DP_CHANNEL_INFO &out, ULONG connection)
+bool Transport::open_channel(OA2DP_CHANNEL_KIND kind, OA2DP_CHANNEL_INFO &out, ULONG connection,
+                              HANDLE cancel)
 {
     OA2DP_OPEN_CHANNEL_IN in{};
     in.Kind = kind;
     in.ConnectionGeneration = connection;
     DWORD n = 0;
     // L2CAP connection setup can take a few seconds (paging, auth).
-    DWORD err = dev_.ioctl(IOCTL_OA2DP_OPEN_CHANNEL, &in, sizeof(in), &out, sizeof(out), &n, 15000);
+    DWORD err = dev_.ioctl(IOCTL_OA2DP_OPEN_CHANNEL, &in, sizeof(in), &out, sizeof(out), &n, 15000, cancel);
     if (err != ERROR_SUCCESS)
         LOGW("open %s channel failed: %lu", kind == Oa2dpChannelMedia ? "media" : "signalling",
              err);
@@ -192,11 +198,11 @@ bool Transport::close_channel(OA2DP_CHANNEL_KIND kind, ULONG connection, ULONG *
     return ok;
 }
 
-bool Transport::send(const OA2DP_SEND_IN &binding, const uint8_t *data, size_t len)
+bool Transport::send(const OA2DP_SEND_IN &binding, const uint8_t *data, size_t len, HANDLE cancel)
 {
     OA2DP_SEND_IN in = binding;
     return dev_.ioctl(IOCTL_OA2DP_SEND, &in, sizeof(in), const_cast<uint8_t *>(data),
-                      static_cast<DWORD>(len), nullptr, 5000) == ERROR_SUCCESS;
+                      static_cast<DWORD>(len), nullptr, 5000, cancel) == ERROR_SUCCESS;
 }
 
 int Transport::recv(const OA2DP_RECV_IN &binding, uint8_t *buf, size_t cap, DWORD timeout_ms,

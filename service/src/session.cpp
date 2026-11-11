@@ -183,7 +183,7 @@ int Session::cb_send(void *user, const uint8_t *pdu, size_t len)
 {
     auto *s = static_cast<Session *>(user);
     const OA2DP_SEND_IN binding{Oa2dpChannelSignaling, s->sig_generation_, s->sig_generation_};
-    return s->tr_.send(binding, pdu, len) ? 0 : -1;
+    return s->tr_.send(binding, pdu, len, s->stop_event_) ? 0 : -1;
 }
 
 uint32_t Session::cb_now(void *) { return GetTickCount(); }
@@ -315,7 +315,7 @@ void Session::on_avdtp_event(const oa2dp_avdtp_event &ev)
 bool Session::connect_signaling()
 {
     OA2DP_CHANNEL_INFO ci{};
-    if (!tr_.open_channel(Oa2dpChannelSignaling, ci)) {
+    if (!tr_.open_channel(Oa2dpChannelSignaling, ci, 0, stop_event_)) {
         teardown("signalling open failed");
         return false;
     }
@@ -333,7 +333,7 @@ bool Session::open_media_channel()
     if (media_open_)
         return true;
     OA2DP_CHANNEL_INFO ci{};
-    if (!tr_.open_channel(Oa2dpChannelMedia, ci, sig_generation_))
+    if (!tr_.open_channel(Oa2dpChannelMedia, ci, sig_generation_, stop_event_))
         return false;
     media_generation_ = ci.Generation;
     media_mtu_ = ci.OutMtu;

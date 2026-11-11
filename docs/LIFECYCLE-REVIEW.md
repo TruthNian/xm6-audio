@@ -1,5 +1,30 @@
 # Native lifecycle review
 
+## 0.3.56: carry stop through control-I/O submission
+
+Session stop signals a persistent event and cancels currently submitted I/O.
+Its signalling/media OPEN and AVDTP-send wrappers previously omitted that
+event. A request submitted after the one-shot CancelIoEx could therefore wait
+for its ordinary timeout. The production Session -> Transport -> IOCTL chain
+reproduces a full 15,000 simulated milliseconds for signalling OPEN in the
+controlled stop-before-submit ordering; this is not a measured host delay.
+
+Pass the existing stop event through those operations. The common IOCTL helper
+rejects a request when cancellation is already signalled; later cancellation
+is included in its overlapped wait. Pending requests still undergo cancellation
+and terminal completion before releasing OVERLAPPED storage. Cleanup CLOSE
+and final drain remain available after stop rather than abandoning ownership.
+No new runtime thread, poll or timer is introduced.
+
+The fixture executes all three production call chains with stop before/during
+submission, ordinary completion, simultaneous completion/stop and a normal
+timeout. It checks that the pre-stopped path submits nothing, the in-flight
+path cancels/drains before cleanup, and successful binding/output survives.
+The previous body fails its elapsed-budget assertion. This establishes the
+submission/cancellation contract, not a universal shutdown deadline: lower
+Windows/Bluetooth I/O must still reach terminal completion. Actual connected
+recovery and audio stability remain separate acceptance requirements.
+
 ## 0.3.55: complete failed incoming OPEN notifications
 
 Outgoing channel failures already bind and finish the pending Windows connect

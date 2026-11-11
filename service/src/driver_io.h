@@ -52,10 +52,11 @@ public:
     void cancel_all() { dev_.cancel_all(); }
 
     bool get_info(OA2DP_DEVICE_INFO &out);
-    bool open_channel(OA2DP_CHANNEL_KIND kind, OA2DP_CHANNEL_INFO &out, ULONG connection = 0);
+    bool open_channel(OA2DP_CHANNEL_KIND kind, OA2DP_CHANNEL_INFO &out, ULONG connection,
+                      HANDLE cancel);
     bool close_channel(OA2DP_CHANNEL_KIND kind, ULONG connection = 0,
                         ULONG *closed_connection = nullptr);
-    bool send(const OA2DP_SEND_IN &binding, const uint8_t *data, size_t len);
+    bool send(const OA2DP_SEND_IN &binding, const uint8_t *data, size_t len, HANDLE cancel);
     // > 0 bytes, 0 timeout, < 0 channel closed / error
     int recv(const OA2DP_RECV_IN &binding, uint8_t *buf, size_t cap, DWORD timeout_ms,
              HANDLE cancel = nullptr);

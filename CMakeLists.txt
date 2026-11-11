@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(XM6Audio VERSION 0.3.55 LANGUAGES C CXX)
+project(XM6Audio VERSION 0.3.56 LANGUAGES C CXX)
 
 # The loaded binary's version must agree with the configured project and INF.
 # Generate resources in the build tree rather than keeping a stale copy.
@@ -207,6 +207,19 @@ if(OA2DP_BUILD_TESTS)
     target_link_libraries(test_handle_lifetime PRIVATE Threads::Threads)
     add_test(NAME handle_lifetime COMMAND test_handle_lifetime)
     set_tests_properties(handle_lifetime PROPERTIES TIMEOUT 15)
+    xm6_test_body(service/src/driver_io.cpp "DWORD DriverHandle::ioctl("
+        "\nbool Transport::open(" control-ioctl)
+    xm6_test_body(service/src/driver_io.cpp "bool Transport::open_channel("
+        "\nbool Transport::close_channel(" control-open)
+    xm6_test_body(service/src/driver_io.cpp "bool Transport::send("
+        "\nint Transport::recv(" control-send)
+    xm6_test_body(service/src/session.cpp "bool Session::connect_signaling("
+        "\nbool Session::configure_as_initiator(" control-connect)
+    xm6_test_body(service/src/session.cpp "int Session::cb_send("
+        "\nuint32_t Session::cb_now(" control-protocol-send)
+    add_executable(test_control_cancel tools/test-control-cancel.cpp)
+    target_include_directories(test_control_cancel PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
+    add_test(NAME control_cancel COMMAND test_control_cancel)
     xm6_test_body(service/src/session.cpp "bool Session::setup_audio_endpoint("
         "\nbool Session::start_stream(" endpoint-formats)
     xm6_test_body(service/src/session.cpp "            oa2dp_codec_caps cfg{};"
