@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(XM6Audio VERSION 0.3.60 LANGUAGES C CXX)
+project(XM6Audio VERSION 0.3.61 LANGUAGES C CXX)
 
 # The loaded binary's version must agree with the configured project and INF.
 # Generate resources in the build tree rather than keeping a stale copy.
@@ -222,6 +222,10 @@ if(OA2DP_BUILD_TESTS)
         "\nbool Session::configure_as_initiator(" control-connect)
     xm6_test_body(service/src/session.cpp "int Session::cb_send("
         "\nuint32_t Session::cb_now(" control-protocol-send)
+    xm6_test_body(service/src/session.cpp "void Session::stop("
+        "\n// ---------------------------------------------------------------------------\n// Helper threads" control-policy)
+    xm6_test_body(service/src/session.cpp "bool Session::pump("
+        "\nbool Session::request(" control-pump)
     add_executable(test_control_cancel tools/test-control-cancel.cpp)
     target_include_directories(test_control_cancel PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
     add_test(NAME control_cancel COMMAND test_control_cancel)

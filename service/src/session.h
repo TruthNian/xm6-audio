@@ -153,6 +153,9 @@ private:
 
     // thread plumbing
     HANDLE stop_event_ = nullptr;
+    // Current disconnect policy OR permanent stop; updated under mu_.
+    // Interrupts control I/O without stopping the policy/event waiters.
+    HANDLE control_cancel_event_ = nullptr;
     HANDLE wake_event_ = nullptr;
     HANDLE stream_stop_event_ = nullptr;
     std::thread main_, ev_, audio_thr_, stream_;

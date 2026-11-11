@@ -1,10 +1,17 @@
 # Event, notification and transport review
 
-Reviewed 2026-11-11 against the 0.3.50–0.3.60 production source. The headset
+Reviewed 2026-11-11 against the 0.3.50–0.3.61 production source. The headset
 was unavailable. Runtime conclusions below concern the disconnected Windows
 path; protocol fixtures do not substitute for connected hardware acceptance.
 
 ## Confirmed corrections
+
+The [0.3.61 control-wait correction](LIFECYCLE-REVIEW.md) propagates an ordinary
+Windows disconnect to in-flight service control I/O and protocol waits,
+instead of queuing teardown behind their timeout. The old production OPEN
+path reproduces that wait in a controlled fixture; reconnect remains usable
+without stopping the session. Kernel cancellation timing and visible button
+completion still require hardware/Windows acceptance.
 
 The [0.3.60 presentation-clock correction](PERFORMANCE-REVIEW.md) prevents
 updated delay reports from moving the reported position backward or changing

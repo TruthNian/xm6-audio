@@ -26,6 +26,11 @@
 using ULONG = uint32_t;
 using USHORT = uint16_t;
 using DWORD = uint32_t;
+constexpr DWORD WAIT_OBJECT_0 = 0, WAIT_TIMEOUT = 258;
+static DWORD WaitForSingleObject(const bool *event, DWORD timeout) {
+    CHECK(timeout == 0);
+    return *event ? WAIT_OBJECT_0 : WAIT_TIMEOUT;
+}
 static DWORD now = 100;
 static DWORD GetTickCount() { return now; }
 static bool is_after(DWORD a, DWORD b) { return static_cast<int32_t>(a - b) >= 0; }
@@ -58,6 +63,8 @@ struct Session {
     bool connection_enabled_ = true, transport_suspended_ = false, suspend_requested_ = false;
     bool teardown_pending_ = false, streaming_ = false, media_open_ = false, audio_ready_ = true;
     bool stopping_ = false, publication_pending_ = false;
+    bool control_cancelled_ = false;
+    const bool *control_cancel_event_ = &control_cancelled_;
     bool sig_open_ = true, rx_failed_ = false;
     bool have_remote_caps_ = false, peer_configuration_pending_ = false, audio_running_ = true;
     bool rate_resume_pending_ = false;
@@ -225,6 +232,23 @@ struct Session {
 // clang-format on
 
 int main() {
+    for (bool before : {false, true}) {
+        Session s;
+        now = 100;
+        s.control_cancelled_ = before;
+        s.during_wait = [&] { s.control_cancelled_ = true; };
+        oa2dp_avdtp_event response{};
+        const int label = oa2dp_avdtp_discover(&s.av_);
+        CHECK(label >= 0);
+        CHECK(!s.wait_request(label, response));
+        CHECK(now == (before ? 100u : 150u)); // no wait for the 3-second core timeout
+        CHECK(!s.stopping_ && s.sig_open_ && !s.rx_failed_);
+        // The caller's existing teardown retires the pending transaction.
+        oa2dp_avdtp_reset(&s.av_);
+        s.packets.clear(); s.responses_.clear();
+        s.control_cancelled_ = false; s.during_wait = {};
+        CHECK(s.wait_request(oa2dp_avdtp_discover(&s.av_), response));
+    }
     for (uint8_t signal : {OA2DP_AVDTP_SUSPEND, OA2DP_AVDTP_RECONFIGURE}) {
         Session s;
         now = 100;

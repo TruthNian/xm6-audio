@@ -70,6 +70,7 @@ std::string codec_label(const oa2dp_codec_caps &c) { return oa2dp_codec_name(c.c
 Session::Session(std::wstring transport_path) : path_(std::move(transport_path))
 {
     stop_event_ = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    control_cancel_event_ = CreateEventW(nullptr, TRUE, FALSE, nullptr);
     wake_event_ = CreateEventW(nullptr, FALSE, FALSE, nullptr);
     stream_stop_event_ = CreateEventW(nullptr, TRUE, TRUE, nullptr);
 }
@@ -79,6 +80,8 @@ Session::~Session()
     stop();
     if (stop_event_)
         CloseHandle(stop_event_);
+    if (control_cancel_event_)
+        CloseHandle(control_cancel_event_);
     if (wake_event_)
         CloseHandle(wake_event_);
     if (stream_stop_event_) CloseHandle(stream_stop_event_);
@@ -86,13 +89,21 @@ Session::~Session()
 
 void Session::start()
 {
+    if (!stop_event_ || !control_cancel_event_ || !wake_event_ || !stream_stop_event_) {
+        LOGE("cannot create session synchronization events");
+        return;
+    }
     main_ = std::thread([this] { main_loop(); });
 }
 
 void Session::stop()
 {
-    stopping_ = true;
-    SetEvent(stop_event_);
+    {
+        std::lock_guard<std::mutex> lock(mu_);
+        stopping_ = true;
+        SetEvent(stop_event_);
+        SetEvent(control_cancel_event_);
+    }
     SetEvent(stream_stop_event_);
     tr_.cancel_all();
     audio_.cancel_all();
@@ -105,6 +116,15 @@ void Session::post(const Command &c)
     {
         std::lock_guard<std::mutex> lock(mu_);
         cmd_q_.push_back(c);
+        if (c.cmd == Cmd::AudioFormat) {
+            // The main thread may be inside OPEN or an AVDTP request. Wake
+            // that I/O now; only the main thread handles protocol teardown.
+            // Reconnect can clear this transient policy, but never stop().
+            if (stopping_ || !c.format.ConnectionEnabled)
+                SetEvent(control_cancel_event_);
+            else
+                ResetEvent(control_cancel_event_);
+        }
     }
     SetEvent(wake_event_);
 }
@@ -183,7 +203,7 @@ int Session::cb_send(void *user, const uint8_t *pdu, size_t len)
 {
     auto *s = static_cast<Session *>(user);
     const OA2DP_SEND_IN binding{Oa2dpChannelSignaling, s->sig_generation_, s->sig_generation_};
-    return s->tr_.send(binding, pdu, len, s->stop_event_) ? 0 : -1;
+    return s->tr_.send(binding, pdu, len, s->control_cancel_event_) ? 0 : -1;
 }
 
 uint32_t Session::cb_now(void *) { return GetTickCount(); }
@@ -210,11 +230,12 @@ uint8_t Session::cb_check(void *user, uint8_t seid, const oa2dp_avdtp_caps *cfg,
 
 bool Session::pump(DWORD timeout_ms)
 {
-    if (!sig_open_ || rx_failed_ || stopping_ || transport_suspended_)
+    if (!sig_open_ || rx_failed_ || stopping_ || transport_suspended_ ||
+        WaitForSingleObject(control_cancel_event_, 0) == WAIT_OBJECT_0)
         return false;
     uint8_t pdu[OA2DP_AVDTP_MSG_MAX + 3];
     const OA2DP_RECV_IN binding{Oa2dpChannelSignaling, sig_generation_, sig_generation_};
-    int n = tr_.recv(binding, pdu, sizeof(pdu), timeout_ms, stop_event_);
+    int n = tr_.recv(binding, pdu, sizeof(pdu), timeout_ms, control_cancel_event_);
     if (n <= 0) {
         if (n < 0 && !stopping_) {
             rx_failed_ = true;
@@ -236,7 +257,8 @@ bool Session::request(int label, oa2dp_avdtp_event &out, DWORD timeout_ms)
     if (label < 0)
         return false;
     DWORD deadline = GetTickCount() + timeout_ms;
-    while (!stopping_ && sig_open_ && !rx_failed_) {
+    while (!stopping_ && sig_open_ && !rx_failed_ &&
+           WaitForSingleObject(control_cancel_event_, 0) != WAIT_OBJECT_0) {
         // Core timeouts are completions, not peer commands. Deliver and
         // consume them before the caller's outer deadline can leave one
         // behind for a reused transaction label.
@@ -315,7 +337,7 @@ void Session::on_avdtp_event(const oa2dp_avdtp_event &ev)
 bool Session::connect_signaling()
 {
     OA2DP_CHANNEL_INFO ci{};
-    if (!tr_.open_channel(Oa2dpChannelSignaling, ci, 0, stop_event_)) {
+    if (!tr_.open_channel(Oa2dpChannelSignaling, ci, 0, control_cancel_event_)) {
         teardown("signalling open failed");
         return false;
     }
@@ -333,7 +355,7 @@ bool Session::open_media_channel()
     if (media_open_)
         return true;
     OA2DP_CHANNEL_INFO ci{};
-    if (!tr_.open_channel(Oa2dpChannelMedia, ci, sig_generation_, stop_event_))
+    if (!tr_.open_channel(Oa2dpChannelMedia, ci, sig_generation_, control_cancel_event_))
         return false;
     media_generation_ = ci.Generation;
     media_mtu_ = ci.OutMtu;
@@ -452,6 +474,15 @@ bool Session::ensure_audio_endpoint()
         audio_format_ = state.Format;
         pcm_sequence_ = state.PcmSequence;
         audio_running_ = state.Running != 0;
+        {
+            // Initialize from the reopened endpoint before its waiter can
+            // deliver newer snapshots. Do not retain an old disconnect latch.
+            std::lock_guard<std::mutex> lock(mu_);
+            if (stopping_ || !state.ConnectionEnabled)
+                SetEvent(control_cancel_event_);
+            else
+                ResetEvent(control_cancel_event_);
+        }
         audio_ready_ = true;
     }
     return true;

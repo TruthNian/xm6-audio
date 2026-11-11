@@ -85,8 +85,8 @@ void DriverHandle::cancel_all()
 DWORD DriverHandle::ioctl(DWORD code, const void *in, DWORD in_len, void *out, DWORD out_len,
                           DWORD *bytes, DWORD timeout_ms, HANDLE cancel)
 {
-    // CancelIoEx only covers requests already submitted. A sticky stop event
-    // also closes the gap before this submission; a later stop is included in
+    // CancelIoEx only covers requests already submitted. The cancellation
+    // event also closes the gap before this submission and participates in
     // the overlapped wait below. Cleanup calls deliberately omit cancellation.
     if (cancel && WaitForSingleObject(cancel, 0) == WAIT_OBJECT_0)
         return ERROR_CANCELLED;

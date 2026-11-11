@@ -1,5 +1,38 @@
 # Native lifecycle review
 
+## 0.3.61: interrupt control waits on a Windows disconnect request
+
+The audio-policy waiter previously queued a disconnect without interrupting
+the main thread's synchronous L2CAP OPEN, signalling send or AVDTP response
+wait. That thread could not dispatch the queued teardown until the pending
+operation returned. The existing cancellation event covered service stop,
+not an ordinary per-device disconnect.
+
+The policy producer now updates a manual-reset control-cancellation event
+under the existing command mutex. Disconnect interrupts pending control I/O;
+reconnect clears the transient cancellation, while permanent stop cannot be
+cleared by a late policy snapshot. Initial/reopened audio state initializes
+the event before the audio waiter is enabled. Protocol mutation and channel
+teardown remain on the main thread. Event and policy waiters keep running so
+the same session can receive reconnect; no worker, timer or kernel ABI is added.
+
+The existing production-body control fixture reproduces the old defect:
+with a disconnect already queued, OPEN waited its full 15000 ms simulated
+user-mode timeout. This is **not** a measured Windows/kernel latency: the
+fixture controls I/O completion, while the real lower OPEN has its own timeout.
+The corrected path cancels before/during signalling OPEN, media OPEN and
+signalling SEND without waiting for that timer, and drains terminal completion
+before releasing request storage. Signalling receive and the real AVDTP
+request body also observe cancellation. Checks cover subsequent reconnect,
+unrelated notifications, alternating policy and permanent stop.
+
+Cancellation requests are not proof that a lower driver has completed them;
+the existing completion drain remains necessary under Microsoft's
+[CancelIoEx contract](https://learn.microsoft.com/en-us/windows/win32/api/ioapiset/nf-ioapiset-cancelioex).
+No radio, rendered Settings button, physical disconnect deadline or audible
+reconnect result is established by these fixtures. This fixes a demonstrated
+service-side delay path, not a proven complete explanation of the UI error.
+
 ## 0.3.58: retain failed power-state queries
 
 Power notifications tell the service to query the current driver state rather
