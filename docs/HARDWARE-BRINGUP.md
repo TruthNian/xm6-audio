@@ -2,14 +2,40 @@
 
 The controlled developer trial targets WH-1000XM6 on Windows 10 x64, build 19045. It uses a local development signature under explicitly authorized test signing. This is separate from the production installer, which still requires Microsoft-signed catalogs.
 
-Latest source audit: [0.3.54 performance/output review](PERFORMANCE-REVIEW.md).
-Version 0.3.54 is activated with verified loaded images; see the following record.
+Latest source audit: [0.3.55 incoming-OPEN lifecycle review](LIFECYCLE-REVIEW.md).
+Version 0.3.55 is activated with verified loaded images; see the following record.
 Earlier runtime observations apply to 0.3.44. After its authorized
 deployment and a user restart, both actual loaded kernel images and the running
 service matched the verified local test-signed candidate. The service process
 started approximately twelve seconds after boot without a manual start in the
 post-boot session. This establishes automatic service startup, not complete
 automatic audio/reconnect acceptance.
+
+## 0.3.55 incoming-OPEN failure recovery activation (2026-11-11)
+
+Source `3f99f4897acab6f498db2130e2dae6a9766d8fc8` passed all 25 local checks
+and [Linux/Windows source CI](https://github.com/TruthNian/xm6-audio/actions/runs/43000936449).
+Controlled production bodies reproduce the old missing attempt binding,
+failure notification and service event-consumption paths. Coverage includes
+replacement generations and a failed remaining-channel CLOSE followed by the
+existing teardown retry. No connected headset was used for these checks.
+
+The locally built package was signed using the existing development certificate
+and activated through one Bluetooth radio cycle. Both actual loaded kernel
+images and the running service executable match the protected signed payload.
+No computer restart, boot/trust or privacy change was made. Current transport
+and render install flags requested no restart. The actual settings retain
+automatic PCM sample rate/precision, LDAC/AAC/SBC, LDAC HQ and ABR off.
+
+The offline trace decoded all 411 events with zero event/buffer loss. Target
+state was transiently Connected(7) around 4463 ms, then Disconnected(3) around
+5458/5473 ms, followed by another 4994 ms of settled observation. The retained
+Windows inbox trace also has a roughly one-second transient Connected interval;
+this alone is not attributed to the native driver. AEP Paired=True/Connected=False,
+container Connected=False and native disconnected/zero-bitrate state agreed.
+The corresponding installed English label is **Paired**, but rendered text and
+buttons were not observed. Real per-device reconnect, existing-client recovery,
+Chrome audio stability and current-version headset sound remain unaccepted.
 
 ## 0.3.54 PCM/output correction activation (2026-11-11)
 

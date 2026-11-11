@@ -30,6 +30,13 @@ teardown execute with a failed CLOSE followed by a successful retry.
 OS/Bluetooth calls remain controlled; this does not establish that these
 paths caused a particular observed UI error or prove headset acceptance.
 
+Version55 was then activated without rebooting the computer; both actual
+kernel images and the running service match the signed payload. All 25 local
+checks and [source CI](https://github.com/TruthNian/xm6-audio/actions/runs/43000936449)
+passed. The final offline display model and AEP/container state remain paired
+and disconnected; see the [runtime record](HARDWARE-BRINGUP.md) for trace scope
+and the separate, still-incomplete connected/rendered-UI acceptance.
+
 ## 0.3.54: PCM cost and AAC output ownership
 
 The [performance/output review](PERFORMANCE-REVIEW.md) removes measured
