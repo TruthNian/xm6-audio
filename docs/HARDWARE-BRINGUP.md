@@ -2,14 +2,54 @@
 
 The controlled developer trial targets WH-1000XM6 on Windows 10 x64, build 19045. It uses a local development signature under explicitly authorized test signing. This is separate from the production installer, which still requires Microsoft-signed catalogs.
 
-Latest source audit: [0.3.60 presentation-clock review](PERFORMANCE-REVIEW.md).
-Version 0.3.60 is activated with verified loaded images; see the following record.
+Latest source audit: [0.3.61 disconnect-wait review](LIFECYCLE-REVIEW.md).
+Version 0.3.61 is activated with verified loaded images; see the following record.
 Earlier runtime observations apply to 0.3.44. After its authorized
 deployment and a user restart, both actual loaded kernel images and the running
 service matched the verified local test-signed candidate. The service process
 started approximately twelve seconds after boot without a manual start in the
 post-boot session. This establishes automatic service startup, not complete
 automatic audio/reconnect acceptance.
+
+## 0.3.61 activation and connected state acceptance (2026-11-11)
+
+Source `b378045332f704af05f07abc12c44772f9f985a1` passed all 28 local checks
+and [Linux/Windows source CI](https://github.com/TruthNian/xm6-audio/actions/runs/43011913970).
+The local WDK/MSVC package was signed with the existing test certificate and
+activated through a Bluetooth radio cycle. Both actual loaded kernel images
+and the running service match the protected signed package; current restart
+flags are clear. No computer reboot, boot-policy or certificate-trust changes
+were made. Automatic PCM, LDAC/AAC/SBC, LDAC HQ and ABR-off policy was read back.
+
+The planned offline check was not applicable: the headset had become reachable
+and the service was actually submitting 96 kHz LDAC HQ audio. Its rejected
+offline assertion was preserved, rather than reported as an offline regression
+or silently counted as a successful absent-headset test.
+
+One standard Bluetooth-audio KS disconnect followed by the address-scoped
+Windows whole-device disconnect produced Paired=True/Connected=False,
+container Connected=False and native user-disconnected/zero-bitrate state.
+The KS call succeeded in 78.627 ms; this is one call's elapsed time, not a
+universal physical-disconnect deadline. Reconnect was accepted, and media
+submission resumed at 96 kHz, stereo, 24 useful bits in a 32-bit integer input
+container, with LDAC HQ policy. Reported submission rate was about 1.01 Mbit/s
+including protocol overhead, not a separate LDAC quality level. No player or
+service restart occurred during this control cycle.
+
+All 38 display-model trace events decoded with zero loss. The target changed
+from Connected(7) to Disconnected(3), then back to Connected(7), agreeing with
+the sampled AEP/container/service states. The user independently confirmed
+that the current Windows UI shows **Paired when unconnected**, and correctly
+updates after connection and disconnection. This Settings-state requirement
+is now accepted on this host. Computer Use accessibility returned null and
+window capture timed out twice; the visual acceptance source is the user.
+
+This run does not establish a worst-case cancellation time, audible playback
+after reconnect, long-term Chrome stability, sleep/resume, all PCM transitions
+or physical audio/video synchronization. The control-wait defect was proven
+with production-body fixtures, but not established as the sole cause of the
+prior UI error. A preceding unconnected 0.3.60 control call already succeeded
+in about 30 ms, so these separate calls do not demonstrate a latency speedup.
 
 ## 0.3.60 presentation-clock correction activation (2026-11-11)
 

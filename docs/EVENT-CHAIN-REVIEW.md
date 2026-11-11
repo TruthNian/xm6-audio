@@ -1,8 +1,9 @@
 # Event, notification and transport review
 
-Reviewed 2026-11-11 against the 0.3.50–0.3.61 production source. The headset
-was unavailable. Runtime conclusions below concern the disconnected Windows
-path; protocol fixtures do not substitute for connected hardware acceptance.
+Reviewed 2026-11-11 against the 0.3.50–0.3.61 production source. Initial work
+was performed without a headset. During 0.3.61 activation it became reachable;
+a connected control cycle and user-confirmed Settings display are recorded
+below. Protocol fixtures do not substitute for audible hardware acceptance.
 
 ## Confirmed corrections
 
@@ -10,8 +11,9 @@ The [0.3.61 control-wait correction](LIFECYCLE-REVIEW.md) propagates an ordinary
 Windows disconnect to in-flight service control I/O and protocol waits,
 instead of queuing teardown behind their timeout. The old production OPEN
 path reproduces that wait in a controlled fixture; reconnect remains usable
-without stopping the session. Kernel cancellation timing and visible button
-completion still require hardware/Windows acceptance.
+without stopping the session. A subsequent real control cycle recovered media
+submission, and the user confirmed correct Windows connection display.
+Worst-case kernel cancellation timing and audible stability remain unaccepted.
 
 The [0.3.60 presentation-clock correction](PERFORMANCE-REVIEW.md) prevents
 updated delay reports from moving the reported position backward or changing
@@ -97,7 +99,8 @@ at about 4930 ms. Version54 transiently reported Connected at about 4383 ms,
 then settled to Disconnected at about 5392 ms. The similar startup interval
 alone does not identify a custom-driver defect or establish visible UI flicker.
 It must be distinguished from the reproduced version49 failure that finally
-returned to Connected. Literal rendered text/button acceptance remains open.
+returned to Connected. The user later confirmed correct settled Settings
+display on 0.3.61; this is separate evidence from the historical traces.
 
 `Disconnected(3)` is the internal model enumeration, **not the expected screen
 text**. For a paired, disconnected headset, the expected English UI label is
@@ -105,8 +108,8 @@ text**. For a paired, disconnected headset, the expected English UI label is
 the SDK MakePRI tool: both `SystemSettings_Device_Bluetooth_Disconnected` and
 `SystemSettings_Device_Bluetooth_DisconnectedAudio` have the string value
 `Paired`. AEP Paired=True/Connected=False and the settled model support that
-state; they are not a direct observation of rendered screen text. Literal
-Settings-label/button acceptance must retain that distinction.
+state; they are not a direct observation of rendered screen text. The user's
+0.3.61 visual confirmation now supplies the missing display evidence.
 
 Version51 was subsequently activated without a computer restart. Both actual
 kernel images and the running service matched the signed source package;
@@ -122,9 +125,16 @@ events are separate measurements. None proves that the headphone rendered
 every packet. Opt-in ETW can correlate these on a later connected run without
 recording PCM content or pairing secrets.
 
-No connected headset was available to establish per-device disconnect/button
-completion, automatic reconnect, sound recovery in already-open clients,
-wear detection, Chrome audio stability or RF performance. Those remain open.
+During 0.3.61 activation a real headset connection became available. A standard
+single-device control cycle cleared AEP/container state and restored 96 kHz
+LDAC HQ media submission without restarting the players or service. All 38
+display-model events decoded with zero loss and included Connected ->
+Disconnected -> Connected. The user confirmed Paired before connection and
+correct display after connecting/disconnecting. This host's Settings-state
+requirement is accepted; tool screenshots remained unavailable.
+
+Audible recovery in already-open clients, current wear/control regression,
+sleep/resume, Chrome audio stability and RF performance still need acceptance.
 The finite fixtures and source inspection do not establish absence of all bugs
 or optimal performance. Private-ABI behavior, blocking kernel cancellation and
 real scheduler/radio timing remain material external boundaries.

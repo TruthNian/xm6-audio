@@ -33,6 +33,15 @@ No radio, rendered Settings button, physical disconnect deadline or audible
 reconnect result is established by these fixtures. This fixes a demonstrated
 service-side delay path, not a proven complete explanation of the UI error.
 
+The candidate is now activated with both actual drivers and the service
+verified against the local signed package. All 28 local checks and
+[source CI](https://github.com/TruthNian/xm6-audio/actions/runs/43011913970) passed.
+A connected single-device cycle cleared connection state and restored 96 kHz
+LDAC HQ submission without a player/service restart. The user confirmed the
+Windows Paired/connected/disconnected display on this installation. See the
+[runtime record](HARDWARE-BRINGUP.md) for the evidence and remaining acceptance
+limits; the earlier fixture conclusions alone do not establish these results.
+
 ## 0.3.58: retain failed power-state queries
 
 Power notifications tell the service to query the current driver state rather

@@ -4,13 +4,13 @@
 
 原生 Windows 蓝牙 LDAC 的开发原型，面向 WH-1000XM6。**尚未完成驱动签名和本机实机验收，当前不是可安装成品。** 已恢复可用的 Windows 自带 A2DP 通道应继续保留。
 
-本机已验证 0.3.50 的两个实际加载驱动和运行中的服务，通过一次蓝牙关闭／开启完成激活，没有重启电脑。耳机不在场时，Windows 实际显示模型最终保持 Disconnected，修复了已独立复现的离线误显示 Connected 路径。用户此前对 QQ 音乐、PotPlayer、系统提示声及蓝牙控制的确认，以及 YouTube 音频卡顿报告，适用于 0.3.44。**真实连接后的单设备断开／重连、已有播放器恢复及 Chrome 稳定性仍待验收。**
+0.3.50 修复了已独立复现的离线误显示 Connected 路径。用户此前对 QQ 音乐、PotPlayer、系统提示声及蓝牙控制的确认，以及 YouTube 音频卡顿报告，适用于 0.3.44。当前安装版本已获用户实测确认：**未连接时正确显示 Paired，连接和断开后的 Windows 显示均正常。** Chrome 音频稳定性仍待验收。
 
-当前实际运行版本为 **0.3.60**，两个已加载驱动及运行中的服务均与本机签名包哈希核对一致，无需重启电脑。呈现位置在延迟更新后不再倒退，进入暂停时提交当前位置、暂停期间冻结，STOP 时重置。实际生产函数的受控测试复现了旧版 35 ms 倒退，修复覆盖四种采样率及三种原始 QPC 频率。全部 28 项本地检查及[源码 CI](https://github.com/TruthNian/xm6-audio/actions/runs/43008980426)通过。总线 ABI 6、PCM／编码策略不变，保留此前生命周期和 RTP 修复。离线后台最终为已配对／未连接，对应英文界面应显示 **Paired**；屏幕文字、按钮和真实耳机连接仍未完成验收。详见[生命周期审查](docs/LIFECYCLE-REVIEW.md)、[事件链审查](docs/EVENT-CHAIN-REVIEW.md)、[性能审查](docs/PERFORMANCE-REVIEW.md)、[编码审查](docs/CODEC-REVIEW.md)和[开发记录](docs/HARDWARE-BRINGUP.md)。**不要加载 0.3.5 候选驱动**：该版属性表布局错误曾导致开发机蓝屏，0.3.6 已修正并增加离线 PE/PDB 检查。
+当前实际运行版本为 **0.3.61**，两个已加载驱动及运行中的服务均与本机签名包哈希核对一致，没有重启电脑。Windows 普通断开请求现在会中断服务的控制等待，不再排在连接／协议超时之后。全部 28 项本地检查及[源码 CI](https://github.com/TruthNian/xm6-audio/actions/runs/43011913970)通过。后台单设备断开／重连中，AEP 和容器连接状态正确清零，随后恢复 96 kHz LDAC HQ 传输，没有重启播放器或服务；这证明传输恢复，不代表长期听音稳定性已验收。总线 ABI 6、自动 PCM／编码策略及此前时钟和 RTP 修复保留。详见[生命周期审查](docs/LIFECYCLE-REVIEW.md)、[事件链审查](docs/EVENT-CHAIN-REVIEW.md)、[性能审查](docs/PERFORMANCE-REVIEW.md)、[编码审查](docs/CODEC-REVIEW.md)和[开发记录](docs/HARDWARE-BRINGUP.md)。**不要加载 0.3.5 候选驱动**：该版属性表布局错误曾导致开发机蓝屏，0.3.6 已修正并增加离线 PE/PDB 检查。
 
-已配对但未连接时，英文界面应显示 **Paired**。`Disconnected(3)` 是 Windows 内部状态枚举；已直接读取本机 Windows 资源，两个对应蓝牙未连接标签的英文值均为 `Paired`。内部状态、AEP／容器状态和资源文字已分别核对，实际屏幕标签及按钮仍需保留为独立验收项目。
+已配对但未连接时，英文界面显示 **Paired**。`Disconnected(3)` 是 Windows 内部状态枚举，本机对应资源文字为 `Paired`。当前界面状态已由用户亲自确认；Computer Use 的窗口截图仍超时，因此视觉验收依据是用户实测，而非工具截图。
 
-最新离线蓝牙开关事件仍记录到约 1 秒的临时 Connected，之后模型才稳定为对应 Paired 的状态。保留的 Windows 自带驱动对照中也出现过相似过渡，不能仅凭这一段判定自定义驱动有错；实际文字、按钮及连接后的生命周期仍待验收，详见[运行记录](docs/HARDWARE-BRINGUP.md)。
+此前保留的离线蓝牙开关事件有约 1 秒的临时 Connected，之后模型稳定为对应 Paired 的状态。Windows 自带驱动对照也出现过相似过渡，不能仅凭这一段判定自定义驱动有错。当前稳定后的显示已获用户确认，详见[运行记录](docs/HARDWARE-BRINGUP.md)。
 
 `follow_source_rate` 这个兼容配置名实际表示“跟随端点 PCM 采样率”，不读取播放器文件或 Hi-Res／SQ 标签。共享模式下，多个应用先按一个 Windows 端点格式混音；96 kHz 文件进入 48 kHz 混音时，驱动仍只收到 48 kHz。逐文件自动选择共享混音格式尚未实现。播放器可通过独占模式直接提交支持的格式，但会排除其他应用同时使用该端点。
 
