@@ -97,7 +97,9 @@ CMiniportWaveRTStream::Init
     m_Format = *Format_;
     m_ulBlockAlign = (ULONG)Format_->Channels * (Format_->BitsPerSample / 8);
     m_KsState = KSSTATE_STOP;
-    m_NeedsPcmEpoch = FALSE; // Init establishes the first producer boundary below.
+    m_NeedsPcmEpoch = TRUE;
+    m_WaitingForConsumer = FALSE;
+    m_PcmSequence = MAXULONG;
     m_pDmaBuffer = NULL;
     m_ulDmaBufferSize = 0;
     m_ulNotificationsPerBuffer = 0;
@@ -128,13 +130,8 @@ CMiniportWaveRTStream::Init
     }
 
 
-    // F4.3: Windows opened the endpoint with a (possibly) new format. The ring
-    // allocation never moves, so only its header changes; the service learns
-    // about it from WAIT_FORMAT and reconfigures the headset.
-    if (Oa2dpRingBeginStream(&m_Device->Ring, &m_Format))
-    {
-        Oa2dpReportStream(m_Device, &m_Format, FALSE);
-    }
+    // Merely opening/probing a pin is not playback. Publish its epoch at RUN,
+    // before any sample is pumped, so an unused pin cannot retire live audio.
 
     return STATUS_SUCCESS;
 } // Init
@@ -480,6 +477,7 @@ CMiniportWaveRTStream::AllocateAudioBuffer
 #pragma code_seg()
 ULONGLONG CMiniportWaveRTStream::RunningHns(_In_ LARGE_INTEGER Qpc)
 {
+    if (m_WaitingForConsumer) return m_hnsRunBase;
     LARGE_INTEGER delta;
     delta.QuadPart = Qpc.QuadPart - m_RunStartQpc.QuadPart;
     if (delta.QuadPart < 0)
@@ -502,6 +500,8 @@ VOID CMiniportWaveRTStream::Pump(_In_ ULONGLONG ToFrame)
     }
     if (end <= start)
     {
+        if (m_bEoSReceived && end == m_ullEosFrame)
+            Oa2dpRingEndSource(&m_Device->Ring, m_PcmSequence);
         return;
     }
     if (m_pDmaBuffer == NULL || m_ulDmaBufferSize < m_ulBlockAlign)
@@ -516,8 +516,10 @@ VOID CMiniportWaveRTStream::Pump(_In_ ULONGLONG ToFrame)
     }
     Oa2dpRingPump(&m_Device->Ring, m_pDmaBuffer, m_ulDmaBufferSize,
                   (ULONG)((start % bufferFrames) * m_ulBlockAlign), (ULONG)(end - start),
-                  &m_Format);
+                  &m_Format, m_PcmSequence);
     m_ullPumpedFrames = end;
+    if (m_bEoSReceived && end == m_ullEosFrame)
+        Oa2dpRingEndSource(&m_Device->Ring, m_PcmSequence);
 }
 
 #pragma code_seg()
@@ -545,6 +547,11 @@ VOID CMiniportWaveRTStream::NotifyPackets()
 #pragma code_seg()
 VOID CMiniportWaveRTStream::UpdatePosition(_In_ LARGE_INTEGER Qpc)
 {
+    if (m_WaitingForConsumer) {
+        if (!Oa2dpRingConsumerReady(&m_Device->Ring, m_PcmSequence)) return;
+        m_RunStartQpc = Qpc;
+        m_WaitingForConsumer = FALSE;
+    }
     ULONGLONG frames = HnsToFrames(RunningHns(Qpc), m_Format.SampleRate);
 
     if (frames <= m_ullLinearFrames)
@@ -764,6 +771,7 @@ CMiniportWaveRTStream::SetState
     {
         case KSSTATE_STOP:
             m_NeedsPcmEpoch = TRUE;
+            m_WaitingForConsumer = FALSE;
             // Reset DMA
             m_llPacketCounter = 0;
             m_ullLinearFrames = 0;
@@ -797,11 +805,15 @@ CMiniportWaveRTStream::SetState
                 if (m_NeedsPcmEpoch) {
                     // A reused STOPped stream starts a new clip. Do this under
                     // the pump lock, before RUN makes any new samples visible.
-                    Oa2dpRingBeginStream(&m_Device->Ring, &m_Format);
+                    if (!Oa2dpRingBeginStream(&m_Device->Ring, &m_Format, &m_PcmSequence)) {
+                        KeReleaseSpinLock(&m_PositionSpinLock, oldIrql);
+                        return STATUS_INVALID_DEVICE_STATE;
+                    }
                     m_NeedsPcmEpoch = FALSE;
                 }
                 // Start DMA
                 m_RunStartQpc = KeQueryPerformanceCounter(&m_PerfFrequency);
+                m_WaitingForConsumer = !Oa2dpRingConsumerReady(&m_Device->Ring, m_PcmSequence);
             }
             break;
         default:
@@ -816,14 +828,14 @@ CMiniportWaveRTStream::SetState
     if (wasRunning && State_ != KSSTATE_RUN)
     {
         ExCancelTimer(m_pNotificationTimer, NULL);
-        Oa2dpReportStream(m_Device, &m_Format, FALSE);
+        Oa2dpReportStream(m_Device, &m_Format, FALSE, m_PcmSequence);
     }
     else if (!wasRunning && State_ == KSSTATE_RUN)
     {
         // 1 ms software hardware-emulation timer; notification cadence comes
         // from actual packet progress, including intervening position queries.
         ExSetTimer(m_pNotificationTimer, -(LONGLONG)OA2DP_HNS_PER_MS, OA2DP_HNS_PER_MS, NULL);
-        Oa2dpReportStream(m_Device, &m_Format, TRUE);
+        Oa2dpReportStream(m_Device, &m_Format, TRUE, m_PcmSequence);
     }
     return STATUS_SUCCESS;
 }

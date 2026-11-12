@@ -49,7 +49,7 @@ struct Packetizer {
         : pkt(mtu), spf(samples), flush_each(flush) {
         REQUIRE(oa2dp_rtp_init(&rtp, codec, pkt.data(), pkt.size(), 1) == OA2DP_OK);
     }
-    void send_packet(size_t len) {
+    void send_packet(size_t len, uint32_t = 0) {
         REQUIRE(len <= pkt.size());
         if (len && streaming_) {
             if (fail_send) {
@@ -59,6 +59,7 @@ struct Packetizer {
             sent.emplace_back(pkt.begin(), pkt.begin() + len);
         }
     }
+    void flush_packet() { const uint32_t samples=rtp.samples; send_packet(oa2dp_rtp_flush(&rtp),samples); }
     void add(const std::vector<uint8_t> &out, uint8_t frames) {
         const size_t len = out.size();
 #include "service-rtp-under-test.inc"
@@ -72,6 +73,7 @@ struct Packetizer {
     }
     void no_pcm(int read_status=OA2DP_OK) {
         const uint32_t read_frames=0;
+        const bool block_ready=false;
         const bool timing=true;
         const LARGE_INTEGER clock_rate{1000000};
         uint64_t max_wait_us=0,wait_count=0;

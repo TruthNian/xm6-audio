@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(XM6Audio VERSION 0.4.1 LANGUAGES C CXX)
+project(XM6Audio VERSION 0.4.2 LANGUAGES C CXX)
 
 # The loaded binary's version must agree with the configured project and INF.
 # Generate resources in the build tree rather than keeping a stale copy.
@@ -206,6 +206,15 @@ if(OA2DP_BUILD_TESTS)
     target_include_directories(test_stream_start PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
     target_link_libraries(test_stream_start PRIVATE oa2dp_core)
     add_test(NAME stream_start COMMAND test_stream_start)
+    add_executable(test_short_clips tools/test-short-clips.cpp)
+    target_link_libraries(test_short_clips PRIVATE oa2dp_core)
+    add_test(NAME short_clips COMMAND test_short_clips)
+    xm6_test_body(service/src/session.cpp "    case Cmd::AudioFormat:"
+        "\n    case Cmd::AudioUnavailable:" clip-lifecycle)
+    add_executable(test_clip_lifecycle tools/test-clip-lifecycle.cpp)
+    target_include_directories(test_clip_lifecycle PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
+    target_link_libraries(test_clip_lifecycle PRIVATE oa2dp_core)
+    add_test(NAME clip_lifecycle COMMAND test_clip_lifecycle)
     xm6_test_body(service/src/driver_io.cpp "bool Transport::finish_slot(" "\nbool Transport::send_media(" media-finish)
     xm6_test_body(service/src/driver_io.cpp "bool Transport::send_media(" "\nvoid Transport::cancel_media(" media-send)
     xm6_test_body(service/src/driver_io.cpp "bool Transport::drain_media(" "\n// --------------------------------------------------------------------------\n\nbool AudioEndpoint::open(" media-drain)
@@ -291,7 +300,7 @@ if(OA2DP_BUILD_TESTS)
     xm6_test_body(service/src/session.cpp "        int r = oa2dp_rtp_add_frames("
         "\n        DWORD now = GetTickCount();" service-rtp)
     xm6_test_body(service/src/session.cpp "        if (read_status == OA2DP_ERR_BUSY ||"
-        "\n        if (read_status != OA2DP_OK || read_frames != spc)" service-pcm-wait)
+        "\n        if (read_status != OA2DP_OK || !block_ready || read_frames > spc)" service-pcm-wait)
     add_executable(test_service_rtp tools/test-service-rtp.cpp)
     target_include_directories(test_service_rtp PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
     target_link_libraries(test_service_rtp PRIVATE oa2dp_core)
@@ -367,6 +376,12 @@ elseif(XM6_REQUIRE_LDAC)
 endif()
 
 if(OA2DP_BUILD_TESTS)
+    xm6_test_body(service/src/session.cpp "void Session::stream_loop("
+        "\n}  // namespace oa2dp" stream-loop)
+    add_executable(test_stream_loop tools/test-stream-loop.cpp)
+    target_include_directories(test_stream_loop PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
+    target_link_libraries(test_stream_loop PRIVATE oa2dp_codecs)
+    add_test(NAME stream_loop COMMAND test_stream_loop)
     if(TARGET ldac)
         target_compile_definitions(test_service_rtp PRIVATE XM6_TEST_WITH_CODECS)
         target_link_libraries(test_service_rtp PRIVATE oa2dp_codecs)
@@ -418,7 +433,8 @@ if(MSVC)
     foreach(binary IN ITEMS oa2dp_core oa2dp_codecs oa2dp_manage oa2dpsvc oa2dpctl
                             oa2dpgui ldac sbc oa2dp_tests test_encoders verify_native_metadata test_ks_attributes
                             test_ring_concurrency test_profile_retry test_handle_lifetime test_endpoint_formats
-                            test_service_rtp test_peer_format test_aac_media_type test_aac_backend test_pcm_quantization)
+                            test_service_rtp test_peer_format test_aac_media_type test_aac_backend test_pcm_quantization
+                            test_short_clips test_clip_lifecycle test_stream_start test_stream_loop)
         if(TARGET ${binary})
             set_property(TARGET ${binary} PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
         endif()

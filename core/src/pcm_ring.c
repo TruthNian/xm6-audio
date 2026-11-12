@@ -114,6 +114,7 @@ int oa2dp_ring_init(oa2dp_pcm_ring *r, uint32_t capacity, uint32_t sample_rate,
     r->channels = channels;
     r->storage_channels = channels;
     r->format = format;
+    r->consumer_sequence = UINT32_MAX;
     return OA2DP_OK;
 }
 
@@ -157,6 +158,32 @@ int oa2dp_ring_snapshot(const oa2dp_pcm_ring *r, oa2dp_ring_format *format)
     return OA2DP_OK;
 }
 
+int oa2dp_ring_admit(oa2dp_pcm_ring *r, const oa2dp_ring_format *format)
+{
+    oa2dp_ring_format current;
+    int status = oa2dp_ring_snapshot(r, &current);
+    if (status != OA2DP_OK) return status;
+    if (!format || current.sequence != format->sequence ||
+        current.start_pos != format->start_pos || current.sample_rate != format->sample_rate ||
+        current.channels != format->channels || current.format != format->format ||
+        current.capacity != format->capacity || current.storage_channels != format->storage_channels)
+        return OA2DP_ERR_STATE;
+    store32(&r->consumer_sequence, current.sequence);
+    return load32(&r->format_sequence) == current.sequence ? OA2DP_OK : OA2DP_ERR_STATE;
+}
+
+void oa2dp_ring_retire(oa2dp_pcm_ring *r)
+{
+    store32(&r->consumer_sequence, UINT32_MAX);
+}
+
+bool oa2dp_ring_consumer_ready(const oa2dp_pcm_ring *r)
+{
+    uint32_t sequence = load32(&r->format_sequence);
+    return !(sequence & 1) && load32(&r->consumer_sequence) == sequence &&
+        load32(&r->format_sequence) == sequence;
+}
+
 static int set_format(oa2dp_pcm_ring *r, uint32_t rate, uint16_t channels, uint16_t format, int new_epoch)
 {
     if (!r || !rate || !channels || channels > r->storage_channels ||
@@ -173,8 +200,10 @@ static int set_format(oa2dp_pcm_ring *r, uint32_t rate, uint16_t channels, uint1
     store16(&r->format, format);
     store64(&r->format_start_pos, load64(&r->write_pos));
 #if defined(_MSC_VER)
+    (void)_InterlockedAnd((volatile long *)&r->flags, ~(long)OA2DP_RING_FLAG_EOS);
     (void)_InterlockedOr((volatile long *)&r->flags, OA2DP_RING_FLAG_FORMAT_CHANGED);
 #else
+    (void)__atomic_fetch_and(&r->flags, ~OA2DP_RING_FLAG_EOS, __ATOMIC_SEQ_CST);
     (void)__atomic_fetch_or(&r->flags, OA2DP_RING_FLAG_FORMAT_CHANGED, __ATOMIC_SEQ_CST);
 #endif
     store32(&r->format_sequence, sequence + 2);
@@ -323,9 +352,11 @@ uint32_t oa2dp_ring_write_pcm(oa2dp_pcm_ring *r, const void *data, uint32_t fram
     return write_samples(r, data, frames, container_bits);
 }
 
-int oa2dp_ring_read(oa2dp_pcm_ring *r, const oa2dp_ring_format *format,
-                    void *data, size_t data_bytes, uint32_t frames, uint32_t *read_frames)
+static int read_samples(oa2dp_pcm_ring *r, const oa2dp_ring_format *format,
+                    void *data, size_t data_bytes, uint32_t frames,
+                    uint32_t *read_frames, bool *ready)
 {
+    if (ready) *ready = false;
     if (!read_frames)
         return OA2DP_ERR_INVAL;
     *read_frames = 0;
@@ -350,8 +381,13 @@ int oa2dp_ring_read(oa2dp_pcm_ring *r, const oa2dp_ring_format *format,
     if (w < rd || w - rd > format->capacity)
         return OA2DP_ERR_PROTO;
     uint32_t n = w - rd >= frames ? frames : 0;
+    const uint32_t flags = load32(&r->flags);
+    const bool pad = ready && (flags & (OA2DP_RING_FLAG_RUNNING | OA2DP_RING_FLAG_EOS)) != OA2DP_RING_FLAG_RUNNING;
+    if (pad && !n) n = (uint32_t)(w - rd);
     if (n)
         copy_out(r, format, rd, (uint8_t *)data, n);
+    if (pad && n < frames)
+        memset((uint8_t *)data + n * fb, 0, (frames - n) * fb);
     OA2DP_FENCE();
     if (load32(&r->format_sequence) != format->sequence)
         return OA2DP_ERR_STATE;
@@ -359,7 +395,22 @@ int oa2dp_ring_read(oa2dp_pcm_ring *r, const oa2dp_ring_format *format,
     // ring from the previous format cannot starve its new producer.
     store64(&r->read_pos, rd + n);
     *read_frames = n;
+    if (ready) *ready = n == frames || pad;
     return OA2DP_OK;
+}
+
+int oa2dp_ring_read(oa2dp_pcm_ring *r, const oa2dp_ring_format *format,
+                    void *data, size_t data_bytes, uint32_t frames, uint32_t *read_frames)
+{
+    return read_samples(r, format, data, data_bytes, frames, read_frames, NULL);
+}
+
+int oa2dp_ring_read_block(oa2dp_pcm_ring *r, const oa2dp_ring_format *format,
+                    void *data, size_t data_bytes, uint32_t frames,
+                    uint32_t *read_frames, bool *ready)
+{
+    if (!ready) return OA2DP_ERR_INVAL;
+    return read_samples(r, format, data, data_bytes, frames, read_frames, ready);
 }
 
 /* Consumer-only; kept out of oa2dpaudio.sys, which never touches floats. */

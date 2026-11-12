@@ -19,7 +19,7 @@ extern "C" {
 #endif
 
 #define OA2DP_RING_MAGIC 0x4D435041u /* "APCM" */
-#define OA2DP_RING_VERSION 2
+#define OA2DP_RING_VERSION 3
 
 #define OA2DP_RING_FMT_FLOAT32 0 /* interleaved IEEE float, nominal [-1, 1] */
 #define OA2DP_RING_FMT_S32 1     /* interleaved int32, 24-bit values */
@@ -27,6 +27,7 @@ extern "C" {
 
 #define OA2DP_RING_FLAG_RUNNING 0x1        /* endpoint is rendering */
 #define OA2DP_RING_FLAG_FORMAT_CHANGED 0x2 /* consumer must re-read format */
+#define OA2DP_RING_FLAG_EOS 0x4            /* final valid source frame committed */
 
 #if defined(_MSC_VER)
 #define OA2DP_ALIGN8 __declspec(align(8))
@@ -49,7 +50,8 @@ typedef struct {
     uint16_t storage_channels; /* immutable slot stride; channels may be smaller */
     uint16_t reserved0;
     OA2DP_ALIGN8 volatile uint64_t format_start_pos; /* first frame of this format */
-    uint32_t reserved[4];
+    volatile uint32_t consumer_sequence; /* admitted encoder epoch; odd = retired */
+    uint32_t reserved[3];
     /* followed by capacity * storage_channels * 4 bytes of sample data */
 } oa2dp_pcm_ring;
 
@@ -89,6 +91,11 @@ uint32_t oa2dp_ring_readable(const oa2dp_pcm_ring *r);
 uint32_t oa2dp_ring_writable(const oa2dp_pcm_ring *r);
 /* Atomic diagnostic snapshot; use instead of reading a live counter directly. */
 uint64_t oa2dp_ring_overruns(const oa2dp_pcm_ring *r);
+/* The virtual hardware clock must not consume Windows' cyclic buffer before
+ * the codec/transport accepts this epoch. Only the consumer publishes admission. */
+int oa2dp_ring_admit(oa2dp_pcm_ring *r, const oa2dp_ring_format *format);
+void oa2dp_ring_retire(oa2dp_pcm_ring *r);
+bool oa2dp_ring_consumer_ready(const oa2dp_pcm_ring *r);
 
 /* Producer: copy up to `frames`; returns frames written. */
 uint32_t oa2dp_ring_write(oa2dp_pcm_ring *r, const void *data, uint32_t frames);
@@ -106,6 +113,14 @@ uint32_t oa2dp_ring_write_pcm(oa2dp_pcm_ring *r, const void *data, uint32_t fram
  * released even if the new format has no full block yet. Output is bounded. */
 int oa2dp_ring_read(oa2dp_pcm_ring *r, const oa2dp_ring_format *format,
                     void *data, size_t data_bytes, uint32_t frames, uint32_t *read_frames);
+/* Service block reader: while RUNning, wait for a complete block. On PAUSE,
+ * STOP or committed EOS, preserve any partial tail and zero-pad the remainder.
+ * `ready` also permits paced silence after the source tail, flushing codec
+ * lookahead during the existing idle grace period. `read_frames` counts only
+ * real source frames, never padding. Caller must pace the resulting media. */
+int oa2dp_ring_read_block(oa2dp_pcm_ring *r, const oa2dp_ring_format *format,
+                    void *data, size_t data_bytes, uint32_t frames,
+                    uint32_t *read_frames, bool *ready);
 /* Consumer: explicitly abandon queued PCM. Never use at encoder admission:
  * the current clip may already be queued. Epoch boundaries reject old clips. */
 uint32_t oa2dp_ring_discard(oa2dp_pcm_ring *r);

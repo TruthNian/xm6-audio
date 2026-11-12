@@ -316,19 +316,19 @@ static VOID FailWaits(_Inout_ OA2DP_AUDIO_DEVICE *dev, _In_opt_ PFILE_OBJECT fo,
 /* Called by the WaveRT stream on a new format and on RUN / leaving RUN. The
  * latest state wins if the service has not picked up the previous one. */
 extern "C" VOID Oa2dpReportStream(_Inout_ OA2DP_AUDIO_DEVICE *dev, _In_ const OA2DP_FORMAT *format,
-                                  _In_ BOOLEAN running)
+                                  _In_ BOOLEAN running, ULONG sequence)
 {
     OA2DP_FORMAT_CHANGE ev;
     KIRQL irql;
     PIRP irp;
 
     KeAcquireSpinLock(&dev->Lock, &irql);
-    // Commit format and epoch together. A GET_STATE between RingSetFormat and
+    // Commit format and epoch together. A GET_STATE between RingBeginStream and
     // this report must retain the old epoch, so the encoder defers starting.
     // Device -> ring is the only nested order; ring producers do not take Lock.
     KeAcquireSpinLockAtDpcLevel(&dev->Ring.Lock);
     oa2dp_pcm_ring *ring = dev->Ring.Ring;
-    if (!ring || !dev->Ring.SourceFormatValid ||
+    if (!ring || ring->format_sequence != sequence || !dev->Ring.SourceFormatValid ||
         !oa2dp_pcm_format_same(&dev->Ring.SourceFormat, format) ||
         ring->sample_rate != format->SampleRate || ring->channels != format->Channels ||
         ring->format != oa2dp_pcm_format_ring_type(format)) {

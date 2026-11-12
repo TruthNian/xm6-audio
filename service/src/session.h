@@ -163,6 +163,9 @@ private:
     std::deque<Command> cmd_q_;
     std::atomic<bool> stopping_{false};
     std::atomic<bool> streaming_{false};
+    // Only the policy thread may authorize an identical-format producer epoch
+    // for the running encoder; normalized ring layout alone loses valid bits.
+    std::atomic<ULONG> approved_pcm_sequence_{0};
 
     // shared with the stream thread
     std::atomic<uint32_t> delay_report_us_{0};

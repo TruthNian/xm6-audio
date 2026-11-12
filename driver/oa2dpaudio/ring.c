@@ -113,6 +113,7 @@ VOID Oa2dpRingUnmapUser(_Inout_ OA2DP_AUDIO_RING *r)
     KAPC_STATE apc;
 
     (void)Oa2dpRingSetDataEvent(r, NULL, 0, KernelMode);
+    if (r->Ring) oa2dp_ring_retire(r->Ring);
     if (!r->UserVa)
         return;
     if (r->UserProcess == PsGetCurrentProcess()) {
@@ -163,20 +164,22 @@ NTSTATUS Oa2dpRingSetDataEvent(OA2DP_AUDIO_RING *r, HANDLE event,
 
 /* Rewrites only the format fields: positions keep counting, so a consumer
  * that is still running never sees them jump backwards. */
-static BOOLEAN SetProducerFormat(OA2DP_AUDIO_RING *r, const OA2DP_FORMAT *format, BOOLEAN newStream)
+BOOLEAN Oa2dpRingBeginStream(OA2DP_AUDIO_RING *r, const OA2DP_FORMAT *format, ULONG *sequence)
 {
     KIRQL irql;
     BOOLEAN changed = FALSE;
+    if (sequence) *sequence = MAXULONG;
 
     if (!oa2dp_pcm_format_valid(format))
         return FALSE;
     KeAcquireSpinLock(&r->Lock, &irql);
-    if (r->Ring && (newStream || !r->SourceFormatValid || !oa2dp_pcm_format_same(&r->SourceFormat, format))) {
+    if (r->Ring) {
         changed = oa2dp_ring_begin_format(r->Ring, format->SampleRate, format->Channels,
             oa2dp_pcm_format_ring_type(format)) > 0;
         if (changed) {
             r->SourceFormat = *format;
             r->SourceFormatValid = TRUE;
+            if (sequence) *sequence = r->Ring->format_sequence;
         }
     }
     if (changed && r->DataEvent) KeSetEvent(r->DataEvent, IO_NO_INCREMENT, FALSE);
@@ -184,16 +187,26 @@ static BOOLEAN SetProducerFormat(OA2DP_AUDIO_RING *r, const OA2DP_FORMAT *format
     return changed;
 }
 
-BOOLEAN Oa2dpRingSetFormat(OA2DP_AUDIO_RING *r, const OA2DP_FORMAT *format)
+BOOLEAN Oa2dpRingConsumerReady(OA2DP_AUDIO_RING *r, ULONG sequence)
 {
-    return SetProducerFormat(r, format, FALSE);
+    KIRQL irql;
+    BOOLEAN ready;
+    KeAcquireSpinLock(&r->Lock, &irql);
+    ready = r->Ring && r->Ring->format_sequence == sequence && oa2dp_ring_consumer_ready(r->Ring);
+    KeReleaseSpinLock(&r->Lock, irql);
+    return ready;
 }
 
-/* A fresh WaveRT clip is a new producer epoch even when its PCM format is
- * identical. Establish this boundary before the first sample can be pumped. */
-BOOLEAN Oa2dpRingBeginStream(OA2DP_AUDIO_RING *r, const OA2DP_FORMAT *format)
+VOID Oa2dpRingEndSource(OA2DP_AUDIO_RING *r, ULONG sequence)
 {
-    return SetProducerFormat(r, format, TRUE);
+    KIRQL irql;
+    KeAcquireSpinLock(&r->Lock, &irql);
+    if (r->Ring && r->Ring->format_sequence == sequence) {
+        LONG old = InterlockedOr((volatile LONG *)&r->Ring->flags, OA2DP_RING_FLAG_EOS);
+        if (!(old & OA2DP_RING_FLAG_EOS) && r->DataEvent)
+            KeSetEvent(r->DataEvent, IO_NO_INCREMENT, FALSE);
+    }
+    KeReleaseSpinLock(&r->Lock, irql);
 }
 
 VOID Oa2dpRingSetRunning(_Inout_ OA2DP_AUDIO_RING *r, _In_ BOOLEAN running)
@@ -216,7 +229,7 @@ VOID Oa2dpRingSetRunning(_Inout_ OA2DP_AUDIO_RING *r, _In_ BOOLEAN running)
  * closing stream. */
 VOID Oa2dpRingPump(_Inout_ OA2DP_AUDIO_RING *r, _In_reads_bytes_(cyclicBytes) const UCHAR *cyclic,
                    _In_ ULONG cyclicBytes, _In_ ULONG pos, _In_ ULONG frames,
-                   _In_ const OA2DP_FORMAT *format)
+                   _In_ const OA2DP_FORMAT *format, ULONG sequence)
 {
     KIRQL irql;
     USHORT channels = format->Channels;
@@ -230,7 +243,8 @@ VOID Oa2dpRingPump(_Inout_ OA2DP_AUDIO_RING *r, _In_reads_bytes_(cyclicBytes) co
     if (pos >= cyclicBytes)
         pos = 0;
     KeAcquireSpinLock(&r->Lock, &irql);
-    if (r->Ring && r->SourceFormatValid && oa2dp_pcm_format_same(&r->SourceFormat, format) &&
+    if (r->Ring && r->Ring->format_sequence == sequence &&
+        r->SourceFormatValid && oa2dp_pcm_format_same(&r->SourceFormat, format) &&
         r->Ring->sample_rate == format->SampleRate &&
         r->Ring->channels == channels && r->Ring->format == want) {
         while (frames) {

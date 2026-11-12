@@ -135,6 +135,9 @@ struct Session {
     DWORD next_profile_retry_ = 0;
     ULONG pcm_sequence_ = 0, media_generation_ = 2, sig_generation_ = 1;
     ULONG stream_generation_ = 0, suspend_serial_ = 1;
+    std::atomic<ULONG> approved_pcm_sequence_{0};
+    bool audio_running_ = true;
+    DWORD idle_since_ = 0;
     USHORT media_mtu_ = 1000;
     bool stream_stop_ = true;
     HANDLE stream_stop_event_ = &stream_stop_;
@@ -469,6 +472,13 @@ int main() {
         s.sig_open_ = s.media_open_ = true; s.sig_generation_ = 8;
         REQUIRE(s.update_suspend_state() && !s.suspend_publication_pending_);
         REQUIRE(!s.audio_.suspended && s.audio_.connection == 8);
+    }
+    {
+        Session s;
+        s.audio_running_ = false;
+        s.av_.sep.state = OA2DP_SEP_STREAMING;
+        s.begin_streaming();
+        REQUIRE(s.streaming_ && s.idle_since_ == GetTickCount());
     }
     std::puts("production profile retry and closed-link epoch admission checks passed (external APIs fake)");
 }

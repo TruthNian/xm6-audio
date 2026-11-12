@@ -1,4 +1,4 @@
-# Short-clip startup correction (0.4.1)
+# Short-clip pipeline review (0.4.1 / 0.4.2 candidate)
 
 On 2026-11-12, the owner reported missing beginnings of pronunciation clips
 in the Shici Windows application on the 0.4.0 native driver. This concrete bug
@@ -33,6 +33,58 @@ representations, identical-format clip replacement, old-epoch rejection,
 STOP/reuse and PAUSE/resume. Opt-in EncoderStart/FirstPcm timing events record
 only epochs, frame positions and counts, never audio content.
 
-The patch requires both the endpoint driver and service. Source checks do not
-replace exact-package deployment and real short-clip acceptance. Those results
-will be recorded separately; this report does not claim the hearing result.
+## 0.4.1 result: incomplete correction
+
+The exact 0.4.1 package was locally test-signed and activated with both kernel
+images and the service verified. The owner still reported a missing beginning
+or another playback problem. It is **not** an accepted fix or a stable release.
+
+In the deployment trace, nine subsequent starts preserved their first checked
+PCM block. Two started with 32,768 and 32,750 queued frames (the ring capacity
+is 32,768). In the first 100 ms of those nine starts, completed LDAC HQ packets
+represented approximately 123–155 ms of 96 kHz audio. These are host transport
+completion times and represented sample counts, not proof of receiver playback
+or a measurement of exactly which audible samples were lost. They expose
+startup backlog and catch-up bursts that the first patch did not address.
+
+The earlier zero-overrun-window result was also too narrow: its baseline was
+taken after encoder creation, so startup losses and subsecond streams were not
+fully represented. No PCM content or private device identifiers are published.
+
+## 0.4.2: combined pipeline correction
+
+The owner requested a complete source review and a single combined deployment,
+rather than incremental installation/listening experiments. The review covers
+the WaveRT clock, source lifetime, ring admission, codec input, packet pacing,
+end-of-stream and cancellation paths.
+
+| Stage | Defect or gap | Correction and offline coverage |
+| --- | --- | --- |
+| Virtual hardware clock | RUN immediately advanced the OS cyclic buffer while AVDTP START and encoder creation were still pending. A finite ring could overflow before the first reader, despite the removed discard. | The encoder admits its exact producer epoch only after transport/codec readiness. The initial WaveRT clock waits without consuming packet zero. The actual clock body is tested with a 900 ms delayed consumer, plus paused-stream restart. |
+| Stream ownership | A pin open/probe changed the producer epoch before RUN. Format equality also did not distinguish a late callback from an older identical-format stream. | Establish the epoch at RUN. Pump, EOS, ready checks and state publication carry the producer sequence. Tests reject old identical-format PCM, STOP and EOS without disturbing the new stream. |
+| Repeated short clips | Every new producer sequence forced SUSPEND/START, recreated LDAC and reset RTP identity even when full PCM format was unchanged. | The policy thread authorizes only a full-format match (including valid bits); the existing encoder adopts that epoch. Actual format, HFP and disconnect changes still retire the stream. Production-handler tests exercise these distinctions. |
+| PCM tail / codec lookahead | The reader required a complete block. Partial EOS data remained queued; an empty ring did not supply the subsequent samples needed to emit codec lookahead. | Preserve the partial tail and zero-pad only after PAUSE/STOP or committed EOS. Paced silence during the existing three-second idle grace drains codec output and maintains the receiver stream between short clips. Active partial blocks still wait for real PCM. Peer START without a source also gets a bounded idle deadline. |
+| Media timing | Completed/queued Bluetooth sends limited throughput but did not enforce the represented audio time; queued startup PCM could be sent as a burst. | Sample-count packet deadlines, fractional clock carry and cancellable waitable timers. A long scheduling stall cannot cause an unbounded catch-up burst. RTP fragmentation advances the deadline only once per represented frame group. |
+| Observability | First-sample data loss was invisible to successful-send counts; startup overruns and short stream tails could escape one-second summaries. | EncoderStart/PcmEpoch/FirstPcm/MediaSubmit/EncoderEnd record epoch positions, source/padding counts, media-frame counts and total overruns. ETW remains opt-in and contains no audio samples. |
+
+Ring protocol version 3 occupies an existing reserved header word for consumer
+admission and rejects mixed old/new mappings. The endpoint driver and service
+must be deployed together; no registry sound tweak, per-application workaround,
+radio ownership change or background keepalive application is introduced.
+
+The complete production `stream_loop` is compiled into an offline fixture with
+scripted PCM/time/OS waits and the real LDAC encoder. At 44.1/48/88.2/96 kHz it
+checks that two short clips retain every one of 4,226 source frames across two
+producer epochs with one encoder, emit continuous RTP timestamps, obey media
+deadlines, flush through silence and cancel cleanly. Separate ring fixtures
+cover mono/stereo, all ring representations, 1/127/128/129/255/511/2401-frame
+clips, stale epochs and unapproved format changes. This validates input
+preservation and host packet scheduling, not acoustic output from a headset.
+
+The pacing distinction is also consistent with
+[PipeWire's media sender](https://github.com/PipeWire/pipewire/blob/master/spa/plugins/bluez5/media-sink.c),
+which limits queued-media flushing by represented sample time. That comparison
+does not establish the cause of a particular receiver's audible behavior.
+
+Exact-package activation and a final real short-clip acceptance remain separate
+gates. Do not label the 0.4.2 candidate an accepted or stable fix until recorded.

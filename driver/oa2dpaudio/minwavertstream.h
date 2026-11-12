@@ -74,6 +74,8 @@ private:
     KSPIN_LOCK                  m_PositionSpinLock;
     KSSTATE                     m_KsState;
     BOOLEAN                     m_NeedsPcmEpoch; // STOP reuse; PAUSE preserves the current epoch
+    BOOLEAN                     m_WaitingForConsumer;
+    ULONG                       m_PcmSequence;
 
     BYTE                       *m_pDmaBuffer;
     ULONG                       m_ulDmaBufferSize;

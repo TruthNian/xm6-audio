@@ -34,6 +34,7 @@ constexpr NTSTATUS STATUS_SUCCESS = 0, STATUS_INVALID_PARAMETER = -1, STATUS_DEV
 constexpr bool FALSE = false, TRUE = true;
 constexpr int IO_NO_INCREMENT = 0, EVENT_MODIFY_STATE = 2;
 constexpr unsigned RING_FRAMES = 8, OA2DP_RING_MAX_CHANNELS = 2, OA2DP_PUMP_CHUNK = 256;
+constexpr ULONG MAXULONG = UINT32_MAX;
 struct FakeEvent {
     int references = 0, signals = 0;
     bool signalled = false, valid = true;
@@ -96,6 +97,14 @@ struct OA2DP_AUDIO_RING {
     bool SourceFormatValid = false;
 };
 #include "pcm-notification-under-test.inc"
+// Existing format-focused fixtures use the current producer. Epoch-race
+// fixtures below pass explicit old/new identities to the production functions.
+static bool Oa2dpRingBeginStream(OA2DP_AUDIO_RING *r,const OA2DP_FORMAT *f) {
+    ULONG sequence; return Oa2dpRingBeginStream(r,f,&sequence);
+}
+static void Oa2dpRingPump(OA2DP_AUDIO_RING *r,const UCHAR *p,ULONG bytes,ULONG pos,ULONG frames,const OA2DP_FORMAT *f) {
+    Oa2dpRingPump(r,p,bytes,pos,frames,f,r->Ring->format_sequence);
+}
 struct OA2DP_FORMAT_CHANGE {
     OA2DP_FORMAT Format{};
     ULONG PcmSequence = 0;
@@ -122,6 +131,9 @@ static void SnapshotStateLocked(OA2DP_AUDIO_DEVICE *dev, OA2DP_FORMAT_CHANGE *ev
 static PIRP IoCsqRemoveNextIrp(int *, void *) { REQUIRE(locked); return nullptr; }
 static void CompleteWait(PIRP, const OA2DP_FORMAT_CHANGE *) { REQUIRE(!locked); }
 #include "pcm-report-under-test.inc"
+static void Oa2dpReportStream(OA2DP_AUDIO_DEVICE *d,const OA2DP_FORMAT *f,bool running) {
+    Oa2dpReportStream(d,f,running,d->Ring.Ring->format_sequence);
+}
 static bool wait(FakeEvent &e) {
     bool signalled = e.signalled;
     e.signalled = false;
@@ -136,7 +148,7 @@ static void integer_pump() {
             const auto type = bits == 32 ? OA2DP_RING_FMT_S32_FULL : OA2DP_RING_FMT_S32;
             REQUIRE(oa2dp_ring_init(r.Ring, 8, 48000, 2, type) == 0);
             OA2DP_FORMAT format{48000, channels, bits, bits, OA2DP_PCM_INTEGER};
-            REQUIRE(Oa2dpRingSetFormat(&r, &format));
+            REQUIRE(Oa2dpRingBeginStream(&r, &format));
             const int32_t values[] = {-32768, 32767, -1, 0, 1, -1234, 1234, 42};
             const size_t width = bits / 8, frame_bytes = channels * width;
             std::vector<UCHAR> input(8 * frame_bytes);
@@ -183,10 +195,10 @@ static void precision_epoch() {
         OA2DP_FORMAT before{48000, 2, width[0], width[1], OA2DP_PCM_INTEGER};
         OA2DP_FORMAT after{48000, 2, width[2], width[3], OA2DP_PCM_INTEGER};
         REQUIRE(oa2dp_ring_init(r.Ring, 8, 48000, 2, oa2dp_pcm_format_ring_type(&before)) == 0);
-        (void)Oa2dpRingSetFormat(&r, &before);
+        (void)Oa2dpRingBeginStream(&r, &before);
         oa2dp_ring_format old_snapshot{}, new_snapshot{};
         REQUIRE(oa2dp_ring_snapshot(r.Ring, &old_snapshot) == 0);
-        const bool changed = Oa2dpRingSetFormat(&r, &after);
+        const bool changed = Oa2dpRingBeginStream(&r, &after);
         REQUIRE(oa2dp_ring_snapshot(r.Ring, &new_snapshot) == 0);
         UCHAR samples[32]{};
         Oa2dpRingPump(&r, samples, sizeof(samples), 0, 2, &after);
@@ -200,9 +212,8 @@ static void precision_epoch() {
         const auto written = r.Ring->write_pos;
         Oa2dpRingPump(&r, samples, sizeof(samples), 0, 2, &before);
         REQUIRE(r.Ring->write_pos == written); // obsolete producer metadata cannot enter the new epoch
-        REQUIRE(!Oa2dpRingSetFormat(&r, &after));
         REQUIRE(r.Ring->format_sequence == new_snapshot.sequence);
-        REQUIRE(Oa2dpRingSetFormat(&r, &before));
+        REQUIRE(Oa2dpRingBeginStream(&r, &before));
         REQUIRE(r.Ring->format_sequence != old_snapshot.sequence && r.Ring->format_sequence != new_snapshot.sequence);
         REQUIRE(oa2dp_ring_read(r.Ring, &old_snapshot, output, sizeof(output), 2, &count) == OA2DP_ERR_STATE);
 
@@ -213,7 +224,7 @@ static void precision_epoch() {
         dev.Bus.SetPlaying = [](void *context, bool) { REQUIRE(!locked); ++*static_cast<unsigned *>(context); };
         Oa2dpReportStream(&dev, &before, TRUE);
         REQUIRE(!dev.EventPending && publications == 0); // no committed producer format yet
-        REQUIRE(Oa2dpRingSetFormat(&dev.Ring, &after));
+        REQUIRE(Oa2dpRingBeginStream(&dev.Ring, &after));
         FakeEvent notification;
         REQUIRE(Oa2dpRingSetDataEvent(&dev.Ring, &notification, 1, UserMode) == 0);
         Oa2dpReportStream(&dev, &after, TRUE);
@@ -251,7 +262,35 @@ static void new_clip_epoch() {
     REQUIRE(oa2dp_ring_read(ring.Ring,&current,output,sizeof(output),2,&frames)==0);
     REQUIRE(frames==2 && output[0]==11 && output[3]==14);
 }
+static void obsolete_producer() {
+    std::vector<uint64_t> storage((oa2dp_ring_bytes(8,2)+7)/8);
+    OA2DP_AUDIO_DEVICE d;
+    d.Ring.Ring=reinterpret_cast<oa2dp_pcm_ring *>(storage.data());
+    OA2DP_FORMAT f{48000,2,32,32,OA2DP_PCM_INTEGER};
+    REQUIRE(oa2dp_ring_init(d.Ring.Ring,8,48000,2,OA2DP_RING_FMT_S32_FULL)==0);
+    ULONG old=0,current=0;
+    REQUIRE(Oa2dpRingBeginStream(&d.Ring,&f,&old));
+    REQUIRE(Oa2dpRingBeginStream(&d.Ring,&f,&current) && current!=old);
+    Oa2dpReportStream(&d,&f,true,current);
+    d.EventPending=false;
+    Oa2dpReportStream(&d,&f,false,old);
+    REQUIRE(d.Running && !d.EventPending && (d.Ring.Ring->flags&OA2DP_RING_FLAG_RUNNING));
+    int32_t pcm[4]={1,2,3,4};
+    Oa2dpRingPump(&d.Ring,reinterpret_cast<const UCHAR *>(pcm),sizeof(pcm),0,2,&f,old);
+    REQUIRE(d.Ring.Ring->write_pos==0);
+    Oa2dpRingEndSource(&d.Ring,old);
+    REQUIRE(!(d.Ring.Ring->flags&OA2DP_RING_FLAG_EOS));
+    Oa2dpRingPump(&d.Ring,reinterpret_cast<const UCHAR *>(pcm),sizeof(pcm),0,2,&f,current);
+    REQUIRE(d.Ring.Ring->write_pos==2);
+    Oa2dpRingEndSource(&d.Ring,current);
+    REQUIRE(d.Ring.Ring->flags&OA2DP_RING_FLAG_EOS);
+    oa2dp_ring_format snapshot{};
+    REQUIRE(oa2dp_ring_snapshot(d.Ring.Ring,&snapshot)==0);
+    REQUIRE(oa2dp_ring_admit(d.Ring.Ring,&snapshot)==0);
+    REQUIRE(Oa2dpRingConsumerReady(&d.Ring,current) && !Oa2dpRingConsumerReady(&d.Ring,old));
+}
 int main() {
+    obsolete_producer();
     new_clip_epoch();
     precision_epoch();
     std::vector<uint64_t> storage((oa2dp_ring_bytes(8, 2) + 7) / 8);
@@ -259,7 +298,7 @@ int main() {
     r.Ring = reinterpret_cast<oa2dp_pcm_ring *>(storage.data());
     REQUIRE(oa2dp_ring_init(r.Ring, 8, 48000, 2, OA2DP_RING_FMT_FLOAT32) == 0);
     OA2DP_FORMAT f{48000, 2, 32, 32, OA2DP_PCM_FLOAT};
-    REQUIRE(Oa2dpRingSetFormat(&r, &f));
+    REQUIRE(Oa2dpRingBeginStream(&r, &f));
     FakeEvent a, b, bad;
     bad.valid = false;
     REQUIRE(Oa2dpRingSetDataEvent(&r, &a, 4, UserMode) == 0 && a.references == 1);
@@ -285,15 +324,15 @@ int main() {
     REQUIRE(Oa2dpRingSetDataEvent(&r, &a, 0, UserMode) != 0 && r.DataEvent == &b);
     REQUIRE(Oa2dpRingSetDataEvent(&r, &a, 9, UserMode) != 0 && r.DataEvent == &b);
     OA2DP_FORMAT rate_change = f; rate_change.SampleRate = 44100;
-    REQUIRE(Oa2dpRingSetFormat(&r, &rate_change) && wait(b));
+    REQUIRE(Oa2dpRingBeginStream(&r, &rate_change) && wait(b));
     REQUIRE(oa2dp_ring_read(r.Ring, &format, out, sizeof(out), 4, &count) == OA2DP_ERR_STATE);
-    REQUIRE(Oa2dpRingSetFormat(&r, &f) && wait(b));
+    REQUIRE(Oa2dpRingBeginStream(&r, &f) && wait(b));
     oa2dp_ring_format returned{};
     REQUIRE(oa2dp_ring_snapshot(r.Ring, &returned) == 0);
     REQUIRE(returned.sample_rate == format.sample_rate && returned.channels == format.channels &&
             returned.format == format.format && returned.sequence != format.sequence);
     REQUIRE(oa2dp_ring_read(r.Ring, &format, out, sizeof(out), 4, &count) == OA2DP_ERR_STATE);
-    REQUIRE(Oa2dpRingSetFormat(&r, &rate_change) && wait(b));
+    REQUIRE(Oa2dpRingBeginStream(&r, &rate_change) && wait(b));
     int signals = b.signals;
     Oa2dpRingPump(&r, reinterpret_cast<UCHAR *>(samples), sizeof(samples), 0, 4, &f);
     REQUIRE(b.signals == signals); // stale-rate stream cannot write or notify

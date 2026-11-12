@@ -10,6 +10,8 @@
 
 #include "log.h"
 #include "stream_trace.h"
+#include "media_clock.h"
+#include "pcm_feed.h"
 #include "oa2dp/encoder.h"
 #include "oa2dp/media.h"
 #include "oa2dp/pcm_ring.h"
@@ -888,11 +890,15 @@ void Session::handle(const Command &c)
                 publish(publication_pending_ ? "state-update-pending" : "user-disconnected");
             break;
         }
-        if (streaming_ && (pcm_sequence_ != c.format.PcmSequence ||
-                          !oa2dp_pcm_format_same(&audio_format_, &c.format.Format)))
+        if (streaming_ && !oa2dp_pcm_format_same(&audio_format_, &c.format.Format))
             suspend_stream();
         audio_format_ = c.format.Format;
         pcm_sequence_ = c.format.PcmSequence;
+        // A new clip with identical PCM is not a new Bluetooth stream. Keep
+        // codec history and RTP identity; authorize the checked reader to move
+        // to this producer epoch without SUSPEND/START or a receiver restart.
+        approved_pcm_sequence_ = pcm_sequence_;
+        if (audio_.data_event()) SetEvent(audio_.data_event());
         audio_running_ = c.format.Running != 0;
         if (teardown_pending_ || transport_suspended_) break;
         if (suspend_requested_) {
@@ -1170,6 +1176,7 @@ void Session::begin_streaming()
         LOGE("PCM format unavailable when starting the encoder");
         return;
     }
+    approved_pcm_sequence_ = context.ring_format.sequence;
     // Publish availability before admitting a new sender. Otherwise a cached
     // suspended state could re-acknowledge HFP while this new thread starts.
     if (!update_suspend_state()) {
@@ -1180,6 +1187,7 @@ void Session::begin_streaming()
     if (stopping_) // stop may have arrived during the synchronous publication
         return;
     streaming_ = true;
+    if (!audio_running_ && !idle_since_) idle_since_ = GetTickCount();
     ResetEvent(stream_stop_event_);
     if (++stream_generation_ == 0) ++stream_generation_;
     context.generation = stream_generation_;
@@ -1286,7 +1294,7 @@ void Session::stream_loop(const StreamContext &stream)
     const uint8_t encoder_bits = oa2dp_codec_pcm_bits(&cfg, &set);
     const uint32_t spc = info.samples_per_call;
     const uint32_t spf = info.samples_per_frame ? info.samples_per_frame : spc;
-    const oa2dp_ring_format &ring_format = stream.ring_format;
+    oa2dp_ring_format ring_format = stream.ring_format;
     // Windows may already have queued the beginning of this clip while AVDTP
     // START and encoder creation completed. The producer's epoch marks stale
     // audio; ring_read excludes that older epoch without dropping this prefix.
@@ -1299,6 +1307,9 @@ void Session::stream_loop(const StreamContext &stream)
         return;
     }
     HANDLE pcm_waits[] = {stream_stop_event_, stop_event_, audio_.data_event()};
+    // Admission follows accepted AVDTP START and encoder creation. Until this
+    // point the WaveRT clock retains the OS's first cyclic-buffer samples.
+    (void)oa2dp_ring_admit(ring, &ring_format);
     TraceLoggingWrite(g_Oa2dpStreamTrace, "EncoderStart",
         TraceLoggingLevel(5),
         TraceLoggingUInt32(generation, "StreamGeneration"),
@@ -1306,7 +1317,8 @@ void Session::stream_loop(const StreamContext &stream)
         TraceLoggingUInt32(info.sample_rate, "SampleRate"),
         TraceLoggingUInt64(ring_format.start_pos, "EpochStartFrame"),
         TraceLoggingUInt64(static_cast<uint64_t>(ring->read_pos), "ReadFrame"),
-        TraceLoggingUInt32(oa2dp_ring_readable(ring), "BufferedFrames"));
+        TraceLoggingUInt32(oa2dp_ring_readable(ring), "BufferedFrames"),
+        TraceLoggingUInt64(oa2dp_ring_overruns(ring), "TotalOverrunFrames"));
     bool first_pcm = true;
     {
         std::lock_guard<std::mutex> lock(status_mu_);
@@ -1332,25 +1344,70 @@ void Session::stream_loop(const StreamContext &stream)
     DWORD window_start = GetTickCount(), last_abr = window_start;
     LARGE_INTEGER clock_rate{};
     QueryPerformanceFrequency(&clock_rate);
+    MediaClock packet_clock(static_cast<uint64_t>(clock_rate.QuadPart), info.sample_rate);
+    // A waitable timer allows cancellation without a polling loop or changing
+    // the process/system timer resolution.
+    HANDLE packet_timer = CreateWaitableTimerExW(nullptr, nullptr,
+        CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
+    if (!packet_timer) packet_timer = CreateWaitableTimerW(nullptr, FALSE, nullptr);
+    if (!packet_timer) {
+        oa2dp_ring_retire(ring);
+        oa2dp_encoder_destroy(enc);
+        fail_stream();
+        return;
+    }
+    HANDLE packet_waits[] = {stream_stop_event_, stop_event_, packet_timer};
     uint64_t wait_count = 0, max_wait_us = 0;
+    uint64_t source_frames = 0, silence_frames = 0;
     uint32_t peak_frames = 0;
     uint64_t previous_overruns = oa2dp_ring_overruns(ring);
     LOGI("streaming %s: %u Hz, %u ch, %u samples/call, adapter input %s", oa2dp_codec_name(cfg.codec),
          info.sample_rate, ch, spc, info.input_format == OA2DP_ENCODER_INPUT_F32 ? "float32" :
          info.input_format == OA2DP_ENCODER_INPUT_S32 ? "int32" : "S24 scale");
 
-    auto send_packet = [&](size_t len) {
+    auto send_packet = [&](size_t len, uint32_t frames) {
         if (len && streaming_) {
-            if (tr_.send_media(stream.media, pkt.data(), len, stream_stop_event_))
+            LARGE_INTEGER now{};
+            QueryPerformanceCounter(&now);
+            const uint64_t due = packet_clock.deadline(static_cast<uint64_t>(now.QuadPart));
+            while (static_cast<uint64_t>(now.QuadPart) < due) {
+                const uint64_t delta = due - static_cast<uint64_t>(now.QuadPart);
+                const uint64_t hz = static_cast<uint64_t>(clock_rate.QuadPart);
+                LARGE_INTEGER wait{};
+                wait.QuadPart = -static_cast<LONGLONG>(delta / hz * 10000000 +
+                    (delta % hz * 10000000 + hz - 1) / hz);
+                if (!SetWaitableTimer(packet_timer, &wait, 0, nullptr, nullptr, FALSE)) {
+                    fail_stream(); streaming_ = false; return;
+                }
+                const DWORD wake = WaitForMultipleObjects(3, packet_waits, FALSE, INFINITE);
+                if (wake != WAIT_OBJECT_0 + 2) {
+                    if (wake == WAIT_FAILED) fail_stream();
+                    streaming_ = false; return;
+                }
+                QueryPerformanceCounter(&now);
+            }
+            if (tr_.send_media(stream.media, pkt.data(), len, stream_stop_event_)) {
                 bytes_sent += len;
-            else {
+                TraceLoggingWrite(g_Oa2dpStreamTrace, "MediaSubmit",
+                    TraceLoggingLevel(5),
+                    TraceLoggingUInt32(generation, "StreamGeneration"),
+                    TraceLoggingUInt32(ring_format.sequence, "PcmSequence"),
+                    TraceLoggingUInt32(frames, "MediaFrames"),
+                    TraceLoggingUInt64(source_frames, "SourceFrames"),
+                    TraceLoggingUInt64(silence_frames, "PaddingFrames"));
+            } else {
                 if (streaming_) {
                     LOGE("Bluetooth media send failed");
                     fail_stream();
                 }
                 streaming_ = false;
             }
+            if (frames) packet_clock.advance(frames);
         }
+    };
+    auto flush_packet = [&] {
+        const uint32_t frames = rtp.samples;
+        send_packet(oa2dp_rtp_flush(&rtp), frames);
     };
 
     while (streaming_) {
@@ -1362,21 +1419,39 @@ void Session::stream_loop(const StreamContext &stream)
             break;
         }
         uint32_t read_frames = 0;
+        bool block_ready = false;
         const size_t input_bytes = pcm.size() * sizeof(int32_t);
-        const int read_status = oa2dp_ring_read(ring, &ring_format, pcm.data(), input_bytes, spc, &read_frames);
+        const int read_status = oa2dp_ring_read_block(ring, &ring_format, pcm.data(), input_bytes,
+            spc, &read_frames, &block_ready);
         if (read_status == OA2DP_ERR_STATE) {
-            // Old format cannot become current again. The format waiter will
-            // stop/reconfigure us; wait cancellably instead of polling it.
-            WaitForMultipleObjects(2, pcm_waits, FALSE, INFINITE);
-            break;
+            if (adopt_pcm_epoch(ring, ring_format, approved_pcm_sequence_.load())) {
+                first_pcm = true;
+                TraceLoggingWrite(g_Oa2dpStreamTrace, "PcmEpoch",
+                    TraceLoggingLevel(5),
+                    TraceLoggingUInt32(generation, "StreamGeneration"),
+                    TraceLoggingUInt32(ring_format.sequence, "PcmSequence"),
+                    TraceLoggingUInt32(info.sample_rate, "SampleRate"),
+                    TraceLoggingUInt64(ring_format.start_pos, "EpochStartFrame"),
+                    TraceLoggingUInt64(static_cast<uint64_t>(ring->read_pos), "ReadFrame"),
+                    TraceLoggingUInt64(oa2dp_ring_overruns(ring), "TotalOverrunFrames"));
+                continue;
+            }
+            // Full PCM changes still retire/reconfigure the encoder. A same-
+            // format epoch waits for the policy thread's explicit authorization.
+            const DWORD wake = WaitForMultipleObjects(3, pcm_waits, FALSE, INFINITE);
+            if (wake != WAIT_OBJECT_0 + 2) {
+                if (wake == WAIT_FAILED) fail_stream();
+                break;
+            }
+            continue;
         }
         if (read_status == OA2DP_ERR_BUSY ||
-            (read_status == OA2DP_OK && !read_frames)) {
+            (read_status == OA2DP_OK && !block_ready)) {
             // Batching codecs may have complete frames without a full packet.
             // Do not hold that tail until more PCM arrives (possibly never).
             // BUSY has no validated format snapshot, so only flush on OK.
             if (read_status == OA2DP_OK && rtp.frames) {
-                send_packet(oa2dp_rtp_flush(&rtp));
+                flush_packet();
                 if (!streaming_) break;
             }
             LARGE_INTEGER before{}, after{};
@@ -1395,12 +1470,14 @@ void Session::stream_loop(const StreamContext &stream)
             }
             continue;
         }
-        if (read_status != OA2DP_OK || read_frames != spc) {
+        if (read_status != OA2DP_OK || !block_ready || read_frames > spc) {
             LOGE("invalid PCM block; stopping the encoder");
             fail_stream();
             break;
         }
-        if (first_pcm) {
+        source_frames += read_frames;
+        silence_frames += spc - read_frames;
+        if (first_pcm && read_frames) {
             first_pcm = false;
             TraceLoggingWrite(g_Oa2dpStreamTrace, "FirstPcm",
                 TraceLoggingLevel(5),
@@ -1434,11 +1511,11 @@ void Session::stream_loop(const StreamContext &stream)
 
         int r = oa2dp_rtp_add_frames(&rtp, out.data(), len, frames, spf * frames);
         if (r == 0) {
-            send_packet(oa2dp_rtp_flush(&rtp));
+            flush_packet();
             r = oa2dp_rtp_add_frames(&rtp, out.data(), len, frames, spf * frames);
         }
         if (r == OA2DP_ERR_NOSPC) {  // larger than one packet: fragment
-            send_packet(oa2dp_rtp_flush(&rtp));
+            flush_packet();
             size_t off = 0;
             while (off < len && streaming_) {
                 int n = oa2dp_rtp_fragment(&rtp, out.data(), len, spf * frames, &off);
@@ -1448,14 +1525,14 @@ void Session::stream_loop(const StreamContext &stream)
                     streaming_ = false;
                     break;
                 }
-                send_packet(static_cast<size_t>(n));
+                send_packet(static_cast<size_t>(n), off == len ? spf * frames : 0);
             }
         } else if (r != 1) {
             LOGE("RTP packetization failed (%d); stopping the stream", r);
             fail_stream();
             streaming_ = false;
         } else if (flush_each) {
-            send_packet(oa2dp_rtp_flush(&rtp));
+            flush_packet();
         }
 
         DWORD now = GetTickCount();
@@ -1498,6 +1575,15 @@ void Session::stream_loop(const StreamContext &stream)
         }
     }
     // Retired audio belongs to this encoder/link. Discard a partial packet.
+    oa2dp_ring_retire(ring);
+    CloseHandle(packet_timer);
+    TraceLoggingWrite(g_Oa2dpStreamTrace, "EncoderEnd",
+        TraceLoggingLevel(5),
+        TraceLoggingUInt32(generation, "StreamGeneration"),
+        TraceLoggingUInt64(source_frames, "SourceFrames"),
+        TraceLoggingUInt64(silence_frames, "PaddingFrames"),
+        TraceLoggingUInt64(oa2dp_ring_overruns(ring), "TotalOverrunFrames"),
+        TraceLoggingUInt32(oa2dp_ring_readable(ring), "RemainingFrames"));
     tr_.cancel_media();
     if (!tr_.drain_media())
         LOGW("media drain budget expired; retaining pending I/O buffers");

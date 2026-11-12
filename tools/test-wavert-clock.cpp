@@ -79,6 +79,7 @@ using PEX_TIMER = FakeTimer *;
 struct FakeRing {
     unsigned Epochs = 0;
     bool Running = false;
+    bool Ready = true, Ended = false;
 };
 struct OA2DP_AUDIO_DEVICE {
     FakeRing Ring;
@@ -128,16 +129,21 @@ static void ExSetTimer(PEX_TIMER t, LONGLONG due, ULONGLONG period, void *) {
     t->Active = true;
     ++t->Sets;
 }
-static void Oa2dpReportStream(OA2DP_AUDIO_DEVICE *d, const OA2DP_FORMAT *, bool running) {
+static void Oa2dpReportStream(OA2DP_AUDIO_DEVICE *d, const OA2DP_FORMAT *, bool running, ULONG) {
     REQUIRE(!locked);
     d->Ring.Running = running;
     d->Reports.push_back(running);
 }
-static bool Oa2dpRingBeginStream(FakeRing *ring, const OA2DP_FORMAT *) {
+static bool Oa2dpRingBeginStream(FakeRing *ring, const OA2DP_FORMAT *, ULONG *sequence) {
     REQUIRE(locked);
     ++ring->Epochs;
+    *sequence = ring->Epochs * 2;
+    ring->Ready = false;
+    ring->Ended = false;
     return true;
 }
+static bool Oa2dpRingConsumerReady(FakeRing *ring, ULONG) { REQUIRE(locked); return ring->Ready; }
+static void Oa2dpRingEndSource(FakeRing *ring, ULONG) { REQUIRE(locked); ring->Ended = true; }
 static ULONG Oa2dpLatencyUs(OA2DP_AUDIO_DEVICE *) {
     REQUIRE(!locked);
     return latency_us;
@@ -147,7 +153,7 @@ struct PumpCall {
 };
 static std::vector<PumpCall> pumped;
 static void Oa2dpRingPump(FakeRing *, const BYTE *, ULONG bytes, ULONG pos, ULONG frames,
-                          const OA2DP_FORMAT *f) {
+                          const OA2DP_FORMAT *f, ULONG) {
     REQUIRE(locked && mapped && bytes && pos < bytes);
     REQUIRE(frames <= bytes / (f->Channels * (f->BitsPerSample / 8)));
     pumped.push_back({pos, frames});
@@ -187,6 +193,8 @@ class CMiniportWaveRTStream {
     int m_PositionSpinLock = 0;
     KSSTATE m_KsState;
     BOOLEAN m_NeedsPcmEpoch = false;
+    BOOLEAN m_WaitingForConsumer = false;
+    ULONG m_PcmSequence = 0;
     LARGE_INTEGER m_PerfFrequency, m_RunStartQpc;
     ULONGLONG m_hnsRunBase, m_ullLinearFrames, m_ullPumpedFrames, m_ullEosFrame;
     ULONGLONG m_ullPresentationFrames;
@@ -423,5 +431,29 @@ int main() {
         REQUIRE(presentation.u64PositionInBlocks == 2640);
         REQUIRE(presentation.u64QPCPosition == static_cast<UINT64>(now)); // KS uses raw QPC ticks
     }
-    std::puts("production WaveRT clock/packet/presentation checks passed (OS APIs fake)");
+    // AVDTP/codec startup can take longer than the old 341 ms ring capacity.
+    // The OS must retain packet zero until the consumer accepts this epoch.
+    reset(s, KSSTATE_STOP);
+    s.m_NeedsPcmEpoch = true;
+    REQUIRE(s.SetState(KSSTATE_RUN) == STATUS_SUCCESS && !device.Ring.Ready);
+    now = 900 * OA2DP_HNS_PER_MS;
+    REQUIRE(s.GetPosition(&position) == STATUS_SUCCESS && position.PlayOffset == 0);
+    REQUIRE(pumped.empty() && s.m_ullLinearFrames == 0 && s.m_llPacketCounter == 0);
+    device.Ring.Ready = true;
+    now = 901 * OA2DP_HNS_PER_MS;
+    REQUIRE(s.GetPosition(&position) == STATUS_SUCCESS && s.m_ullLinearFrames == 0);
+    now = 906 * OA2DP_HNS_PER_MS;
+    REQUIRE(s.GetPosition(&position) == STATUS_SUCCESS && s.m_ullLinearFrames == 240);
+    REQUIRE(pumped.size() == 1 && pumped[0].Position == 0 && pumped[0].Frames == 240);
+    REQUIRE(s.SetState(KSSTATE_PAUSE) == STATUS_SUCCESS);
+    device.Ring.Ready = false; // idle SUSPEND retired the encoder during pause
+    now = 2000 * OA2DP_HNS_PER_MS;
+    REQUIRE(s.SetState(KSSTATE_RUN) == STATUS_SUCCESS && s.m_WaitingForConsumer);
+    now = 2900 * OA2DP_HNS_PER_MS;
+    REQUIRE(s.GetPosition(&position) == STATUS_SUCCESS && s.m_ullLinearFrames == 240);
+    device.Ring.Ready = true;
+    REQUIRE(s.GetPosition(&position) == STATUS_SUCCESS && s.m_ullLinearFrames == 240);
+    now = 2905 * OA2DP_HNS_PER_MS;
+    REQUIRE(s.GetPosition(&position) == STATUS_SUCCESS && s.m_ullLinearFrames == 480);
+    std::puts("production WaveRT clock/packet/presentation and delayed-consumer startup checks passed (OS APIs fake)");
 }

@@ -104,16 +104,17 @@ NTSTATUS Oa2dpRingMapUser(_Inout_ OA2DP_AUDIO_RING *r, _Out_ OA2DP_RING_MAPPING 
 VOID Oa2dpRingUnmapUser(_Inout_ OA2DP_AUDIO_RING *r);
 NTSTATUS Oa2dpRingSetDataEvent(_Inout_ OA2DP_AUDIO_RING *r, HANDLE event,
                               ULONG minimumFrames, KPROCESSOR_MODE mode);
-/* Rewrite the header in place; TRUE if the format changed. */
-BOOLEAN Oa2dpRingSetFormat(_Inout_ OA2DP_AUDIO_RING *r, _In_ const OA2DP_FORMAT *format);
-BOOLEAN Oa2dpRingBeginStream(_Inout_ OA2DP_AUDIO_RING *r, _In_ const OA2DP_FORMAT *format);
+/* Claim a producer epoch at RUN, before its first PCM sample. */
+BOOLEAN Oa2dpRingBeginStream(_Inout_ OA2DP_AUDIO_RING *r, _In_ const OA2DP_FORMAT *format, _Out_ ULONG *sequence);
+BOOLEAN Oa2dpRingConsumerReady(_Inout_ OA2DP_AUDIO_RING *r, ULONG sequence);
+VOID Oa2dpRingEndSource(_Inout_ OA2DP_AUDIO_RING *r, ULONG sequence);
 VOID Oa2dpRingSetRunning(_Inout_ OA2DP_AUDIO_RING *r, _In_ BOOLEAN running);
 /* Copy `frames` frames of the WaveRT cyclic buffer, starting at byte offset
  * `pos`, into the ring. `bits` is the container: 32 = IEEE float, 16/24 =
  * PCM (converted to 24-bit values in int32, OA2DP_RING_FMT_S32). */
 VOID Oa2dpRingPump(_Inout_ OA2DP_AUDIO_RING *r, _In_reads_bytes_(cyclicBytes) const UCHAR *cyclic,
                    _In_ ULONG cyclicBytes, _In_ ULONG pos, _In_ ULONG frames,
-                   _In_ const OA2DP_FORMAT *format);
+                   _In_ const OA2DP_FORMAT *format, ULONG sequence);
 
 /* ---- control.cpp ----------------------------------------------------------- */
 
@@ -130,7 +131,7 @@ BOOLEAN Oa2dpControlOwns(_In_ OA2DP_AUDIO_DEVICE *dev, _In_ PIRP irp);
 NTSTATUS Oa2dpControlDispatch(_Inout_ OA2DP_AUDIO_DEVICE *dev, _Inout_ PIRP irp);
 /* Stream state for WAIT_FORMAT (F4.3); callable up to DISPATCH_LEVEL. */
 VOID Oa2dpReportStream(_Inout_ OA2DP_AUDIO_DEVICE *dev, _In_ const OA2DP_FORMAT *format,
-                       _In_ BOOLEAN running);
+                       _In_ BOOLEAN running, ULONG sequence);
 /* Snapshot of the format list; callable up to DISPATCH_LEVEL. */
 VOID Oa2dpGetFormats(_In_ OA2DP_AUDIO_DEVICE *dev, _Out_ OA2DP_FORMAT_LIST *out);
 BOOLEAN Oa2dpFormatListed(_In_ const OA2DP_FORMAT_LIST *list, _In_ const OA2DP_FORMAT *f);

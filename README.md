@@ -8,6 +8,8 @@
 
 English · [简体中文](README.zh-CN.md)
 
+> **Short-clip defect under correction:** the owner subsequently reported missing pronunciation beginnings in Shici on 0.4.0. The first 0.4.1 correction did not pass listening acceptance. This development branch contains the combined 0.4.2 pipeline correction; it is not yet a stable or acoustically accepted release. See the [source review and validation limits](docs/SHORT-CLIP-REVIEW.md).
+
 XM6 Audio adds an A2DP profile driver and a WaveRT render endpoint while Windows continues to own the Bluetooth radio, pairing, volume UI and AVRCP media-control stack. The WH-1000XM6 is the initial hardware acceptance target.
 
 > **Release status:** 0.4.0 is the stable baseline for the validated WH-1000XM6 / Windows 10 x64 development-host configuration. Feature and platform expansion are paused by the project owner's decision on 2026-11-12. The installed package retains its existing local test signature. Public packages remain unsigned: normal protected Windows installation requires Microsoft production signing. Other headsets and Windows 11 are not qualified by this release.
