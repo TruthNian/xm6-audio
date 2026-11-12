@@ -81,6 +81,15 @@ cover mono/stereo, all ring representations, 1/127/128/129/255/511/2401-frame
 clips, stale epochs and unapproved format changes. This validates input
 preservation and host packet scheduling, not acoustic output from a headset.
 
+The fixture also exercises the real SBC and Media Foundation AAC encoders at
+44.1/48 kHz, plus LDAC at all four rates, with mono/stereo input and integer
+16/16, 24/24, 24/32, 32/32 and float32 formats: **80 codec/rate/channel/PCM
+combinations**. Exactly representable signed source values are normalized at
+the encoder input boundary, so expected precision conversion is distinguished
+from dropped or repeated frames. All 80 retain both clips' complete input;
+RTP timing includes AAC fragmentation. These additional checks change only
+the test fixture and documentation, not the deployed 0.4.2 production code.
+
 The pacing distinction is also consistent with
 [PipeWire's media sender](https://github.com/PipeWire/pipewire/blob/master/spa/plugins/bluez5/media-sink.c),
 which limits queued-media flushing by represented sample time. That comparison
