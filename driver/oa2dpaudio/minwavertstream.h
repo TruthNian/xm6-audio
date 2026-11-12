@@ -73,6 +73,7 @@ private:
     PEX_TIMER                   m_pNotificationTimer;
     KSPIN_LOCK                  m_PositionSpinLock;
     KSSTATE                     m_KsState;
+    BOOLEAN                     m_NeedsPcmEpoch; // STOP reuse; PAUSE preserves the current epoch
 
     BYTE                       *m_pDmaBuffer;
     ULONG                       m_ulDmaBufferSize;

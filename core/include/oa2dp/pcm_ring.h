@@ -106,7 +106,8 @@ uint32_t oa2dp_ring_write_pcm(oa2dp_pcm_ring *r, const void *data, uint32_t fram
  * released even if the new format has no full block yet. Output is bounded. */
 int oa2dp_ring_read(oa2dp_pcm_ring *r, const oa2dp_ring_format *format,
                     void *data, size_t data_bytes, uint32_t frames, uint32_t *read_frames);
-/* Consumer: discard accumulated PCM when a Bluetooth stream restarts. */
+/* Consumer: explicitly abandon queued PCM. Never use at encoder admission:
+ * the current clip may already be queued. Epoch boundaries reject old clips. */
 uint32_t oa2dp_ring_discard(oa2dp_pcm_ring *r);
 
 /* Sample conversion for the consumer. */

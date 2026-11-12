@@ -77,6 +77,7 @@ struct FakeTimer {
 };
 using PEX_TIMER = FakeTimer *;
 struct FakeRing {
+    unsigned Epochs = 0;
     bool Running = false;
 };
 struct OA2DP_AUDIO_DEVICE {
@@ -132,6 +133,11 @@ static void Oa2dpReportStream(OA2DP_AUDIO_DEVICE *d, const OA2DP_FORMAT *, bool 
     d->Ring.Running = running;
     d->Reports.push_back(running);
 }
+static bool Oa2dpRingBeginStream(FakeRing *ring, const OA2DP_FORMAT *) {
+    REQUIRE(locked);
+    ++ring->Epochs;
+    return true;
+}
 static ULONG Oa2dpLatencyUs(OA2DP_AUDIO_DEVICE *) {
     REQUIRE(!locked);
     return latency_us;
@@ -180,6 +186,7 @@ class CMiniportWaveRTStream {
     PEX_TIMER m_pNotificationTimer;
     int m_PositionSpinLock = 0;
     KSSTATE m_KsState;
+    BOOLEAN m_NeedsPcmEpoch = false;
     LARGE_INTEGER m_PerfFrequency, m_RunStartQpc;
     ULONGLONG m_hnsRunBase, m_ullLinearFrames, m_ullPumpedFrames, m_ullEosFrame;
     ULONGLONG m_ullPresentationFrames;
@@ -351,6 +358,11 @@ int main() {
     REQUIRE(s.SetState(static_cast<KSSTATE>(99)) == STATUS_INVALID_PARAMETER &&
             s.m_KsState == KSSTATE_STOP);
     REQUIRE(device.Reports == std::vector<bool>({true, false, true, false}));
+    REQUIRE(device.Ring.Epochs == 0 && s.m_NeedsPcmEpoch); // PAUSE retained epoch; STOP retires it
+    REQUIRE(s.SetState(KSSTATE_ACQUIRE) == STATUS_SUCCESS && s.SetState(KSSTATE_PAUSE) == STATUS_SUCCESS);
+    REQUIRE(s.SetState(KSSTATE_RUN) == STATUS_SUCCESS && device.Ring.Epochs == 1 && !s.m_NeedsPcmEpoch);
+    REQUIRE(s.SetState(KSSTATE_PAUSE) == STATUS_SUCCESS && s.SetState(KSSTATE_RUN) == STATUS_SUCCESS);
+    REQUIRE(device.Ring.Epochs == 1); // a pause is not a new clip
     REQUIRE(!locked);
 
     reset(s);

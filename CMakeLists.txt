@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(XM6Audio VERSION 0.4.0 LANGUAGES C CXX)
+project(XM6Audio VERSION 0.4.1 LANGUAGES C CXX)
 
 # The loaded binary's version must agree with the configured project and INF.
 # Generate resources in the build tree rather than keeping a stale copy.
@@ -200,6 +200,12 @@ if(OA2DP_BUILD_TESTS)
     target_include_directories(test_pcm_notification PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
     target_link_libraries(test_pcm_notification PRIVATE oa2dp_core)
     add_test(NAME pcm_notification COMMAND test_pcm_notification)
+    xm6_test_body(service/src/session.cpp "    const uint32_t spc = info.samples_per_call;"
+        "\n    HANDLE pcm_waits[]" encoder-admission)
+    add_executable(test_stream_start tools/test-stream-start.cpp)
+    target_include_directories(test_stream_start PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
+    target_link_libraries(test_stream_start PRIVATE oa2dp_core)
+    add_test(NAME stream_start COMMAND test_stream_start)
     xm6_test_body(service/src/driver_io.cpp "bool Transport::finish_slot(" "\nbool Transport::send_media(" media-finish)
     xm6_test_body(service/src/driver_io.cpp "bool Transport::send_media(" "\nvoid Transport::cancel_media(" media-send)
     xm6_test_body(service/src/driver_io.cpp "bool Transport::drain_media(" "\n// --------------------------------------------------------------------------\n\nbool AudioEndpoint::open(" media-drain)

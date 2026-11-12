@@ -97,6 +97,7 @@ CMiniportWaveRTStream::Init
     m_Format = *Format_;
     m_ulBlockAlign = (ULONG)Format_->Channels * (Format_->BitsPerSample / 8);
     m_KsState = KSSTATE_STOP;
+    m_NeedsPcmEpoch = FALSE; // Init establishes the first producer boundary below.
     m_pDmaBuffer = NULL;
     m_ulDmaBufferSize = 0;
     m_ulNotificationsPerBuffer = 0;
@@ -130,7 +131,7 @@ CMiniportWaveRTStream::Init
     // F4.3: Windows opened the endpoint with a (possibly) new format. The ring
     // allocation never moves, so only its header changes; the service learns
     // about it from WAIT_FORMAT and reconfigures the headset.
-    if (Oa2dpRingSetFormat(&m_Device->Ring, &m_Format))
+    if (Oa2dpRingBeginStream(&m_Device->Ring, &m_Format))
     {
         Oa2dpReportStream(m_Device, &m_Format, FALSE);
     }
@@ -762,6 +763,7 @@ CMiniportWaveRTStream::SetState
     switch (State_)
     {
         case KSSTATE_STOP:
+            m_NeedsPcmEpoch = TRUE;
             // Reset DMA
             m_llPacketCounter = 0;
             m_ullLinearFrames = 0;
@@ -792,6 +794,12 @@ CMiniportWaveRTStream::SetState
         case KSSTATE_RUN:
             if (!wasRunning)
             {
+                if (m_NeedsPcmEpoch) {
+                    // A reused STOPped stream starts a new clip. Do this under
+                    // the pump lock, before RUN makes any new samples visible.
+                    Oa2dpRingBeginStream(&m_Device->Ring, &m_Format);
+                    m_NeedsPcmEpoch = FALSE;
+                }
                 // Start DMA
                 m_RunStartQpc = KeQueryPerformanceCounter(&m_PerfFrequency);
             }

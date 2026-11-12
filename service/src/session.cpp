@@ -1287,7 +1287,9 @@ void Session::stream_loop(const StreamContext &stream)
     const uint32_t spc = info.samples_per_call;
     const uint32_t spf = info.samples_per_frame ? info.samples_per_frame : spc;
     const oa2dp_ring_format &ring_format = stream.ring_format;
-    oa2dp_ring_discard(ring);
+    // Windows may already have queued the beginning of this clip while AVDTP
+    // START and encoder creation completed. The producer's epoch marks stale
+    // audio; ring_read excludes that older epoch without dropping this prefix.
     const uint16_t ring_ch = ring_format.channels;
     const uint8_t ch = info.channels;
     if (!audio_.set_data_event(spc)) {
@@ -1297,6 +1299,15 @@ void Session::stream_loop(const StreamContext &stream)
         return;
     }
     HANDLE pcm_waits[] = {stream_stop_event_, stop_event_, audio_.data_event()};
+    TraceLoggingWrite(g_Oa2dpStreamTrace, "EncoderStart",
+        TraceLoggingLevel(5),
+        TraceLoggingUInt32(generation, "StreamGeneration"),
+        TraceLoggingUInt32(ring_format.sequence, "PcmSequence"),
+        TraceLoggingUInt32(info.sample_rate, "SampleRate"),
+        TraceLoggingUInt64(ring_format.start_pos, "EpochStartFrame"),
+        TraceLoggingUInt64(static_cast<uint64_t>(ring->read_pos), "ReadFrame"),
+        TraceLoggingUInt32(oa2dp_ring_readable(ring), "BufferedFrames"));
+    bool first_pcm = true;
     {
         std::lock_guard<std::mutex> lock(status_mu_);
         status_.encoder_input = info.input_format == OA2DP_ENCODER_INPUT_F32 ? "float32" :
@@ -1388,6 +1399,16 @@ void Session::stream_loop(const StreamContext &stream)
             LOGE("invalid PCM block; stopping the encoder");
             fail_stream();
             break;
+        }
+        if (first_pcm) {
+            first_pcm = false;
+            TraceLoggingWrite(g_Oa2dpStreamTrace, "FirstPcm",
+                TraceLoggingLevel(5),
+                TraceLoggingUInt32(generation, "StreamGeneration"),
+                TraceLoggingUInt32(ring_format.sequence, "PcmSequence"),
+                TraceLoggingUInt64(ring_format.start_pos, "EpochStartFrame"),
+                TraceLoggingUInt64(static_cast<uint64_t>(ring->read_pos), "ReadFrame"),
+                TraceLoggingUInt32(read_frames, "Frames"));
         }
         // Prepare codec PCM: channel layout before final precision.
         const int prepared = native_pcm ?

@@ -163,7 +163,7 @@ NTSTATUS Oa2dpRingSetDataEvent(OA2DP_AUDIO_RING *r, HANDLE event,
 
 /* Rewrites only the format fields: positions keep counting, so a consumer
  * that is still running never sees them jump backwards. */
-BOOLEAN Oa2dpRingSetFormat(_Inout_ OA2DP_AUDIO_RING *r, _In_ const OA2DP_FORMAT *format)
+static BOOLEAN SetProducerFormat(OA2DP_AUDIO_RING *r, const OA2DP_FORMAT *format, BOOLEAN newStream)
 {
     KIRQL irql;
     BOOLEAN changed = FALSE;
@@ -171,7 +171,7 @@ BOOLEAN Oa2dpRingSetFormat(_Inout_ OA2DP_AUDIO_RING *r, _In_ const OA2DP_FORMAT 
     if (!oa2dp_pcm_format_valid(format))
         return FALSE;
     KeAcquireSpinLock(&r->Lock, &irql);
-    if (r->Ring && (!r->SourceFormatValid || !oa2dp_pcm_format_same(&r->SourceFormat, format))) {
+    if (r->Ring && (newStream || !r->SourceFormatValid || !oa2dp_pcm_format_same(&r->SourceFormat, format))) {
         changed = oa2dp_ring_begin_format(r->Ring, format->SampleRate, format->Channels,
             oa2dp_pcm_format_ring_type(format)) > 0;
         if (changed) {
@@ -182,6 +182,18 @@ BOOLEAN Oa2dpRingSetFormat(_Inout_ OA2DP_AUDIO_RING *r, _In_ const OA2DP_FORMAT 
     if (changed && r->DataEvent) KeSetEvent(r->DataEvent, IO_NO_INCREMENT, FALSE);
     KeReleaseSpinLock(&r->Lock, irql);
     return changed;
+}
+
+BOOLEAN Oa2dpRingSetFormat(OA2DP_AUDIO_RING *r, const OA2DP_FORMAT *format)
+{
+    return SetProducerFormat(r, format, FALSE);
+}
+
+/* A fresh WaveRT clip is a new producer epoch even when its PCM format is
+ * identical. Establish this boundary before the first sample can be pumped. */
+BOOLEAN Oa2dpRingBeginStream(OA2DP_AUDIO_RING *r, const OA2DP_FORMAT *format)
+{
+    return SetProducerFormat(r, format, TRUE);
 }
 
 VOID Oa2dpRingSetRunning(_Inout_ OA2DP_AUDIO_RING *r, _In_ BOOLEAN running)

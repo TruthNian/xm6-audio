@@ -106,6 +106,7 @@ NTSTATUS Oa2dpRingSetDataEvent(_Inout_ OA2DP_AUDIO_RING *r, HANDLE event,
                               ULONG minimumFrames, KPROCESSOR_MODE mode);
 /* Rewrite the header in place; TRUE if the format changed. */
 BOOLEAN Oa2dpRingSetFormat(_Inout_ OA2DP_AUDIO_RING *r, _In_ const OA2DP_FORMAT *format);
+BOOLEAN Oa2dpRingBeginStream(_Inout_ OA2DP_AUDIO_RING *r, _In_ const OA2DP_FORMAT *format);
 VOID Oa2dpRingSetRunning(_Inout_ OA2DP_AUDIO_RING *r, _In_ BOOLEAN running);
 /* Copy `frames` frames of the WaveRT cyclic buffer, starting at byte offset
  * `pos`, into the ring. `bits` is the container: 32 = IEEE float, 16/24 =

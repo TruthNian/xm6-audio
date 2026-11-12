@@ -231,7 +231,28 @@ static void precision_epoch() {
         REQUIRE(Oa2dpRingSetDataEvent(&dev.Ring, nullptr, 0, KernelMode) == 0 && !notification.references);
     }
 }
+static void new_clip_epoch() {
+    std::vector<uint64_t> storage((oa2dp_ring_bytes(8,2)+7)/8);
+    OA2DP_AUDIO_RING ring;
+    ring.Ring=reinterpret_cast<oa2dp_pcm_ring *>(storage.data());
+    OA2DP_FORMAT format{48000,2,32,32,OA2DP_PCM_INTEGER};
+    REQUIRE(oa2dp_ring_init(ring.Ring,8,48000,2,OA2DP_RING_FMT_S32_FULL)==0);
+    REQUIRE(Oa2dpRingBeginStream(&ring,&format));
+    oa2dp_ring_format previous{},current{};
+    REQUIRE(oa2dp_ring_snapshot(ring.Ring,&previous)==0);
+    int32_t tail[4]={-1,-2,-3,-4},head[4]={11,12,13,14},output[4]{};
+    REQUIRE(oa2dp_ring_write(ring.Ring,tail,2)==2);
+    REQUIRE(Oa2dpRingBeginStream(&ring,&format)); // exact same PCM, different clip
+    REQUIRE(oa2dp_ring_snapshot(ring.Ring,&current)==0);
+    REQUIRE(current.sequence!=previous.sequence && current.start_pos==2);
+    REQUIRE(oa2dp_ring_write(ring.Ring,head,2)==2);
+    uint32_t frames=0;
+    REQUIRE(oa2dp_ring_read(ring.Ring,&previous,output,sizeof(output),2,&frames)==OA2DP_ERR_STATE);
+    REQUIRE(oa2dp_ring_read(ring.Ring,&current,output,sizeof(output),2,&frames)==0);
+    REQUIRE(frames==2 && output[0]==11 && output[3]==14);
+}
 int main() {
+    new_clip_epoch();
     precision_epoch();
     std::vector<uint64_t> storage((oa2dp_ring_bytes(8, 2) + 7) / 8);
     OA2DP_AUDIO_RING r;
