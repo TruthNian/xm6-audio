@@ -146,7 +146,7 @@ computations reported zero bytes to stall. The trace recorded no native send
 failures or ring overruns. These events do not establish byte identity through
 Windows mixing/encoding or what was audible at the headset.
 
-Startup latency remains an unresolved observation: Media Foundation's first
+Startup latency was initially an unresolved observation: Media Foundation's first
 `StartLocalGraph` interval took approximately 2,065 ms, immediate replay 0.37 ms,
 and replay after idle 75 ms. The first interval ended immediately after native
 encoder preparation. This localizes the wait to the startup path but does not
@@ -156,6 +156,22 @@ The diagnostic process's COM cleanup order was corrected separately and its
 last run exited successfully. No application code or further driver deployment
 was performed during this investigation. Shici's reported audible defect remains
 unaccepted; do not claim that every cause has been found or resolved.
+
+A later trace explicitly required the native stream to be suspended before
+starting the diagnostic and included Bluetooth HCI-boundary events. The initial
+AVDTP START command reached that boundary at 338.838 ms; the matching ACCEPT
+arrived at 1842.000 ms, a 1,503.162 ms interval. EncoderStart followed at
+1842.220 ms, and the Windows graph-start call returned at 1842.780 ms. A later
+START on the same connection was accepted in 60.25 ms. A separate trace with an
+already-running encoder had no new START transaction and no long graph-start
+wait. These are different initial states, not interchangeable test results.
+
+This locates the dominant cold-start wait between Bluetooth command transmission
+and reception of the peer's response, rather than after response processing in
+the encoder. HCI-boundary timestamps cannot separate controller scheduling,
+over-air link power state and headset firmware. In particular, a sniff-mode
+explanation is still unproven. No link-policy tweak, arbitrary pre-roll, further
+driver deployment or claim of Shici acceptance follows from this trace.
 
 The Windows contracts require a nominal packet clock and distinguish DMA
 transfer position from downstream presentation position:
