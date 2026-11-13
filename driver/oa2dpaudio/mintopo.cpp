@@ -481,7 +481,11 @@ extern "C" NTSTATUS Oa2dpSetConnected(_Inout_ OA2DP_AUDIO_DEVICE *dev, _In_ BOOL
     // closes cannot acknowledge the KS disconnect. An unavailable encoder may
     // still unplug its audio jack before the physical transport finishes.
     LONG value = connected ? 1 : 0;
+    KeAcquireSpinLock(&dev->Lock, &irql);
     const BOOLEAN changed = InterlockedExchange(&dev->Connected, value) != value;
+    Oa2dpRingSetConsumerAvailable(&dev->Ring, connected && dev->Started && !dev->Removed &&
+        dev->ConnectionEnabled && !dev->SuspendRequested);
+    KeReleaseSpinLock(&dev->Lock, irql);
     if (!changed) {
         Oa2dpUnlock(&dev->ConnectionLock);
         return status;

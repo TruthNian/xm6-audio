@@ -124,6 +124,7 @@ VOID Oa2dpRingUnmapUser(_Inout_ OA2DP_AUDIO_RING *r)
     (void)Oa2dpRingSetDataEvent(r, NULL, 0, KernelMode);
     KeAcquireSpinLock(&r->Lock, &irql);
     r->ConsumerMapped = FALSE;
+    ++r->ConsumerCancelSerial;
     if (r->Ring) oa2dp_ring_retire(r->Ring);
     KeSetEvent(&r->ConsumerEvent, IO_NO_INCREMENT, FALSE);
     KeReleaseSpinLock(&r->Lock, irql);
@@ -217,7 +218,11 @@ NTSTATUS Oa2dpRingSignalConsumer(OA2DP_AUDIO_RING *r, ULONG sequence)
     KIRQL irql;
     NTSTATUS status = STATUS_DEVICE_NOT_READY;
     KeAcquireSpinLock(&r->Lock, &irql);
-    if (r->Ring && r->ConsumerMapped && !r->ConsumerCancelled && r->Ring->format_sequence == sequence &&
+    /* This acknowledges the prepared consumer, not permission to enter RUN.
+     * A policy cancellation is checked by the waiter. Reporting that normal
+     * cancellation as an IOCTL failure would make the service tear down a
+     * healthy Bluetooth link while processing an HFP/disconnect request. */
+    if (r->Ring && r->ConsumerMapped && r->Ring->format_sequence == sequence &&
         oa2dp_ring_consumer_ready(r->Ring)) {
         KeSetEvent(&r->ConsumerEvent, IO_NO_INCREMENT, FALSE);
         status = STATUS_SUCCESS;
@@ -232,13 +237,19 @@ NTSTATUS Oa2dpRingSignalConsumer(OA2DP_AUDIO_RING *r, ULONG sequence)
 NTSTATUS Oa2dpRingWaitConsumer(OA2DP_AUDIO_RING *r, ULONG sequence)
 {
     const ULONGLONG deadline = KeQueryInterruptTime() + 5ULL * 10000000;
+    KIRQL initialIrql;
+    ULONG cancelSerial;
+    KeAcquireSpinLock(&r->Lock, &initialIrql);
+    cancelSerial = r->ConsumerCancelSerial;
+    KeReleaseSpinLock(&r->Lock, initialIrql);
     for (;;) {
         KIRQL irql;
         NTSTATUS status;
         ULONGLONG now;
         LARGE_INTEGER timeout;
         KeAcquireSpinLock(&r->Lock, &irql);
-        if (!r->Ring || !r->ConsumerMapped || r->ConsumerCancelled || r->Ring->format_sequence != sequence) {
+        if (!r->Ring || !r->ConsumerMapped || r->ConsumerCancelled ||
+            r->ConsumerCancelSerial != cancelSerial || r->Ring->format_sequence != sequence) {
             KeReleaseSpinLock(&r->Lock, irql);
             return STATUS_DEVICE_NOT_READY;
         }
@@ -257,11 +268,28 @@ NTSTATUS Oa2dpRingWaitConsumer(OA2DP_AUDIO_RING *r, ULONG sequence)
     }
 }
 
+/* Cancel preparation as soon as connection/profile policy forbids playback.
+ * The service owns retirement of an existing encoder. Do not retire its ready
+ * marker here: a rapid policy reversal may keep that same encoder running. */
+VOID Oa2dpRingSetConsumerAvailable(OA2DP_AUDIO_RING *r, BOOLEAN available)
+{
+    KIRQL irql;
+    const BOOLEAN cancelled = !available;
+    KeAcquireSpinLock(&r->Lock, &irql);
+    if (r->ConsumerCancelled != cancelled) {
+        r->ConsumerCancelled = cancelled;
+        if (!available) ++r->ConsumerCancelSerial;
+        KeSetEvent(&r->ConsumerEvent, IO_NO_INCREMENT, FALSE);
+    }
+    KeReleaseSpinLock(&r->Lock, irql);
+}
+
 VOID Oa2dpRingCancelConsumer(OA2DP_AUDIO_RING *r)
 {
     KIRQL irql;
     KeAcquireSpinLock(&r->Lock, &irql);
     r->ConsumerCancelled = TRUE;
+    ++r->ConsumerCancelSerial;
     if (r->Ring) oa2dp_ring_retire(r->Ring);
     KeSetEvent(&r->ConsumerEvent, IO_NO_INCREMENT, FALSE);
     KeReleaseSpinLock(&r->Lock, irql);

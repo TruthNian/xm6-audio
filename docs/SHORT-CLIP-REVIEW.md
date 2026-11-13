@@ -173,6 +173,34 @@ over-air link power state and headset firmware. In particular, a sniff-mode
 explanation is still unproven. No link-policy tweak, arbitrary pre-roll, further
 driver deployment or claim of Shici acceptance follows from this trace.
 
+## 0.4.4 source candidate: preparation cancellation
+
+Review of the new preparation wait found a separate cancellation defect. PnP
+stop and mapping loss woke the waiter, but a user disconnect or HFP suspension
+only notified the service. A pending RUN could therefore wait for its full
+five-second budget after policy already forbade playback. A regression fixture
+calling the actual `Oa2dpApplyPolicy` and `Oa2dpRingWaitConsumer` bodies reproduced
+that timeout before the correction. This is not evidence of the cause of Shici's
+reported missing beginnings.
+
+Connection state and profile policy now update preparation availability under
+the device-to-ring lock order. An unavailable endpoint wakes waiting RUN calls;
+a cancellation serial prevents a rapid re-enable from erasing a cancellation
+already issued to an existing waiter. Late RUN requests cannot reopen admission
+while disconnected, suspended or stopped. A policy change does not retire an
+otherwise live encoder: the service still owns actual encoder retirement, so a
+coalesced suspend/resume does not strand its ready marker. Physical jack removal
+also closes preparation admission, independently of a pending service callback.
+Consumer-ready notification remains distinct from permission to RUN: an
+otherwise valid notification during policy cancellation succeeds, while the
+waiter still fails. This prevents a normal cancellation from being misreported
+to the service as an encoder/transport failure requiring link teardown.
+
+Production-body checks cover disconnect, HFP suspension, fast re-enable, a late
+RUN, retained encoder readiness and a new wait after recovery. The source builds
+as 0.4.4; it has not been signed, staged or deployed. The installed unified 0.4.3
+trial remains unchanged, and real Shici listening acceptance is still pending.
+
 The Windows contracts require a nominal packet clock and distinguish DMA
 transfer position from downstream presentation position:
 [SetWritePacket](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/portcls/nf-portcls-iminiportwavertoutputstream-setwritepacket),

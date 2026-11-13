@@ -92,6 +92,7 @@ struct OA2DP_AUDIO_DEVICE {
     int Ring = 0;
     IO_CSQ WaitCsq;
     bool Started = false, Removed = false, Running = false;
+    bool Connected = true;
     bool ConnectionEnabled = true, SuspendRequested = false, EventPending = false;
     ULONG Current = 42, PcmSequence = 2, ConnectionSerial = 0, SuspendSerial = 0;
     OA2DP_FORMAT_CHANGE Event{};
@@ -213,6 +214,9 @@ static void IoCsqInsertIrp(PIO_CSQ q, PIRP r, void *) {
     // A producer/canceller may already have completed r; no further access.
 }
 // clang-format off
+static void Oa2dpRingSetConsumerAvailable(int *ring, bool available) {
+    REQUIRE(child.Lock.Held); *ring = available ? 1 : 0;
+}
 #include "policy-apply-under-test.inc"
 #include "wait-format-under-test.inc"
 #include "wait-fail-under-test.inc"

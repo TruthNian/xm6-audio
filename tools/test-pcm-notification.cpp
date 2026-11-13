@@ -14,6 +14,7 @@
     } while (0)
 #define _Inout_
 #define _In_
+#define _Out_
 #define _In_reads_bytes_(n)
 #define _Out_writes_(n)
 using NTSTATUS = int32_t;
@@ -33,6 +34,7 @@ using OA2DP_FORMAT = oa2dp_pcm_format;
 enum KPROCESSOR_MODE { KernelMode, UserMode };
 constexpr NTSTATUS STATUS_SUCCESS = 0, STATUS_INVALID_PARAMETER = -1, STATUS_DEVICE_NOT_READY = -2;
 constexpr NTSTATUS STATUS_TIMEOUT = 258, STATUS_IO_TIMEOUT = -3;
+constexpr NTSTATUS STATUS_DELETE_PENDING = -4;
 constexpr int Executive = 0;
 struct LARGE_INTEGER {LONGLONG QuadPart;};
 #define NT_SUCCESS(s) ((s) >= 0)
@@ -64,13 +66,15 @@ static void ObDereferenceObject(FakeEvent *e) {
     --e->references;
 }
 static void KeAcquireSpinLock(int *, KIRQL *level) {
-    REQUIRE(!locked);
-    locked = true;
-    *level = 0;
+    REQUIRE(!nested_ring_lock);
+    *level = locked ? 1 : 0;
+    if (locked) nested_ring_lock = true;
+    else locked = true;
 }
-static void KeReleaseSpinLock(int *, KIRQL) {
-    REQUIRE(locked && !nested_ring_lock);
-    locked = false;
+static void KeReleaseSpinLock(int *, KIRQL level) {
+    REQUIRE(locked);
+    if (level) { REQUIRE(nested_ring_lock); nested_ring_lock = false; }
+    else { REQUIRE(!nested_ring_lock); locked = false; }
 }
 static void KeAcquireSpinLockAtDpcLevel(int *) {
     REQUIRE(locked && !nested_ring_lock); nested_ring_lock = true;
@@ -114,6 +118,7 @@ struct OA2DP_AUDIO_RING {
     FakeEvent ConsumerEvent{1};
     bool ConsumerMapped = true;
     bool ConsumerCancelled = false;
+    ULONG ConsumerCancelSerial = 0;
 };
 #include "pcm-notification-under-test.inc"
 // Existing format-focused fixtures use the current producer. Epoch-race
@@ -136,6 +141,9 @@ struct OA2DP_AUDIO_DEVICE {
     OA2DP_FORMAT Current{};
     ULONG PcmSequence = 0;
     bool Running = false, Started = true, Removed = false, EventPending = false;
+    bool ConnectionEnabled = true, SuspendRequested = false;
+    LONG Connected = 1;
+    ULONG SuspendSerial = 0, ConnectionSerial = 0;
     void *ControlFile = nullptr;
     OA2DP_FORMAT_CHANGE Event;
     struct {
@@ -149,7 +157,9 @@ static void SnapshotStateLocked(OA2DP_AUDIO_DEVICE *dev, OA2DP_FORMAT_CHANGE *ev
 }
 static PIRP IoCsqRemoveNextIrp(int *, void *) { REQUIRE(locked); return nullptr; }
 static void CompleteWait(PIRP, const OA2DP_FORMAT_CHANGE *) { REQUIRE(!locked); }
+static void PrepareWait(PIRP, const OA2DP_FORMAT_CHANGE *) { REQUIRE(!locked); }
 #include "pcm-report-under-test.inc"
+#include "policy-apply-under-test.inc"
 static void Oa2dpReportStream(OA2DP_AUDIO_DEVICE *d,const OA2DP_FORMAT *f,bool running) {
     Oa2dpReportStream(d,f,running,d->Ring.Ring->format_sequence);
 }
@@ -314,6 +324,58 @@ static void obsolete_producer() {
     REQUIRE(Oa2dpRingConsumerReady(&d.Ring,current) && !Oa2dpRingConsumerReady(&d.Ring,old));
 }
 static OA2DP_AUDIO_RING *waiting_ring;
+static OA2DP_AUDIO_DEVICE *waiting_device;
+static void policy_cancels_preparation() {
+    std::vector<uint64_t> memory((oa2dp_ring_bytes(8,2)+7)/8);
+    OA2DP_AUDIO_DEVICE d; d.Ring.Ring=reinterpret_cast<oa2dp_pcm_ring *>(memory.data());
+    REQUIRE(oa2dp_ring_init(d.Ring.Ring,8,48000,2,OA2DP_RING_FMT_FLOAT32)==0);
+    OA2DP_FORMAT format{48000,2,32,32,OA2DP_PCM_FLOAT};
+    REQUIRE(Oa2dpRingBeginStream(&d.Ring,&format));
+    Oa2dpReportStream(&d,&format,true);
+    waiting_device=&d;
+    const auto before=interrupt_time;
+    on_consumer_wait=[] {
+        PIRP completion=nullptr;
+        REQUIRE(Oa2dpApplyPolicy(waiting_device,false,false,0,&completion)==STATUS_SUCCESS);
+    };
+    REQUIRE(Oa2dpRingWaitConsumer(&d.Ring,d.Ring.Ring->format_sequence)==STATUS_DEVICE_NOT_READY);
+    REQUIRE(interrupt_time==before); // explicit disconnect must not spend the five-second budget
+    d.Running=false;
+    Oa2dpReportStream(&d,&format,true);
+    REQUIRE(!d.Running && d.Ring.ConsumerCancelled); // late RUN cannot undo policy
+    PIRP completion=nullptr;
+    REQUIRE(Oa2dpApplyPolicy(&d,true,false,0,&completion)==STATUS_SUCCESS);
+    on_consumer_wait=[] {
+        PIRP c=nullptr;
+        REQUIRE(Oa2dpApplyPolicy(waiting_device,true,true,1,&c)==STATUS_SUCCESS);
+    };
+    REQUIRE(Oa2dpRingWaitConsumer(&d.Ring,d.Ring.Ring->format_sequence)==STATUS_DEVICE_NOT_READY);
+    REQUIRE(interrupt_time==before); // HFP suspension also cancels preparation
+    REQUIRE(Oa2dpApplyPolicy(&d,true,false,2,&completion)==STATUS_SUCCESS);
+    on_consumer_wait=[] {
+        PIRP c=nullptr;
+        REQUIRE(Oa2dpApplyPolicy(waiting_device,false,false,2,&c)==STATUS_SUCCESS);
+        REQUIRE(Oa2dpApplyPolicy(waiting_device,true,false,2,&c)==STATUS_SUCCESS);
+        oa2dp_ring_format f{};
+        REQUIRE(oa2dp_ring_snapshot(waiting_device->Ring.Ring,&f)==0);
+        REQUIRE(oa2dp_ring_admit(waiting_device->Ring.Ring,&f)==0);
+        REQUIRE(Oa2dpRingSignalConsumer(&waiting_device->Ring,f.sequence)==0);
+    };
+    REQUIRE(Oa2dpRingWaitConsumer(&d.Ring,d.Ring.Ring->format_sequence)==STATUS_DEVICE_NOT_READY);
+    REQUIRE(interrupt_time==before); // re-enable cannot erase an already-issued cancellation
+    REQUIRE(Oa2dpRingWaitConsumer(&d.Ring,d.Ring.Ring->format_sequence)==STATUS_SUCCESS);
+    // A coalesced profile reversal must not retire the still-running encoder.
+    REQUIRE(Oa2dpApplyPolicy(&d,true,true,3,&completion)==STATUS_SUCCESS);
+    REQUIRE(oa2dp_ring_consumer_ready(d.Ring.Ring));
+    REQUIRE(Oa2dpRingSignalConsumer(&d.Ring,d.Ring.Ring->format_sequence)==STATUS_SUCCESS);
+    REQUIRE(Oa2dpRingWaitConsumer(&d.Ring,d.Ring.Ring->format_sequence)==STATUS_DEVICE_NOT_READY);
+    REQUIRE(Oa2dpApplyPolicy(&d,true,false,4,&completion)==STATUS_SUCCESS);
+    REQUIRE(Oa2dpRingWaitConsumer(&d.Ring,d.Ring.Ring->format_sequence)==STATUS_SUCCESS);
+    d.Connected=0;d.Running=false;
+    Oa2dpReportStream(&d,&format,true);
+    REQUIRE(!d.Running && d.Ring.ConsumerCancelled);
+    REQUIRE(Oa2dpRingWaitConsumer(&d.Ring,d.Ring.Ring->format_sequence)==STATUS_DEVICE_NOT_READY);
+}
 static void consumer_preparation() {
     std::vector<uint64_t> memory((oa2dp_ring_bytes(8,2)+7)/8);
     OA2DP_AUDIO_RING r; r.Ring=reinterpret_cast<oa2dp_pcm_ring *>(memory.data());
@@ -348,6 +410,7 @@ static void consumer_preparation() {
 }
 int main() {
     consumer_preparation();
+    policy_cancels_preparation();
     obsolete_producer();
     new_clip_epoch();
     precision_epoch();

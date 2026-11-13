@@ -59,6 +59,7 @@ using PUNKNOWN = FakePort *;
 using PPORTEVENTS = FakePort *;
 struct OA2DP_AUDIO_DEVICE {
     bool Initialized = true, Started = true, Removed = false, ConnectionEnabled = true;
+    bool SuspendRequested = false, Ring = false;
     volatile LONG Connected = 0;
     FakeLock ConnectionLock, Lock, FilterLock;
     DEVICE_OBJECT pdo{this};
@@ -79,6 +80,7 @@ void StopDevice(OA2DP_AUDIO_DEVICE *) { calls.push_back(Stop); }
 void RemoveDevice(OA2DP_AUDIO_DEVICE *) { calls.push_back(Remove); }
 NTSTATUS PcDispatchIrp(DEVICE_OBJECT *, IRP *) { calls.push_back(Dispatch); return dispatch_status; }
 #include "audio-pnp-under-test.inc"
+void Oa2dpRingSetConsumerAvailable(bool *ring, bool available) { *ring=available; }
 void IoInvalidateDeviceState(DEVICE_OBJECT *pdo)
 {
     calls.push_back(Invalidate);
@@ -114,18 +116,18 @@ int main()
     d.Connected = 0;
     calls.clear();
     REQUIRE(Oa2dpSetConnected(&d, true, 9) == STATUS_SUCCESS);
-    REQUIRE(d.Connected == 1 && queried_flags == 0);
+    REQUIRE(d.Connected == 1 && queried_flags == 0 && d.Ring);
     REQUIRE((calls == std::vector<unsigned>{Parent, Invalidate, Dispatch, Jack}));
     calls.clear();
     Oa2dpSetConnected(&d, true, 9);
     REQUIRE((calls == std::vector<unsigned>{Parent}));
     calls.clear();
     REQUIRE(Oa2dpSetConnected(&d, false, 0) == STATUS_SUCCESS);
-    REQUIRE(d.Connected == 0 && queried_flags == PNP_DEVICE_DISCONNECTED);
+    REQUIRE(d.Connected == 0 && queried_flags == PNP_DEVICE_DISCONNECTED && !d.Ring);
     REQUIRE((calls == std::vector<unsigned>{Parent, Invalidate, Dispatch, Jack}));
     calls.clear();
     Oa2dpSetConnected(&d, false, 0);
-    REQUIRE((calls == std::vector<unsigned>{Parent}));
+    REQUIRE((calls == std::vector<unsigned>{Parent}) && !d.Ring);
     parent_status = STATUS_DEVICE_NOT_READY;
     calls.clear();
     REQUIRE(Oa2dpSetConnected(&d, true, 10) == parent_status);

@@ -50,6 +50,7 @@ typedef struct _OA2DP_AUDIO_RING {
     KEVENT ConsumerEvent;    /* RUN preparation completion, never a running clock gate */
     BOOLEAN ConsumerMapped; /* protected by Lock; removal wakes pending RUN */
     BOOLEAN ConsumerCancelled;
+    ULONG ConsumerCancelSerial; /* invalidates a wait even across rapid re-enable */
 } OA2DP_AUDIO_RING;
 
 typedef struct _OA2DP_AUDIO_DEVICE {
@@ -112,6 +113,7 @@ BOOLEAN Oa2dpRingBeginStream(_Inout_ OA2DP_AUDIO_RING *r, _In_ const OA2DP_FORMA
 BOOLEAN Oa2dpRingConsumerReady(_Inout_ OA2DP_AUDIO_RING *r, ULONG sequence);
 NTSTATUS Oa2dpRingSignalConsumer(_Inout_ OA2DP_AUDIO_RING *r, ULONG sequence);
 NTSTATUS Oa2dpRingWaitConsumer(_Inout_ OA2DP_AUDIO_RING *r, ULONG sequence);
+VOID Oa2dpRingSetConsumerAvailable(_Inout_ OA2DP_AUDIO_RING *r, BOOLEAN available);
 VOID Oa2dpRingCancelConsumer(_Inout_ OA2DP_AUDIO_RING *r);
 VOID Oa2dpRingEndSource(_Inout_ OA2DP_AUDIO_RING *r, ULONG sequence);
 VOID Oa2dpRingSetRunning(_Inout_ OA2DP_AUDIO_RING *r, _In_ BOOLEAN running);

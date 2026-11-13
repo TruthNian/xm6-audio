@@ -323,9 +323,14 @@ extern "C" VOID Oa2dpReportStream(_Inout_ OA2DP_AUDIO_DEVICE *dev, _In_ const OA
     PIRP irp;
 
     KeAcquireSpinLock(&dev->Lock, &irql);
-    if (running && (!dev->Started || dev->Removed)) {
-        KeReleaseSpinLock(&dev->Lock, irql);
-        return; // a late RUN preparation must not undo PnP stop/removal
+    if (running) {
+        const BOOLEAN available = dev->Started && !dev->Removed && dev->Connected &&
+            dev->ConnectionEnabled && !dev->SuspendRequested;
+        Oa2dpRingSetConsumerAvailable(&dev->Ring, available);
+        if (!available) {
+            KeReleaseSpinLock(&dev->Lock, irql);
+            return; // a late RUN must not undo disconnect, HFP policy or PnP stop
+        }
     }
     // Commit format and epoch together. A GET_STATE between RingBeginStream and
     // this report must retain the old epoch, so the encoder defers starting.
@@ -345,7 +350,6 @@ extern "C" VOID Oa2dpReportStream(_Inout_ OA2DP_AUDIO_DEVICE *dev, _In_ const OA
     // obsolete stream must not clear the new stream's shared running flag.
     if (running)
     {
-        if (dev->Started) dev->Ring.ConsumerCancelled = FALSE;
         InterlockedOr((volatile LONG *)&ring->flags, OA2DP_RING_FLAG_RUNNING);
     }
     else
@@ -390,6 +394,8 @@ extern "C" NTSTATUS Oa2dpApplyPolicy(_Inout_ OA2DP_AUDIO_DEVICE *dev,
     dev->SuspendRequested = suspended;
     dev->SuspendSerial = suspendSerial;
     ++dev->ConnectionSerial;
+    Oa2dpRingSetConsumerAvailable(&dev->Ring, dev->Started && !dev->Removed &&
+        dev->Connected && enabled && !suspended);
     SnapshotStateLocked(dev, &ev);
     irp = dev->Started && dev->ControlFile
         ? IoCsqRemoveNextIrp(&dev->WaitCsq, dev->ControlFile) : NULL;
