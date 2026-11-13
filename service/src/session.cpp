@@ -1307,9 +1307,6 @@ void Session::stream_loop(const StreamContext &stream)
         return;
     }
     HANDLE pcm_waits[] = {stream_stop_event_, stop_event_, audio_.data_event()};
-    // Admission follows accepted AVDTP START and encoder creation. Until this
-    // point the WaveRT clock retains the OS's first cyclic-buffer samples.
-    (void)oa2dp_ring_admit(ring, &ring_format);
     TraceLoggingWrite(g_Oa2dpStreamTrace, "EncoderStart",
         TraceLoggingLevel(5),
         TraceLoggingUInt32(generation, "StreamGeneration"),
@@ -1357,6 +1354,17 @@ void Session::stream_loop(const StreamContext &stream)
         return;
     }
     HANDLE packet_waits[] = {stream_stop_event_, stop_event_, packet_timer};
+    // Admission is the last preparation step, including allocation and timing
+    // resources. Completing RUN earlier can expose an unusable hardware clock.
+    if (oa2dp_ring_admit(ring, &ring_format) == OA2DP_OK &&
+        !audio_.signal_consumer(ring_format.sequence) &&
+        current_pcm_epoch(ring, ring_format.sequence)) {
+        oa2dp_ring_retire(ring);
+        CloseHandle(packet_timer);
+        oa2dp_encoder_destroy(enc);
+        fail_stream();
+        return;
+    }
     uint64_t wait_count = 0, max_wait_us = 0;
     uint64_t source_frames = 0, silence_frames = 0;
     uint32_t peak_frames = 0;
@@ -1425,6 +1433,11 @@ void Session::stream_loop(const StreamContext &stream)
             spc, &read_frames, &block_ready);
         if (read_status == OA2DP_ERR_STATE) {
             if (adopt_pcm_epoch(ring, ring_format, approved_pcm_sequence_.load())) {
+                if (!audio_.signal_consumer(ring_format.sequence) &&
+                    current_pcm_epoch(ring, ring_format.sequence)) {
+                    fail_stream();
+                    break;
+                }
                 first_pcm = true;
                 TraceLoggingWrite(g_Oa2dpStreamTrace, "PcmEpoch",
                     TraceLoggingLevel(5),

@@ -23,6 +23,8 @@ using UCHAR = uint8_t;
 using CHAR = int8_t;
 using SHORT = int16_t;
 using LONG = int32_t;
+using LONGLONG = int64_t;
+using ULONGLONG = uint64_t;
 using BOOLEAN = bool;
 using KIRQL = int;
 using PVOID = void *;
@@ -30,6 +32,9 @@ using VOID = void;
 using OA2DP_FORMAT = oa2dp_pcm_format;
 enum KPROCESSOR_MODE { KernelMode, UserMode };
 constexpr NTSTATUS STATUS_SUCCESS = 0, STATUS_INVALID_PARAMETER = -1, STATUS_DEVICE_NOT_READY = -2;
+constexpr NTSTATUS STATUS_TIMEOUT = 258, STATUS_IO_TIMEOUT = -3;
+constexpr int Executive = 0;
+struct LARGE_INTEGER {LONGLONG QuadPart;};
 #define NT_SUCCESS(s) ((s) >= 0)
 constexpr bool FALSE = false, TRUE = true;
 constexpr int IO_NO_INCREMENT = 0, EVENT_MODIFY_STATE = 2;
@@ -78,6 +83,17 @@ static void KeSetEvent(FakeEvent *e, int, bool wait) {
     e->signalled = true;
     ++e->signals;
 }
+static void KeClearEvent(FakeEvent *e) { REQUIRE(locked); e->signalled = false; }
+static ULONGLONG interrupt_time = 0;
+static void (*on_consumer_wait)() = nullptr;
+static ULONGLONG KeQueryInterruptTime() { REQUIRE(!locked); return interrupt_time; }
+static NTSTATUS KeWaitForSingleObject(FakeEvent *e, int, KPROCESSOR_MODE, bool, LARGE_INTEGER *timeout) {
+    REQUIRE(!locked && timeout->QuadPart < 0);
+    if(on_consumer_wait) { auto callback=on_consumer_wait;on_consumer_wait=nullptr;callback(); }
+    if(e->signalled)return STATUS_SUCCESS;
+    interrupt_time+=static_cast<ULONGLONG>(-timeout->QuadPart);
+    return STATUS_TIMEOUT;
+}
 static LONG InterlockedOr(volatile LONG *p, LONG b) {
     auto v = *p;
     *p = v | b;
@@ -95,6 +111,9 @@ struct OA2DP_AUDIO_RING {
     ULONG MinimumFrames = 0;
     OA2DP_FORMAT SourceFormat{};
     bool SourceFormatValid = false;
+    FakeEvent ConsumerEvent{1};
+    bool ConsumerMapped = true;
+    bool ConsumerCancelled = false;
 };
 #include "pcm-notification-under-test.inc"
 // Existing format-focused fixtures use the current producer. Epoch-race
@@ -116,7 +135,7 @@ struct OA2DP_AUDIO_DEVICE {
     OA2DP_AUDIO_RING Ring;
     OA2DP_FORMAT Current{};
     ULONG PcmSequence = 0;
-    bool Running = false, Started = false, EventPending = false;
+    bool Running = false, Started = true, Removed = false, EventPending = false;
     void *ControlFile = nullptr;
     OA2DP_FORMAT_CHANGE Event;
     struct {
@@ -284,12 +303,51 @@ static void obsolete_producer() {
     REQUIRE(d.Ring.Ring->write_pos==2);
     Oa2dpRingEndSource(&d.Ring,current);
     REQUIRE(d.Ring.Ring->flags&OA2DP_RING_FLAG_EOS);
+    Oa2dpReportStream(&d,&f,false,current);
+    d.Started=false;d.EventPending=false;
+    Oa2dpRingCancelConsumer(&d.Ring);
+    Oa2dpReportStream(&d,&f,true,current);
+    REQUIRE(!d.Running && !d.EventPending && d.Ring.ConsumerCancelled);
     oa2dp_ring_format snapshot{};
     REQUIRE(oa2dp_ring_snapshot(d.Ring.Ring,&snapshot)==0);
     REQUIRE(oa2dp_ring_admit(d.Ring.Ring,&snapshot)==0);
     REQUIRE(Oa2dpRingConsumerReady(&d.Ring,current) && !Oa2dpRingConsumerReady(&d.Ring,old));
 }
+static OA2DP_AUDIO_RING *waiting_ring;
+static void consumer_preparation() {
+    std::vector<uint64_t> memory((oa2dp_ring_bytes(8,2)+7)/8);
+    OA2DP_AUDIO_RING r; r.Ring=reinterpret_cast<oa2dp_pcm_ring *>(memory.data());
+    REQUIRE(oa2dp_ring_init(r.Ring,8,48000,2,OA2DP_RING_FMT_FLOAT32)==0);
+    OA2DP_FORMAT format{48000,2,32,32,OA2DP_PCM_FLOAT};
+    REQUIRE(Oa2dpRingBeginStream(&r,&format)); waiting_ring=&r;
+    const ULONG sequence=r.Ring->format_sequence;
+    REQUIRE(Oa2dpRingSignalConsumer(&r,sequence)==STATUS_DEVICE_NOT_READY);
+    on_consumer_wait=[] {
+        interrupt_time+=9000000;
+        oa2dp_ring_format f{};REQUIRE(oa2dp_ring_snapshot(waiting_ring->Ring,&f)==0);
+        REQUIRE(oa2dp_ring_admit(waiting_ring->Ring,&f)==0);
+        REQUIRE(Oa2dpRingSignalConsumer(waiting_ring,f.sequence)==0);
+    };
+    REQUIRE(Oa2dpRingWaitConsumer(&r,sequence)==0 && interrupt_time==9000000);
+    REQUIRE(Oa2dpRingWaitConsumer(&r,sequence)==0); // already ready: no blocking
+    REQUIRE(Oa2dpRingBeginStream(&r,&format));
+    REQUIRE(Oa2dpRingSignalConsumer(&r,sequence)==STATUS_DEVICE_NOT_READY); // late ready
+    REQUIRE(Oa2dpRingWaitConsumer(&r,r.Ring->format_sequence)==STATUS_IO_TIMEOUT);
+    REQUIRE(interrupt_time==59000000); // single total five-second budget
+    on_consumer_wait=[] {
+        waiting_ring->ConsumerMapped=false;
+        KIRQL irql;KeAcquireSpinLock(&waiting_ring->Lock,&irql);
+        KeSetEvent(&waiting_ring->ConsumerEvent,0,false);
+        KeReleaseSpinLock(&waiting_ring->Lock,irql);
+    };
+    REQUIRE(Oa2dpRingWaitConsumer(&r,r.Ring->format_sequence)==STATUS_DEVICE_NOT_READY);
+    r.ConsumerMapped=true;
+    on_consumer_wait=[] { Oa2dpRingCancelConsumer(waiting_ring); };
+    REQUIRE(Oa2dpRingWaitConsumer(&r,r.Ring->format_sequence)==STATUS_DEVICE_NOT_READY);
+    REQUIRE(r.ConsumerMapped && r.ConsumerCancelled); // PnP stop preserves the mapping
+}
 int main() {
+    consumer_preparation();
     obsolete_producer();
     new_clip_epoch();
     precision_epoch();

@@ -25,6 +25,7 @@ NTSTATUS Oa2dpRingCreate(_Inout_ OA2DP_AUDIO_RING *r, _In_ ULONG rate, _In_ USHO
         return STATUS_INVALID_PARAMETER;
     RtlZeroMemory(r, sizeof(*r));
     KeInitializeSpinLock(&r->Lock);
+    KeInitializeEvent(&r->ConsumerEvent, NotificationEvent, FALSE);
     low.QuadPart = 0;
     high.QuadPart = (LONGLONG)-1;
     skip.QuadPart = 0;
@@ -100,6 +101,13 @@ NTSTATUS Oa2dpRingMapUser(_Inout_ OA2DP_AUDIO_RING *r, _Out_ OA2DP_RING_MAPPING 
     r->UserVa = va;
     r->UserProcess = PsGetCurrentProcess();
     ObReferenceObject(r->UserProcess);
+    {
+        KIRQL irql;
+        KeAcquireSpinLock(&r->Lock, &irql);
+        r->ConsumerMapped = TRUE;
+        r->ConsumerCancelled = FALSE;
+        KeReleaseSpinLock(&r->Lock, irql);
+    }
     out->Address = (ULONGLONG)(ULONG_PTR)va;
     out->Bytes = r->Bytes;
     return STATUS_SUCCESS;
@@ -111,9 +119,14 @@ NTSTATUS Oa2dpRingMapUser(_Inout_ OA2DP_AUDIO_RING *r, _Out_ OA2DP_RING_MAPPING 
 VOID Oa2dpRingUnmapUser(_Inout_ OA2DP_AUDIO_RING *r)
 {
     KAPC_STATE apc;
+    KIRQL irql;
 
     (void)Oa2dpRingSetDataEvent(r, NULL, 0, KernelMode);
+    KeAcquireSpinLock(&r->Lock, &irql);
+    r->ConsumerMapped = FALSE;
     if (r->Ring) oa2dp_ring_retire(r->Ring);
+    KeSetEvent(&r->ConsumerEvent, IO_NO_INCREMENT, FALSE);
+    KeReleaseSpinLock(&r->Lock, irql);
     if (!r->UserVa)
         return;
     if (r->UserProcess == PsGetCurrentProcess()) {
@@ -180,6 +193,8 @@ BOOLEAN Oa2dpRingBeginStream(OA2DP_AUDIO_RING *r, const OA2DP_FORMAT *format, UL
             r->SourceFormat = *format;
             r->SourceFormatValid = TRUE;
             if (sequence) *sequence = r->Ring->format_sequence;
+            /* Release any waiter for the replaced epoch. */
+            KeSetEvent(&r->ConsumerEvent, IO_NO_INCREMENT, FALSE);
         }
     }
     if (changed && r->DataEvent) KeSetEvent(r->DataEvent, IO_NO_INCREMENT, FALSE);
@@ -195,6 +210,61 @@ BOOLEAN Oa2dpRingConsumerReady(OA2DP_AUDIO_RING *r, ULONG sequence)
     ready = r->Ring && r->Ring->format_sequence == sequence && oa2dp_ring_consumer_ready(r->Ring);
     KeReleaseSpinLock(&r->Lock, irql);
     return ready;
+}
+
+NTSTATUS Oa2dpRingSignalConsumer(OA2DP_AUDIO_RING *r, ULONG sequence)
+{
+    KIRQL irql;
+    NTSTATUS status = STATUS_DEVICE_NOT_READY;
+    KeAcquireSpinLock(&r->Lock, &irql);
+    if (r->Ring && r->ConsumerMapped && !r->ConsumerCancelled && r->Ring->format_sequence == sequence &&
+        oa2dp_ring_consumer_ready(r->Ring)) {
+        KeSetEvent(&r->ConsumerEvent, IO_NO_INCREMENT, FALSE);
+        status = STATUS_SUCCESS;
+    }
+    KeReleaseSpinLock(&r->Lock, irql);
+    return status;
+}
+
+/* PASSIVE_LEVEL, with no position/device/control lock held. A RUN transition
+ * must complete preparation before exposing a running hardware clock. Freezing
+ * that clock afterwards breaks the renderer's real-time timing contract. */
+NTSTATUS Oa2dpRingWaitConsumer(OA2DP_AUDIO_RING *r, ULONG sequence)
+{
+    const ULONGLONG deadline = KeQueryInterruptTime() + 5ULL * 10000000;
+    for (;;) {
+        KIRQL irql;
+        NTSTATUS status;
+        ULONGLONG now;
+        LARGE_INTEGER timeout;
+        KeAcquireSpinLock(&r->Lock, &irql);
+        if (!r->Ring || !r->ConsumerMapped || r->ConsumerCancelled || r->Ring->format_sequence != sequence) {
+            KeReleaseSpinLock(&r->Lock, irql);
+            return STATUS_DEVICE_NOT_READY;
+        }
+        if (oa2dp_ring_consumer_ready(r->Ring)) {
+            KeReleaseSpinLock(&r->Lock, irql);
+            return STATUS_SUCCESS;
+        }
+        KeClearEvent(&r->ConsumerEvent);
+        KeReleaseSpinLock(&r->Lock, irql);
+        now = KeQueryInterruptTime();
+        if (now >= deadline) return STATUS_IO_TIMEOUT;
+        timeout.QuadPart = -(LONGLONG)(deadline - now);
+        status = KeWaitForSingleObject(&r->ConsumerEvent, Executive, KernelMode, FALSE, &timeout);
+        if (status == STATUS_TIMEOUT) return STATUS_IO_TIMEOUT;
+        if (!NT_SUCCESS(status)) return status;
+    }
+}
+
+VOID Oa2dpRingCancelConsumer(OA2DP_AUDIO_RING *r)
+{
+    KIRQL irql;
+    KeAcquireSpinLock(&r->Lock, &irql);
+    r->ConsumerCancelled = TRUE;
+    if (r->Ring) oa2dp_ring_retire(r->Ring);
+    KeSetEvent(&r->ConsumerEvent, IO_NO_INCREMENT, FALSE);
+    KeReleaseSpinLock(&r->Lock, irql);
 }
 
 VOID Oa2dpRingEndSource(OA2DP_AUDIO_RING *r, ULONG sequence)

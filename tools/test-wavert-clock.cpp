@@ -30,6 +30,7 @@
 #endif
 #define ULONG_MAX UINT32_MAX
 using NTSTATUS = int32_t;
+#define NT_SUCCESS(s) ((s) >= 0)
 using ULONG = uint32_t;
 using DWORD = uint32_t;
 using LONG = int32_t;
@@ -142,7 +143,16 @@ static bool Oa2dpRingBeginStream(FakeRing *ring, const OA2DP_FORMAT *, ULONG *se
     ring->Ended = false;
     return true;
 }
-static bool Oa2dpRingConsumerReady(FakeRing *ring, ULONG) { REQUIRE(locked); return ring->Ready; }
+static LONGLONG preparation_delay = 0;
+static NTSTATUS preparation_result = STATUS_SUCCESS;
+static void (*during_preparation)() = nullptr;
+static NTSTATUS Oa2dpRingWaitConsumer(FakeRing *ring, ULONG) {
+    REQUIRE(!locked);
+    if (during_preparation) during_preparation();
+    now += preparation_delay;
+    if (preparation_result == STATUS_SUCCESS) ring->Ready = true;
+    return preparation_result;
+}
 static void Oa2dpRingEndSource(FakeRing *ring, ULONG) { REQUIRE(locked); ring->Ended = true; }
 static ULONG Oa2dpLatencyUs(OA2DP_AUDIO_DEVICE *) {
     REQUIRE(!locked);
@@ -176,6 +186,7 @@ class CMiniportWaveRTStream {
     VOID Pump(ULONGLONG);
     VOID UpdatePosition(LARGE_INTEGER);
     VOID UpdatePresentationPosition(ULONG);
+    VOID UpdatePausedPresentationPosition(LARGE_INTEGER);
     VOID NotifyPackets();
     NTSTATUS GetPosition(KSAUDIO_POSITION *);
     NTSTATUS SetWritePacket(ULONG, DWORD, ULONG);
@@ -193,7 +204,8 @@ class CMiniportWaveRTStream {
     int m_PositionSpinLock = 0;
     KSSTATE m_KsState;
     BOOLEAN m_NeedsPcmEpoch = false;
-    BOOLEAN m_WaitingForConsumer = false;
+    LARGE_INTEGER m_PauseStartQpc{};
+    ULONGLONG m_ullPausePresentationFrames = 0;
     ULONG m_PcmSequence = 0;
     LARGE_INTEGER m_PerfFrequency, m_RunStartQpc;
     ULONGLONG m_hnsRunBase, m_ullLinearFrames, m_ullPumpedFrames, m_ullEosFrame;
@@ -229,6 +241,9 @@ static void reset(CMiniportWaveRTStream &s, KSSTATE state = KSSTATE_RUN) {
     now = 0;
     latency_us = 45000;
     before_lock = nullptr;
+    preparation_delay = 0;
+    preparation_result = STATUS_SUCCESS;
+    during_preparation = nullptr;
     pumped.clear();
     current = &s;
     s.m_Device = &device;
@@ -394,10 +409,10 @@ int main() {
     now = 1000 * OA2DP_HNS_PER_MS;
     latency_us = 0;
     REQUIRE(s.GetOutputStreamPresentationPosition(&presentation) == STATUS_SUCCESS);
-    REQUIRE(presentation.u64PositionInBlocks == 3360); // committed at pause, not last query
+    REQUIRE(presentation.u64PositionInBlocks == 7680); // downstream tail drained during PAUSE
     latency_us = 10000000;
     REQUIRE(s.GetOutputStreamPresentationPosition(&presentation) == STATUS_SUCCESS);
-    REQUIRE(presentation.u64PositionInBlocks == 3360); // paused latency changes cannot move the clock
+    REQUIRE(presentation.u64PositionInBlocks == 7680); // delay changes cannot undo the drained tail
     latency_us = 0;
     REQUIRE(s.SetState(KSSTATE_RUN) == STATUS_SUCCESS);
     now += 10 * OA2DP_HNS_PER_MS;
@@ -431,29 +446,33 @@ int main() {
         REQUIRE(presentation.u64PositionInBlocks == 2640);
         REQUIRE(presentation.u64QPCPosition == static_cast<UINT64>(now)); // KS uses raw QPC ticks
     }
-    // AVDTP/codec startup can take longer than the old 341 ms ring capacity.
-    // The OS must retain packet zero until the consumer accepts this epoch.
+    // Preparation belongs to the state transition. Acknowledged RUN always
+    // advances at nominal rate; a renderer never sees a frozen running clock.
     reset(s, KSSTATE_STOP);
     s.m_NeedsPcmEpoch = true;
-    REQUIRE(s.SetState(KSSTATE_RUN) == STATUS_SUCCESS && !device.Ring.Ready);
-    now = 900 * OA2DP_HNS_PER_MS;
-    REQUIRE(s.GetPosition(&position) == STATUS_SUCCESS && position.PlayOffset == 0);
+    preparation_delay = 900 * OA2DP_HNS_PER_MS;
+    during_preparation = [] {
+        REQUIRE(current->m_KsState != KSSTATE_RUN && !timer.Active);
+        KSAUDIO_POSITION p{};
+        REQUIRE(current->GetPosition(&p) == STATUS_SUCCESS && p.PlayOffset == 0);
+    };
+    REQUIRE(s.SetState(KSSTATE_RUN) == STATUS_SUCCESS && device.Ring.Ready);
     REQUIRE(pumped.empty() && s.m_ullLinearFrames == 0 && s.m_llPacketCounter == 0);
-    device.Ring.Ready = true;
-    now = 901 * OA2DP_HNS_PER_MS;
-    REQUIRE(s.GetPosition(&position) == STATUS_SUCCESS && s.m_ullLinearFrames == 0);
-    now = 906 * OA2DP_HNS_PER_MS;
+    now = 905 * OA2DP_HNS_PER_MS;
     REQUIRE(s.GetPosition(&position) == STATUS_SUCCESS && s.m_ullLinearFrames == 240);
     REQUIRE(pumped.size() == 1 && pumped[0].Position == 0 && pumped[0].Frames == 240);
     REQUIRE(s.SetState(KSSTATE_PAUSE) == STATUS_SUCCESS);
     device.Ring.Ready = false; // idle SUSPEND retired the encoder during pause
     now = 2000 * OA2DP_HNS_PER_MS;
-    REQUIRE(s.SetState(KSSTATE_RUN) == STATUS_SUCCESS && s.m_WaitingForConsumer);
-    now = 2900 * OA2DP_HNS_PER_MS;
-    REQUIRE(s.GetPosition(&position) == STATUS_SUCCESS && s.m_ullLinearFrames == 240);
-    device.Ring.Ready = true;
+    during_preparation = [] { REQUIRE(current->m_KsState == KSSTATE_PAUSE && !timer.Active); };
+    REQUIRE(s.SetState(KSSTATE_RUN) == STATUS_SUCCESS);
     REQUIRE(s.GetPosition(&position) == STATUS_SUCCESS && s.m_ullLinearFrames == 240);
     now = 2905 * OA2DP_HNS_PER_MS;
     REQUIRE(s.GetPosition(&position) == STATUS_SUCCESS && s.m_ullLinearFrames == 480);
-    std::puts("production WaveRT clock/packet/presentation and delayed-consumer startup checks passed (OS APIs fake)");
+    reset(s, KSSTATE_PAUSE);
+    preparation_result = STATUS_INVALID_DEVICE_STATE;
+    REQUIRE(s.SetState(KSSTATE_RUN) == STATUS_INVALID_DEVICE_STATE);
+    REQUIRE(s.m_KsState == KSSTATE_PAUSE && !timer.Active && !device.Ring.Running);
+    REQUIRE(device.Reports == std::vector<bool>({true, false}));
+    std::puts("production WaveRT clock/packet/presentation and synchronous RUN preparation checks passed (OS APIs fake)");
 }

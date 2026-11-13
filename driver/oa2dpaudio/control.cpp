@@ -323,6 +323,10 @@ extern "C" VOID Oa2dpReportStream(_Inout_ OA2DP_AUDIO_DEVICE *dev, _In_ const OA
     PIRP irp;
 
     KeAcquireSpinLock(&dev->Lock, &irql);
+    if (running && (!dev->Started || dev->Removed)) {
+        KeReleaseSpinLock(&dev->Lock, irql);
+        return; // a late RUN preparation must not undo PnP stop/removal
+    }
     // Commit format and epoch together. A GET_STATE between RingBeginStream and
     // this report must retain the old epoch, so the encoder defers starting.
     // Device -> ring is the only nested order; ring producers do not take Lock.
@@ -340,7 +344,10 @@ extern "C" VOID Oa2dpReportStream(_Inout_ OA2DP_AUDIO_DEVICE *dev, _In_ const OA
     // Running belongs to the accepted source format too. A late STOP from an
     // obsolete stream must not clear the new stream's shared running flag.
     if (running)
+    {
+        if (dev->Started) dev->Ring.ConsumerCancelled = FALSE;
         InterlockedOr((volatile LONG *)&ring->flags, OA2DP_RING_FLAG_RUNNING);
+    }
     else
         InterlockedAnd((volatile LONG *)&ring->flags, ~(LONG)OA2DP_RING_FLAG_RUNNING);
     if (dev->Ring.DataEvent) KeSetEvent(dev->Ring.DataEvent, IO_NO_INCREMENT, FALSE);
@@ -454,6 +461,7 @@ extern "C" VOID Oa2dpControlStop(_Inout_ OA2DP_AUDIO_DEVICE *dev)
     dev->Running = FALSE;
     dev->EventPending = FALSE;
     KeReleaseSpinLock(&dev->Lock, irql);
+    Oa2dpRingCancelConsumer(&dev->Ring);
     Oa2dpRingSetRunning(&dev->Ring, FALSE);
     Oa2dpSetConnected(dev, FALSE, 0);
     if (dev->ControlLink.Buffer)
@@ -707,6 +715,16 @@ static NTSTATUS ControlIoctl(_Inout_ OA2DP_AUDIO_DEVICE *dev, _Inout_ PIRP irp, 
         goto done;
     }
     switch (code) {
+    case IOCTL_OA2DP_AUDIO_CONSUMER_READY: {
+        if (!buf || inLen != sizeof(OA2DP_CONSUMER_READY_IN)) {
+            status = STATUS_BUFFER_TOO_SMALL;
+            break;
+        }
+        const auto value = *static_cast<OA2DP_CONSUMER_READY_IN *>(buf);
+        status = value.Reserved ? STATUS_INVALID_PARAMETER :
+            Oa2dpRingSignalConsumer(&dev->Ring, value.PcmSequence);
+        break;
+    }
     case IOCTL_OA2DP_AUDIO_SET_DATA_EVENT: {
         if (!buf || inLen != sizeof(OA2DP_DATA_EVENT_IN)) {
             status = STATUS_BUFFER_TOO_SMALL;

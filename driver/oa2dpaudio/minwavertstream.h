@@ -60,6 +60,7 @@ private:
     ULONGLONG RunningHns(_In_ LARGE_INTEGER Qpc);
     VOID UpdatePosition(_In_ LARGE_INTEGER Qpc);
     VOID UpdatePresentationPosition(_In_ ULONG LatencyUs);
+    VOID UpdatePausedPresentationPosition(_In_ LARGE_INTEGER Qpc);
     VOID Pump(_In_ ULONGLONG ToFrame);
     VOID NotifyPackets();
 
@@ -74,7 +75,6 @@ private:
     KSPIN_LOCK                  m_PositionSpinLock;
     KSSTATE                     m_KsState;
     BOOLEAN                     m_NeedsPcmEpoch; // STOP reuse; PAUSE preserves the current epoch
-    BOOLEAN                     m_WaitingForConsumer;
     ULONG                       m_PcmSequence;
 
     BYTE                       *m_pDmaBuffer;
@@ -87,6 +87,8 @@ private:
     ULONGLONG                   m_ullLinearFrames;  // frames played since STOP
     ULONGLONG                   m_ullPumpedFrames;  // frames copied to the ring
     ULONGLONG                   m_ullPresentationFrames; // monotonic within a stream epoch
+    LARGE_INTEGER               m_PauseStartQpc;
+    ULONGLONG                   m_ullPausePresentationFrames;
     LONGLONG                    m_llPacketCounter;  // completed packets (event mode)
     ULONG                       m_ulLastOsWritePacket;
     BOOLEAN                     m_bEoSReceived;

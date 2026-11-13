@@ -1,4 +1,4 @@
-# Short-clip pipeline review (0.4.1 / 0.4.2 candidate)
+# Short-clip pipeline review (0.4.1–0.4.3)
 
 On 2026-11-12, the owner reported missing beginnings of pronunciation clips
 in the Shici Windows application on the 0.4.0 native driver. This concrete bug
@@ -97,3 +97,43 @@ does not establish the cause of a particular receiver's audible behavior.
 
 Exact-package activation and a final real short-clip acceptance remain separate
 gates. Do not label the 0.4.2 candidate an accepted or stable fix until recorded.
+
+## 2026-11-13: 0.4.2 failed acceptance; 0.4.3 timing correction
+
+The owner reports that actual Shici playback is still defective on 0.4.2.
+The previous offline successes do not establish a complete fix. In particular,
+the scripted producer in the stream-loop fixture waits for admission itself;
+it is not Windows Audio Engine or Shici's Media Foundation renderer.
+
+A standalone, very low-amplitude 500 ms WAV diagnostic using the same Windows
+Media Engine family found a 2,141 ms first Play-to-Ended interval, including
+repeated stalls in the reported media clock. Immediate replay took 515 ms;
+replay after a 4.5-second idle took 594 ms. This establishes an actual timing
+anomaly. It does **not** measure which samples were audible at the headset.
+No Shici application code or content was changed.
+
+The source review found two timing-contract problems:
+
+1. 0.4.2 acknowledged KS RUN before transport/encoder readiness and then froze
+   the running WaveRT clock. The correction under review completes preparation
+   within the state transition, without holding the position lock or running
+   the timer; successful RUN then advances at the nominal rate. An explicit
+   consumer-ready IOCTL wakes the transition. The wait has one five-second
+   budget and wakes on mapping loss, replaced epoch and device stop. This is
+   ring protocol version 4; mixed old/new packages are rejected.
+2. PAUSE froze the presentation position immediately, even though buffered
+   audio continued through the idle drain. The correction advances the paused
+   presentation estimate only to the submitted-frame boundary. No new source
+   PCM is consumed while paused, and STOP resets the timeline.
+
+Consumer readiness follows allocation of the encoder and packet timer. A late
+readiness reply for a replaced source epoch cannot tear down its successor.
+Production-body checks cover delayed preparation, preparation failure,
+timeout/removal wakeups and paused presentation drain. These remain software
+checks, not renewed hardware acceptance. This work has not been deployed.
+
+The Windows contracts require a nominal packet clock and distinguish DMA
+transfer position from downstream presentation position:
+[SetWritePacket](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/portcls/nf-portcls-iminiportwavertoutputstream-setwritepacket),
+[SetState](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/portcls/nf-portcls-iminiportwavertstream-setstate),
+[GetOutputStreamPresentationPosition](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/portcls/nf-portcls-iminiportwavertoutputstream-getoutputstreampresentationposition).

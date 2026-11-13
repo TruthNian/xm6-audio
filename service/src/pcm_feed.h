@@ -3,6 +3,11 @@
 #include "oa2dp/pcm_ring.h"
 
 namespace oa2dp {
+inline bool current_pcm_epoch(oa2dp_pcm_ring *ring, uint32_t sequence)
+{
+    oa2dp_ring_format current{};
+    return oa2dp_ring_snapshot(ring, &current) == OA2DP_OK && current.sequence == sequence;
+}
 // Authorization comes from a full OA2DP_FORMAT comparison on the policy
 // thread, including valid precision; a ring representation match is not enough.
 inline bool adopt_pcm_epoch(oa2dp_pcm_ring *ring, oa2dp_ring_format &current,

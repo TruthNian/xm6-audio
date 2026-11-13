@@ -105,6 +105,7 @@ public:
     bool get_state(OA2DP_FORMAT_CHANGE &out);
     bool map_ring();
     bool set_data_event(ULONG minimum_frames);
+    bool signal_consumer(ULONG pcm_sequence);
     HANDLE data_event() const { return data_event_; }
     void unmap_ring();
     oa2dp_pcm_ring *ring() const { return ring_; }

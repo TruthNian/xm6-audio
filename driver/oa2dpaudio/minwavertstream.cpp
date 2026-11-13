@@ -98,7 +98,6 @@ CMiniportWaveRTStream::Init
     m_ulBlockAlign = (ULONG)Format_->Channels * (Format_->BitsPerSample / 8);
     m_KsState = KSSTATE_STOP;
     m_NeedsPcmEpoch = TRUE;
-    m_WaitingForConsumer = FALSE;
     m_PcmSequence = MAXULONG;
     m_pDmaBuffer = NULL;
     m_ulDmaBufferSize = 0;
@@ -107,6 +106,8 @@ CMiniportWaveRTStream::Init
     m_ullLinearFrames = 0;
     m_ullPumpedFrames = 0;
     m_ullPresentationFrames = 0;
+    m_PauseStartQpc.QuadPart = 0;
+    m_ullPausePresentationFrames = 0;
     m_llPacketCounter = 0;
     m_ulLastOsWritePacket = ULONG_MAX;
     m_bEoSReceived = FALSE;
@@ -477,7 +478,6 @@ CMiniportWaveRTStream::AllocateAudioBuffer
 #pragma code_seg()
 ULONGLONG CMiniportWaveRTStream::RunningHns(_In_ LARGE_INTEGER Qpc)
 {
-    if (m_WaitingForConsumer) return m_hnsRunBase;
     LARGE_INTEGER delta;
     delta.QuadPart = Qpc.QuadPart - m_RunStartQpc.QuadPart;
     if (delta.QuadPart < 0)
@@ -547,11 +547,6 @@ VOID CMiniportWaveRTStream::NotifyPackets()
 #pragma code_seg()
 VOID CMiniportWaveRTStream::UpdatePosition(_In_ LARGE_INTEGER Qpc)
 {
-    if (m_WaitingForConsumer) {
-        if (!Oa2dpRingConsumerReady(&m_Device->Ring, m_PcmSequence)) return;
-        m_RunStartQpc = Qpc;
-        m_WaitingForConsumer = FALSE;
-    }
     ULONGLONG frames = HnsToFrames(RunningHns(Qpc), m_Format.SampleRate);
 
     if (frames <= m_ullLinearFrames)
@@ -575,6 +570,21 @@ VOID CMiniportWaveRTStream::UpdatePresentationPosition(_In_ ULONG LatencyUs)
     // Keep the position until the new estimate catches up; STOP resets it.
     if (presented > m_ullPresentationFrames)
         m_ullPresentationFrames = presented;
+}
+
+#pragma code_seg()
+VOID CMiniportWaveRTStream::UpdatePausedPresentationPosition(_In_ LARGE_INTEGER Qpc)
+{
+    // PAUSE stops the producer, not samples already queued to the receiver.
+    // The existing idle drain continues sending while that audible tail ends.
+    LARGE_INTEGER delta;
+    delta.QuadPart = Qpc.QuadPart - m_PauseStartQpc.QuadPart;
+    if (delta.QuadPart <= 0) return;
+    const ULONGLONG elapsed = HnsToFrames(
+        KSCONVERT_PERFORMANCE_TIME(m_PerfFrequency.QuadPart, delta), m_Format.SampleRate);
+    const ULONGLONG remaining = m_ullLinearFrames - m_ullPausePresentationFrames;
+    const ULONGLONG presented = m_ullPausePresentationFrames + (elapsed < remaining ? elapsed : remaining);
+    if (presented > m_ullPresentationFrames) m_ullPresentationFrames = presented;
 }
 
 //=============================================================================
@@ -715,6 +725,10 @@ CMiniportWaveRTStream::GetOutputStreamPresentationPosition
         UpdatePosition(qpc);
         UpdatePresentationPosition(latencyUs);
     }
+    else if (m_KsState == KSSTATE_PAUSE || m_KsState == KSSTATE_ACQUIRE)
+    {
+        UpdatePausedPresentationPosition(qpc);
+    }
     pPresentationPosition->u64PositionInBlocks = m_ullPresentationFrames;
     pPresentationPosition->u64QPCPosition = (UINT64)qpc.QuadPart;
     KeReleaseSpinLock(&m_PositionSpinLock, oldIrql);
@@ -771,12 +785,13 @@ CMiniportWaveRTStream::SetState
     {
         case KSSTATE_STOP:
             m_NeedsPcmEpoch = TRUE;
-            m_WaitingForConsumer = FALSE;
             // Reset DMA
             m_llPacketCounter = 0;
             m_ullLinearFrames = 0;
             m_ullPumpedFrames = 0;
             m_ullPresentationFrames = 0;
+            m_PauseStartQpc.QuadPart = 0;
+            m_ullPausePresentationFrames = 0;
             m_hnsRunBase = 0;
             // Reset OS write positions
             m_ulLastOsWritePacket = ULONG_MAX;
@@ -794,7 +809,9 @@ CMiniportWaveRTStream::SetState
                 // the timer after committing the new state below.
                 qpc = KeQueryPerformanceCounter(NULL);
                 UpdatePosition(qpc);
-                UpdatePresentationPosition(latencyUs); // freeze at pause, including time since the last query
+                UpdatePresentationPosition(latencyUs); // anchor the downstream tail at PAUSE
+                m_PauseStartQpc = qpc;
+                m_ullPausePresentationFrames = m_ullPresentationFrames;
                 m_hnsRunBase = RunningHns(qpc);
             }
             break;
@@ -811,9 +828,22 @@ CMiniportWaveRTStream::SetState
                     }
                     m_NeedsPcmEpoch = FALSE;
                 }
-                // Start DMA
+                // Request preparation while this stream is still PAUSE/STOP.
+                // Never acknowledge RUN and then freeze its hardware clock:
+                // Media Foundation may already advance/drop source timestamps.
+                const ULONG sequence = m_PcmSequence;
+                KeReleaseSpinLock(&m_PositionSpinLock, oldIrql);
+                Oa2dpReportStream(m_Device, &m_Format, TRUE, sequence);
+                const NTSTATUS prepared = Oa2dpRingWaitConsumer(&m_Device->Ring, sequence);
+                if (!NT_SUCCESS(prepared)) {
+                    Oa2dpReportStream(m_Device, &m_Format, FALSE, sequence);
+                    return prepared;
+                }
+                KeAcquireSpinLock(&m_PositionSpinLock, &oldIrql);
+                // PortCls orders state transitions. Consumer preparation took
+                // place without the position lock or an active timer.
                 m_RunStartQpc = KeQueryPerformanceCounter(&m_PerfFrequency);
-                m_WaitingForConsumer = !Oa2dpRingConsumerReady(&m_Device->Ring, m_PcmSequence);
+                UpdatePausedPresentationPosition(m_RunStartQpc);
             }
             break;
         default:
@@ -835,7 +865,6 @@ CMiniportWaveRTStream::SetState
         // 1 ms software hardware-emulation timer; notification cadence comes
         // from actual packet progress, including intervening position queries.
         ExSetTimer(m_pNotificationTimer, -(LONGLONG)OA2DP_HNS_PER_MS, OA2DP_HNS_PER_MS, NULL);
-        Oa2dpReportStream(m_Device, &m_Format, TRUE, m_PcmSequence);
     }
     return STATUS_SUCCESS;
 }

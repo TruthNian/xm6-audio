@@ -120,6 +120,13 @@ typedef struct _OA2DP_TX_STATE {
 #define IOCTL_OA2DP_AUDIO_GET_STATE     OA2DP_CTL(39, METHOD_BUFFERED)
 #define IOCTL_OA2DP_AUDIO_SET_SUSPENDED OA2DP_CTL(40, METHOD_BUFFERED)
 #define IOCTL_OA2DP_AUDIO_SET_DATA_EVENT OA2DP_CTL(41, METHOD_BUFFERED)
+#define IOCTL_OA2DP_AUDIO_CONSUMER_READY OA2DP_CTL(42, METHOD_BUFFERED)
+/* The service admits this PCM epoch only after START and encoder preparation.
+ * A successful reply wakes a pending KS RUN transition; it is not audio data. */
+typedef struct _OA2DP_CONSUMER_READY_IN {
+    ULONG PcmSequence;
+    ULONG Reserved;
+} OA2DP_CONSUMER_READY_IN;
 
 /* Referenced by the driver until replaced, unmapped or the control file closes.
  * Fixed-width handle permits explicit validation on both architectures. */

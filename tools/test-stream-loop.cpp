@@ -33,6 +33,7 @@ struct AudioScheduling {};
 static uint64_t ticks=10000,timer_due=0;
 static unsigned timers=0,failures=0,waits=0;
 static bool fail_timer=false;
+static bool (*signal_override)(ULONG)=nullptr;
 static oa2dp_codec_id tested_codec=OA2DP_CODEC_LDAC;
 static OA2DP_FORMAT tested_format{96000,2,32,32,OA2DP_PCM_INTEGER};
 static void QueryPerformanceCounter(LARGE_INTEGER *v){v->QuadPart=ticks;}
@@ -78,7 +79,13 @@ struct Session {
     HANDLE stream_stop_event_=1,stop_event_=2;
     std::mutex status_mu_;
     struct {std::string encoder_input;unsigned bitrate=0,abr_level=0;}status_;
-    struct Audio {bool set_data_event(unsigned n){return n>0 && n<=8192;} HANDLE data_event(){return 3;}}audio_;
+    struct Audio {
+        bool set_data_event(unsigned n){return n>0 && n<=8192;}
+        bool signal_consumer(ULONG sequence){
+            REQUIRE(timers==1);return signal_override?signal_override(sequence):true;
+        }
+        HANDLE data_event(){return 3;}
+    }audio_;
     struct Transport {
         struct Packet{uint64_t ticks;uint32_t timestamp;unsigned frames;};
         std::vector<Packet> sent;
@@ -148,7 +155,7 @@ static DWORD WaitForMultipleObjects(unsigned n,HANDLE *h,bool all,DWORD timeout)
     return active->streaming_?WAIT_OBJECT_0+2:WAIT_OBJECT_0;
 }
 static void run(uint32_t rate,oa2dp_codec_id codec=OA2DP_CODEC_LDAC,
-    OA2DP_FORMAT format={0,2,32,32,OA2DP_PCM_INTEGER},bool cancel=false,bool timer_failure=false) {
+    OA2DP_FORMAT format={0,2,32,32,OA2DP_PCM_INTEGER},bool cancel=false,bool timer_failure=false,int ready_failure=0) {
     ticks=10000;timers=failures=waits=clip=produced=0;admitted.clear();expected.clear();
     cancel_from_wait=cancel;fail_timer=timer_failure;tested_rate=rate;
     tested_codec=codec;tested_format=format;tested_format.SampleRate=rate;
@@ -159,6 +166,15 @@ static void run(uint32_t rate,oa2dp_codec_id codec=OA2DP_CODEC_LDAC,
     REQUIRE(oa2dp_ring_begin_format(source,rate,tested_format.Channels,oa2dp_pcm_format_ring_type(&tested_format))==1);
     source->flags|=OA2DP_RING_FLAG_RUNNING;
     oa2dp::Session s;active=&s;
+    signal_override=nullptr;
+    if(ready_failure==1)signal_override=[](ULONG){return false;};
+    if(ready_failure==2)signal_override=[](ULONG){
+        signal_override=nullptr;
+        REQUIRE(oa2dp_ring_begin_format(source,tested_rate,tested_format.Channels,
+            oa2dp_pcm_format_ring_type(&tested_format))==1);
+        active->approved_pcm_sequence_=source->format_sequence;
+        return false; // old epoch rejected while a new source owns the ring
+    };
     oa2dp::Session::StreamContext stream{};stream.ring=source;stream.pcm=tested_format;
     oa2dp_settings_default(&stream.settings);
     stream.settings.sample_rate=rate;stream.settings.bits=0;stream.settings.ldac_quality=OA2DP_LDAC_HQ;
@@ -168,7 +184,7 @@ static void run(uint32_t rate,oa2dp_codec_id codec=OA2DP_CODEC_LDAC,
     s.approved_pcm_sequence_=stream.ring_format.sequence;
     s.stream_loop(stream);
     REQUIRE(timers==0 && !oa2dp_ring_consumer_ready(source));
-    if(timer_failure){REQUIRE(failures==1 && s.tr_.sent.empty());return;}
+    if(timer_failure||ready_failure==1){REQUIRE(failures==1 && s.tr_.sent.empty());return;}
     REQUIRE(failures==0 && oa2dp_ring_overruns(source)==0);
     if(cancel){REQUIRE(admitted.empty() && s.tr_.sent.empty());return;}
     if(admitted!=expected) {
@@ -205,4 +221,6 @@ int main(){
     }
     const OA2DP_FORMAT f{0,2,32,32,OA2DP_PCM_INTEGER};
     run(96000,OA2DP_CODEC_LDAC,f,true);run(96000,OA2DP_CODEC_LDAC,f,false,true);
+    run(96000,OA2DP_CODEC_LDAC,f,false,false,1);
+    run(96000,OA2DP_CODEC_LDAC,f,false,false,2);
 }

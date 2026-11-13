@@ -408,6 +408,13 @@ bool AudioEndpoint::set_data_event(ULONG minimum_frames)
         nullptr, 0, nullptr, 5000) == ERROR_SUCCESS;
 }
 
+bool AudioEndpoint::signal_consumer(ULONG pcm_sequence)
+{
+    OA2DP_CONSUMER_READY_IN value{pcm_sequence, 0};
+    return dev_.ioctl(IOCTL_OA2DP_AUDIO_CONSUMER_READY, &value, sizeof(value),
+        nullptr, 0, nullptr, 5000) == ERROR_SUCCESS;
+}
+
 bool AudioEndpoint::set_connected(bool connected, ULONG connection)
 {
     OA2DP_CONNECTED_IN value{connected ? 1UL : 0UL, connection};

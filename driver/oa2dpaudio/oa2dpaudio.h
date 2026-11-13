@@ -47,6 +47,9 @@ typedef struct _OA2DP_AUDIO_RING {
     ULONG MinimumFrames;
     OA2DP_FORMAT SourceFormat; /* full producer metadata, guarded by Lock */
     BOOLEAN SourceFormatValid;
+    KEVENT ConsumerEvent;    /* RUN preparation completion, never a running clock gate */
+    BOOLEAN ConsumerMapped; /* protected by Lock; removal wakes pending RUN */
+    BOOLEAN ConsumerCancelled;
 } OA2DP_AUDIO_RING;
 
 typedef struct _OA2DP_AUDIO_DEVICE {
@@ -107,6 +110,9 @@ NTSTATUS Oa2dpRingSetDataEvent(_Inout_ OA2DP_AUDIO_RING *r, HANDLE event,
 /* Claim a producer epoch at RUN, before its first PCM sample. */
 BOOLEAN Oa2dpRingBeginStream(_Inout_ OA2DP_AUDIO_RING *r, _In_ const OA2DP_FORMAT *format, _Out_ ULONG *sequence);
 BOOLEAN Oa2dpRingConsumerReady(_Inout_ OA2DP_AUDIO_RING *r, ULONG sequence);
+NTSTATUS Oa2dpRingSignalConsumer(_Inout_ OA2DP_AUDIO_RING *r, ULONG sequence);
+NTSTATUS Oa2dpRingWaitConsumer(_Inout_ OA2DP_AUDIO_RING *r, ULONG sequence);
+VOID Oa2dpRingCancelConsumer(_Inout_ OA2DP_AUDIO_RING *r);
 VOID Oa2dpRingEndSource(_Inout_ OA2DP_AUDIO_RING *r, ULONG sequence);
 VOID Oa2dpRingSetRunning(_Inout_ OA2DP_AUDIO_RING *r, _In_ BOOLEAN running);
 /* Copy `frames` frames of the WaveRT cyclic buffer, starting at byte offset
