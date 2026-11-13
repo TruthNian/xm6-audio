@@ -130,7 +130,32 @@ Consumer readiness follows allocation of the encoder and packet timer. A late
 readiness reply for a replaced source epoch cannot tear down its successor.
 Production-body checks cover delayed preparation, preparation failure,
 timeout/removal wakeups and paused presentation drain. These remain software
-checks, not renewed hardware acceptance. This work has not been deployed.
+checks, not renewed hardware acceptance.
+
+The combined 0.4.3 candidate was subsequently deployed to the local test host.
+Both loaded kernel images and the running service matched the same signed
+candidate; activation required one Bluetooth radio cycle and no computer reboot.
+Endpoint defaults, mix format, volume, mute and capture defaults were preserved.
+The local deployment does not constitute a stable release or Shici acceptance.
+
+A bounded trace then included Windows Audio and Media Foundation events, not
+just the driver's input ring and Bluetooth sends. For three 500 ms diagnostic
+clips, the Media Foundation render events started at source timestamp zero and
+covered contiguous intervals to approximately 500 ms. All 18 render-position
+computations reported zero bytes to stall. The trace recorded no native send
+failures or ring overruns. These events do not establish byte identity through
+Windows mixing/encoding or what was audible at the headset.
+
+Startup latency remains an unresolved observation: Media Foundation's first
+`StartLocalGraph` interval took approximately 2,065 ms, immediate replay 0.37 ms,
+and replay after idle 75 ms. The first interval ended immediately after native
+encoder preparation. This localizes the wait to the startup path but does not
+identify the slow call or prove that the wait loses source samples. Media clock
+plateaus also remain observable; they must not alone be called sample loss.
+The diagnostic process's COM cleanup order was corrected separately and its
+last run exited successfully. No application code or further driver deployment
+was performed during this investigation. Shici's reported audible defect remains
+unaccepted; do not claim that every cause has been found or resolved.
 
 The Windows contracts require a nominal packet clock and distinguish DMA
 transfer position from downstream presentation position:
