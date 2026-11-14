@@ -257,13 +257,15 @@ Shici listening acceptance. Cold Bluetooth preparation still took about two
 seconds before the first notification. No stable tag, main merge or
 hardware-completeness claim follows.
 
-## 0.4.6 source candidate: distinguish preparation from format probing
+## 0.4.6: require a playback buffer and honor allocation sizes
 
 The activation trace also exposed 34 zero-source encoder instances during
-Windows endpoint format discovery. The unconditional PAUSE preparation admitted
-format probes as though they reserved a playback buffer. A production-body
-fixture independently reproduces this for PAUSE without a DMA allocation:
-0.4.5 changes the source epoch and waits for Bluetooth despite having no buffer.
+Windows endpoint format discovery. This prompted a review of PAUSE preparation.
+A production-body fixture independently reproduces unnecessary preparation for
+PAUSE without a DMA allocation: 0.4.5 changes the source epoch and waits for
+Bluetooth despite having no buffer. That fixture does **not** establish that
+the 34 observed instances were bufferless; the deployed trace below establishes
+that those real probes did allocate buffers.
 
 Preparation now requires both PAUSE and an allocated audio buffer. The second
 operation performs the same preparation helper, supporting either ordering and
@@ -278,9 +280,47 @@ The WaveRT contract requires an actual size at least as large as the requested
 size. Both now round up to full frames (and complete notification packets),
 with overflow rejection. Tests exercise nonaligned sizes and maximum-size
 overflow. Notification count is limited to the documented one or two per cycle.
-These are source-level corrections; the candidate is not deployed yet.
+These source corrections are included in the deployed package described below.
 See Microsoft's [AllocateAudioBuffer contract](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/portcls/nf-portcls-iminiportwavertstream-allocateaudiobuffer)
 and [AllocateBufferWithNotification contract](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/portcls/nf-portcls-iminiportwavertstreamnotification-allocatebufferwithnotification).
+
+### Deployed result and remaining limits
+
+Commit `71bf0725fe0c2f311b29d86940896c3c67f471c4` passed the complete local native
+build and all 36 checks. Its exact [CI run](https://github.com/TruthNian/xm6-audio/actions/runs/43551801687)
+also passed. On 2026-11-14 the package was signed with the existing local test
+certificate and activated. Both loaded kernel images and the running service
+were verified against that package at 0.4.6. Activation used one Bluetooth radio
+cycle, no computer reboot, new certificate trust or boot-policy change. Endpoint
+name, default outputs, capture defaults, mix format, volume and mute were retained.
+
+A bounded three-minute trace covered endpoint activation, two standard Windows
+notification sounds and three 500 ms Media Engine diagnostic clips, including
+replay after a 4.5-second pause. Windows reported no buffer glitches or missed
+pump deadlines; native events reported no unavailable RUN, failed media send,
+ring overrun or ETW loss. The diagnostic graph-start spans were 0–1 ms at the
+trace decoder's timing precision. Source render intervals started at timestamp
+zero and were contiguous through approximately 500 ms on each clip.
+
+Metadata accounting also matched: WaveRT pumped 731,656 frames across the three
+source epochs, and the encoder consumed 731,656. Each first read began at its
+epoch's first frame; all consumed source frames reached media submission, and
+no unread ring tail remained when the encoder ended. This checks counts and
+positions, not sample values, headset decoding or audible completeness. The
+diagnostic process is not a repeat of real Shici listening acceptance.
+
+The first cold preparation still occupied approximately 2,001 ms before RUN;
+the following new-epoch preparations took approximately 1.4 and 2.4 ms. The
+trace also retained 34 zero-source encoder instances during endpoint discovery.
+Their state-request events contain nonzero buffer sizes: excluding bufferless
+pins does not remove these allocated probes. A PAUSE with a buffer can be a
+legitimate playback reservation, so treating it as disposable solely because
+RUN has not yet happened would reintroduce the startup readiness problem.
+No process-name exception or claim that this overhead is solved is made.
+
+The deployed source fixes and these automatic checks do not close acoustic
+acceptance. The user has not accepted 0.4.6 listening behavior, and no further
+listening request was sent. No stable tag or main-branch merge follows.
 
 The Windows contracts require a nominal packet clock and distinguish DMA
 transfer position from downstream presentation position:
