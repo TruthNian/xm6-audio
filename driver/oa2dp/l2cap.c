@@ -816,3 +816,82 @@ static void TransferDone(_In_ WDFREQUEST Request, _In_ WDFIOTARGET Target,
     rc->Brb = NULL;
     WdfRequestCompleteWithInformation(Request, status, bytes);
 }
+
+/* ------------------------------------------------------------------------ */
+/* ACL wake before an outgoing START; Windows retains link policy ownership. */
+/* ------------------------------------------------------------------------ */
+
+static EVT_WDF_REQUEST_COMPLETION_ROUTINE WakeLinkDone;
+
+/* Called with dev->Lock held. A wake never establishes connection/play state. */
+static BOOLEAN WakeLinkCurrent(OA2DP_DEVICE_CONTEXT *dev, ULONG media, ULONG connection)
+{
+    return !dev->TransportStopping && !dev->PowerSuspended && dev->PolicyConnected &&
+        !dev->PolicySuspended &&
+        Oa2dpChannelTransferCurrent(&dev->Channels[Oa2dpChannelSignaling].Life, connection, connection) &&
+        Oa2dpChannelTransferCurrent(&dev->Channels[Oa2dpChannelMedia].Life, media, connection);
+}
+
+VOID Oa2dpWakeLink(OA2DP_DEVICE_CONTEXT *dev, WDFREQUEST request, const OA2DP_SEND_IN *in)
+{
+    OA2DP_CHANNEL *ch = &dev->Channels[Oa2dpChannelMedia];
+    NTSTATUS status;
+    if (in->Kind != Oa2dpChannelMedia) {
+        WdfRequestComplete(request, STATUS_INVALID_PARAMETER);
+        return;
+    }
+    const ULONG generation = in->Generation, connection = in->ConnectionGeneration;
+    WdfSpinLockAcquire(dev->Lock);
+    const BOOLEAN admitted = WakeLinkCurrent(dev, generation, connection) &&
+        Oa2dpChannelBeginSubmit(&ch->Life, generation, connection);
+    if (admitted && ch->Life.Submissions == 1) KeClearEvent(&ch->SubmissionsIdle);
+    WdfSpinLockRelease(dev->Lock);
+    if (!admitted) {
+        WdfRequestComplete(request, STATUS_CONNECTION_DISCONNECTED);
+        return;
+    }
+    struct _BRB_ACL_ENTER_ACTIVE_MODE *brb = (struct _BRB_ACL_ENTER_ACTIVE_MODE *)
+        dev->Profile.BthAllocateBrb(BRB_ACL_ENTER_ACTIVE_MODE, OA2DP_POOL_TAG);
+    if (brb) {
+        brb->BtAddress = dev->RemoteAddress;
+        OA2DP_REQUEST_CONTEXT *rc = Oa2dpGetRequest(request);
+        rc->Brb = (struct _BRB *)brb;
+        rc->Generation = generation;
+        rc->ConnectionGeneration = connection;
+        TraceLoggingWrite(g_Oa2dpTransportTrace, "LinkWakeBegin", TraceLoggingLevel(5),
+            TraceLoggingUInt32(connection, "ConnectionGeneration"));
+        // Bound the optional wake independently of the existing START timeout.
+        // Passing the original WDF request keeps service cancellation effective.
+        status = SubmitBrbAsync(dev, request, (struct _BRB *)brb, sizeof(*brb), WakeLinkDone, dev, 1500);
+    } else {
+        status = STATUS_INSUFFICIENT_RESOURCES;
+    }
+    // Completion may have happened inline. Do not access request/rc on PENDING.
+    WdfSpinLockAcquire(dev->Lock);
+    if (Oa2dpChannelEndSubmit(&ch->Life)) KeSetEvent(&ch->SubmissionsIdle, IO_NO_INCREMENT, FALSE);
+    WdfSpinLockRelease(dev->Lock);
+    if (status != STATUS_PENDING) {
+        if (brb) dev->Profile.BthFreeBrb((PBRB)brb);
+        Oa2dpGetRequest(request)->Brb = NULL;
+        WdfRequestComplete(request, status);
+    }
+}
+
+static void WakeLinkDone(WDFREQUEST Request, WDFIOTARGET Target,
+                         PWDF_REQUEST_COMPLETION_PARAMS Params, WDFCONTEXT Context)
+{
+    OA2DP_DEVICE_CONTEXT *dev = (OA2DP_DEVICE_CONTEXT *)Context;
+    OA2DP_REQUEST_CONTEXT *rc = Oa2dpGetRequest(Request);
+    NTSTATUS status = Params->IoStatus.Status;
+    UNREFERENCED_PARAMETER(Target);
+    WdfSpinLockAcquire(dev->Lock);
+    if (NT_SUCCESS(status) && !WakeLinkCurrent(dev, rc->Generation, rc->ConnectionGeneration))
+        status = STATUS_CONNECTION_DISCONNECTED;
+    WdfSpinLockRelease(dev->Lock);
+    TraceLoggingWrite(g_Oa2dpTransportTrace, "LinkWakeComplete", TraceLoggingLevel(5),
+        TraceLoggingUInt32(rc->ConnectionGeneration, "ConnectionGeneration"),
+        TraceLoggingNTStatus(status, "Status"));
+    dev->Profile.BthFreeBrb((PBRB)rc->Brb);
+    rc->Brb = NULL;
+    WdfRequestComplete(Request, status);
+}

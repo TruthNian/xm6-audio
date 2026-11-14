@@ -57,6 +57,7 @@ public:
     bool close_channel(OA2DP_CHANNEL_KIND kind, ULONG connection = 0,
                         ULONG *closed_connection = nullptr);
     bool send(const OA2DP_SEND_IN &binding, const uint8_t *data, size_t len, HANDLE cancel);
+    DWORD wake_link(const OA2DP_SEND_IN &binding, HANDLE cancel);
     // > 0 bytes, 0 timeout, < 0 channel closed / error
     int recv(const OA2DP_RECV_IN &binding, uint8_t *buf, size_t cap, DWORD timeout_ms,
              HANDLE cancel = nullptr);

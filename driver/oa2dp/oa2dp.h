@@ -127,6 +127,7 @@ typedef struct _OA2DP_REQUEST_CONTEXT {
     OA2DP_CHANNEL *Channel;
     ULONG Bytes;
     ULONG Generation;
+    ULONG ConnectionGeneration; /* wake completion must still belong to this link */
     ULONGLONG SubmittedAt;    /* opt-in ETW timestamp, media sends only */
     OA2DP_CHANNEL_INFO *OpenOutput; /* original buffered output, valid until request completion */
 } OA2DP_REQUEST_CONTEXT;
@@ -169,6 +170,7 @@ NTSTATUS Oa2dpCloseConnectionChannel(OA2DP_DEVICE_CONTEXT *dev, OA2DP_CHANNEL_KI
 VOID Oa2dpCloseAllChannels(_In_ OA2DP_DEVICE_CONTEXT *dev);
 VOID Oa2dpTransfer(_In_ OA2DP_DEVICE_CONTEXT *dev, _In_ WDFREQUEST request,
                    _In_ const OA2DP_SEND_IN *in, _In_ BOOLEAN send);
+VOID Oa2dpWakeLink(OA2DP_DEVICE_CONTEXT *dev, WDFREQUEST request, const OA2DP_SEND_IN *in);
 
 /* driver.c */
 NTSTATUS Oa2dpRegisterLinkNotifications(OA2DP_DEVICE_CONTEXT *dev);

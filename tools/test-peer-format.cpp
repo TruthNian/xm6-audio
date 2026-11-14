@@ -23,10 +23,15 @@
 #define LOGE(...) ((void)0)
 #define LOGW(...) ((void)0)
 #define LOGI(...) ((void)0)
+#define TraceLoggingWrite(...) ((void)0)
 using ULONG = uint32_t;
 using USHORT = uint16_t;
 using DWORD = uint32_t;
 constexpr DWORD WAIT_OBJECT_0 = 0, WAIT_TIMEOUT = 258;
+constexpr DWORD ERROR_SUCCESS=0,ERROR_NETNAME_DELETED=64,ERROR_DEVICE_NOT_CONNECTED=1167,
+    ERROR_OPERATION_ABORTED=995,ERROR_CANCELLED=1223;
+constexpr ULONG Oa2dpChannelMedia=1;
+struct OA2DP_SEND_IN { ULONG Kind,Generation,ConnectionGeneration; };
 static DWORD WaitForSingleObject(const bool *event, DWORD timeout) {
     CHECK(timeout == 0);
     return *event ? WAIT_OBJECT_0 : WAIT_TIMEOUT;
@@ -41,6 +46,8 @@ struct OA2DP_FORMAT_LIST {
     OA2DP_FORMAT Formats[OA2DP_MAX_FORMATS]{};
 };
 struct Session {
+    struct Transport { DWORD wake_link(const OA2DP_SEND_IN&,const bool*) { return ERROR_SUCCESS; } } tr_;
+    ULONG media_generation_ = 1;
     struct Audio {
         unsigned publications = 0;
         unsigned failed_stage = 0, failed_attempt = 1;

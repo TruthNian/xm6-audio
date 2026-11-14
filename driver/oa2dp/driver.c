@@ -652,6 +652,16 @@ VOID Oa2dpEvtIoDeviceControl(_In_ WDFQUEUE Queue, _In_ WDFREQUEST Request,
         break;
     }
 
+    case IOCTL_OA2DP_WAKE_LINK: {
+        OA2DP_SEND_IN *in;
+        status = WdfRequestRetrieveInputBuffer(Request, sizeof(*in), (PVOID *)&in, NULL);
+        if (NT_SUCCESS(status)) {
+            Oa2dpWakeLink(dev, Request, in);
+            return;
+        }
+        break;
+    }
+
     case IOCTL_OA2DP_SEND:
     case IOCTL_OA2DP_RECV: {
         OA2DP_SEND_IN *in;

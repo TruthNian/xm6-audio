@@ -18,7 +18,7 @@ constexpr bool TRUE=true, FALSE=false;
 constexpr DWORD ERROR_SUCCESS=0, ERROR_IO_PENDING=997, ERROR_IO_INCOMPLETE=996,
     ERROR_OPERATION_ABORTED=995, ERROR_CANCELLED=1223, WAIT_TIMEOUT=258,
     WAIT_OBJECT_0=0, INFINITE=0xffffffff;
-constexpr DWORD IOCTL_OA2DP_OPEN_CHANNEL=1, IOCTL_OA2DP_SEND=2;
+constexpr DWORD IOCTL_OA2DP_OPEN_CHANNEL=1, IOCTL_OA2DP_SEND=2, IOCTL_OA2DP_WAKE_LINK=3;
 constexpr unsigned OA2DP_AVDTP_MSG_MAX=672;
 enum OA2DP_CHANNEL_KIND { Oa2dpChannelSignaling, Oa2dpChannelMedia };
 struct OA2DP_OPEN_CHANNEL_IN { ULONG Kind=0; ULONG ConnectionGeneration=0; };
@@ -69,6 +69,10 @@ static BOOL DeviceIoControl(HANDLE h,DWORD code,void *in,DWORD,void *out,DWORD o
         last_open_kind=input.Kind; last_connection=input.ConnectionGeneration;
         *static_cast<OA2DP_CHANNEL_INFO*>(out)={input.Kind,9,input.ConnectionGeneration ? input.ConnectionGeneration : 9,679};
         completed_bytes=sizeof(OA2DP_CHANNEL_INFO);
+    } else if (code==IOCTL_OA2DP_WAKE_LINK) {
+        const auto &input=*static_cast<OA2DP_SEND_IN*>(in);
+        REQUIRE(input.Kind==Oa2dpChannelMedia && input.Generation==9 && input.ConnectionGeneration==7);
+        REQUIRE(!out && !outlen);
     } else REQUIRE(code==IOCTL_OA2DP_SEND);
     if (during_submit) during_submit();
     ov->hEvent->signaled=completion_done;
@@ -119,6 +123,7 @@ struct Transport {
     bool open_channel(OA2DP_CHANNEL_KIND,OA2DP_CHANNEL_INFO&,ULONG,HANDLE);
     bool send(const OA2DP_SEND_IN&,const uint8_t*,size_t);
     bool send(const OA2DP_SEND_IN&,const uint8_t*,size_t,HANDLE);
+    DWORD wake_link(const OA2DP_SEND_IN&,HANDLE);
     int recv(const OA2DP_RECV_IN&,uint8_t*,size_t,DWORD,HANDLE cancel) {
         ++receive_calls;
         if (during_receive) during_receive();
@@ -157,6 +162,7 @@ struct Session {
 #include "control-ioctl-under-test.inc"
 #include "control-open-under-test.inc"
 #include "control-send-under-test.inc"
+#include "control-wake-under-test.inc"
 #include "control-connect-under-test.inc"
 #include "control-protocol-send-under-test.inc"
 #include "control-policy-under-test.inc"
@@ -181,6 +187,7 @@ static void invoke_stopped(unsigned operation,bool during) {
     if(operation==0) REQUIRE(!session.connect_signaling());
     if(operation==1) REQUIRE(!session.open_media_channel());
     if(operation==2) REQUIRE(Session::cb_send(&session,pdu,sizeof(pdu))==-1);
+    if(operation==3) REQUIRE(session.tr_.wake_link({Oa2dpChannelMedia,9,7},&control_cancel_event)!=ERROR_SUCCESS);
     if (elapsed) std::fprintf(stderr,"operation %u, stop %s submission: waited %u simulated ms\n",
         operation,during ? "during" : "before",elapsed);
     REQUIRE(elapsed==0);
@@ -197,6 +204,7 @@ static void invoke_disconnected(unsigned operation,bool during) {
     if(operation==0) REQUIRE(!session.connect_signaling());
     if(operation==1) REQUIRE(!session.open_media_channel());
     if(operation==2) REQUIRE(Session::cb_send(&session,pdu,sizeof(pdu))==-1);
+    if(operation==3) REQUIRE(session.tr_.wake_link({Oa2dpChannelMedia,9,7},&control_cancel_event)!=ERROR_SUCCESS);
     if (elapsed) std::fprintf(stderr,"operation %u, disconnect %s submission: waited %u simulated ms\n",
         operation,during ? "during" : "before",elapsed);
     REQUIRE(elapsed==0);
@@ -212,7 +220,7 @@ static void invoke_disconnected(unsigned operation,bool during) {
     REQUIRE(session.connect_signaling());
 }
 int main() {
-    for(unsigned operation=0;operation<3;++operation) {
+    for(unsigned operation=0;operation<4;++operation) {
         invoke_stopped(operation,false);
         invoke_stopped(operation,true);
         invoke_disconnected(operation,false);

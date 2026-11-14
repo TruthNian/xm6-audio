@@ -1,4 +1,4 @@
-# Short-clip pipeline review (0.4.1–0.4.6)
+# Short-clip pipeline review (0.4.1–0.4.7)
 
 On 2026-11-12, the owner reported missing beginnings of pronunciation clips
 in the Shici Windows application on the 0.4.0 native driver. This concrete bug
@@ -321,6 +321,36 @@ No process-name exception or claim that this overhead is solved is made.
 The deployed source fixes and these automatic checks do not close acoustic
 acceptance. The user has not accepted 0.4.6 listening behavior, and no further
 listening request was sent. No stable tag or main-branch merge follows.
+
+## 0.4.7 candidate: wake the ACL before START
+
+Further decoding of the existing 0.4.6 trace located the cold-start wait.
+After the idle SUSPEND, Windows negotiated Sniff mode with a 997.5 ms interval.
+The host subsequently submitted AVDTP START while the link remained in that
+mode. The matching START ACCEPT reached the host 1,938 ms later. Only after
+that reply, when media began, did Windows issue EXIT_SNIFF_MODE and report the
+link active. Host HCI timestamps distinguish this from encoder creation time;
+they do not measure over-air timing or isolate radio and headset processing.
+
+The candidate asks Windows to enter active mode **before** sending START,
+using the documented [BRB_ACL_ENTER_ACTIVE_MODE](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/bthddi/ns-bthddi-_brb_acl_enter_active_mode).
+It does not replace Windows link policy or keep an idle stream continuously
+transmitting. The request carries the current media/signalling generations,
+rejects unavailable, suspended and obsolete bindings, and rechecks ownership
+on completion. It uses the caller's cancellable WDF request, with a 1.5-second
+lower-stack timeout and a two-second user-mode budget. Ordinary wake failures
+retain normal START negotiation; cancellation and driver policy/epoch rejection
+do not issue START. Successful wake does not publish playback or authorize media:
+the existing AVDTP acceptance and encoder-readiness checks still apply.
+
+Driver/service ABI 12 prevents mixing this service with a driver that lacks the
+wake operation. The native build and 37-check suite pass. Additional production-
+body cases cover wake-before-START, unsupported-wake fallback, cancellation,
+old connections, HFP/power/disconnect gates, allocation failure and inline versus
+deferred completion ownership. The wake-order regression fails with the actual
+0.4.6 START body and passes with the candidate. Native metadata events now expose
+wake and START timing without packet payloads. This source candidate has not yet
+been deployed or shown to reduce measured host latency; 0.4.6 remains installed.
 
 The Windows contracts require a nominal packet clock and distinguish DMA
 transfer position from downstream presentation position:

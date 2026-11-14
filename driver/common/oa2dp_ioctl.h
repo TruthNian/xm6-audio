@@ -9,7 +9,7 @@
 #ifndef OA2DP_IOCTL_H
 #define OA2DP_IOCTL_H
 
-#define OA2DP_IOCTL_VERSION 11
+#define OA2DP_IOCTL_VERSION 12
 
 #include "../../core/include/oa2dp/pcm_format.h"
 
@@ -35,6 +35,9 @@ DEFINE_GUID(GUID_OA2DP_BUS_INTERFACE, 0x955e5e3d, 0xc70c, 0x4024, 0x99, 0xdb, 0x
 #define IOCTL_OA2DP_RECV          OA2DP_CTL(4, METHOD_OUT_DIRECT)
 #define IOCTL_OA2DP_WAIT_EVENT    OA2DP_CTL(5, METHOD_BUFFERED)
 #define IOCTL_OA2DP_GET_TX_STATE  OA2DP_CTL(6, METHOD_BUFFERED)
+/* Input: OA2DP_SEND_IN for the current MEDIA channel. Best-effort ACL wake,
+ * not permission to START or publish playback. Cancellable and epoch checked. */
+#define IOCTL_OA2DP_WAKE_LINK     OA2DP_CTL(7, METHOD_BUFFERED)
 #define OA2DP_DEVICE_MPM_REGISTERED 0x00000001UL
 #define OA2DP_DEVICE_SUSPENDED      0x00000002UL
 #define OA2DP_DEVICE_LINK_NOTIFICATIONS 0x00000004UL

@@ -572,7 +572,7 @@ bool Session::setup_audio_endpoint()
 bool Session::start_stream()
 {
     oa2dp_avdtp_sep *sep = oa2dp_avdtp_sep_get(&av_, local_seid_);
-    if (!connection_enabled_ || transport_suspended_ || suspend_requested_ || teardown_pending_ || !sep || !media_open_)
+    if (stopping_ || !connection_enabled_ || transport_suspended_ || suspend_requested_ || teardown_pending_ || !sep || !media_open_)
         return false;
     if (sep->state == OA2DP_SEP_STREAMING) {
         begin_streaming();
@@ -580,8 +580,30 @@ bool Session::start_stream()
     }
     if (sep->state != OA2DP_SEP_OPEN)
         return false;
+    // A short START command does not reliably wake a sniffing ACL. Waiting
+    // for its reply before sending media can cost two full sniff intervals.
+    // Ask the Windows stack to wake this exact link before the transaction.
+    // Wake is an optimization: an unsupported/failed hint cannot by itself
+    // disable otherwise usable playback. START and SEND retain their gates.
+    const OA2DP_SEND_IN binding{Oa2dpChannelMedia, media_generation_, sig_generation_};
+    const DWORD wake = tr_.wake_link(binding, control_cancel_event_);
+    if (wake == ERROR_NETNAME_DELETED || wake == ERROR_DEVICE_NOT_CONNECTED ||
+        wake == ERROR_OPERATION_ABORTED || wake == ERROR_CANCELLED)
+        return false; // driver policy/epoch rejection is not an optional-wake failure
+    if (wake != ERROR_SUCCESS)
+        LOGW("ACL wake did not complete; retaining normal START negotiation");
+    if (stopping_ || WaitForSingleObject(control_cancel_event_, 0) == WAIT_OBJECT_0)
+        return false;
     oa2dp_avdtp_event r{};
-    if (!request(oa2dp_avdtp_start(&av_, local_seid_), r)) {
+    const DWORD started = GetTickCount();
+    TraceLoggingWrite(g_Oa2dpStreamTrace, "StartRequest", TraceLoggingLevel(5),
+        TraceLoggingUInt32(sig_generation_, "ConnectionGeneration"));
+    const bool accepted = request(oa2dp_avdtp_start(&av_, local_seid_), r);
+    TraceLoggingWrite(g_Oa2dpStreamTrace, "StartResult", TraceLoggingLevel(5),
+        TraceLoggingBool(accepted, "Accepted"),
+        TraceLoggingUInt32(GetTickCount() - started, "DurationMs"),
+        TraceLoggingUInt32(r.error_code, "ErrorCode"));
+    if (!accepted) {
         LOGW("START rejected (0x%02X)", r.error_code);
         return false;
     }

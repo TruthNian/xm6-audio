@@ -21,6 +21,7 @@
     } while (0)
 #define LOGE(...) ((void)0)
 #define LOGW(...) ((void)0)
+#define TraceLoggingWrite(...) ((void)0)
 using ULONG = uint32_t;
 using DWORD = uint32_t;
 using USHORT = uint16_t;
@@ -30,6 +31,12 @@ static DWORD GetTickCount() { return now; }
 static bool is_after(DWORD a, DWORD b) { return static_cast<int32_t>(a - b) >= 0; }
 static void SetEvent(HANDLE h) { *h = true; }
 static void ResetEvent(HANDLE h) { *h = false; }
+constexpr DWORD WAIT_OBJECT_0 = 0, WAIT_TIMEOUT = 258;
+constexpr DWORD ERROR_SUCCESS=0,ERROR_NOT_SUPPORTED=50,ERROR_NETNAME_DELETED=64,
+    ERROR_DEVICE_NOT_CONNECTED=1167,ERROR_OPERATION_ABORTED=995,ERROR_CANCELLED=1223;
+static DWORD WaitForSingleObject(HANDLE h, DWORD timeout) {
+    REQUIRE(timeout == 0); return *h ? WAIT_OBJECT_0 : WAIT_TIMEOUT;
+}
 constexpr int Oa2dpChannelMedia = 1;
 constexpr int OA2DP_SEP_OPEN = 2, OA2DP_SEP_STREAMING = 3;
 struct oa2dp_avdtp_sep {
@@ -72,6 +79,15 @@ static bool ConnectionStatusCurrent(OA2DP_DEVICE_CONTEXT *dev, bool connected, U
 struct Session {
     struct Transport {
         bool drained = true;
+        DWORD wake_result = ERROR_SUCCESS;
+        unsigned wakes = 0;
+        OA2DP_SEND_IN wake_binding{};
+        std::function<void()> during_wake;
+        DWORD wake_link(const OA2DP_SEND_IN &binding, HANDLE) {
+            ++wakes; wake_binding = binding;
+            if (during_wake) during_wake();
+            return wake_result;
+        }
         bool drain_media(DWORD) { return drained; }
     } tr_;
     struct Audio {
@@ -141,6 +157,8 @@ struct Session {
     USHORT media_mtu_ = 1000;
     bool stream_stop_ = true;
     HANDLE stream_stop_event_ = &stream_stop_;
+    bool control_cancel_ = false;
+    HANDLE control_cancel_event_ = &control_cancel_;
     std::thread stream_;
     std::mutex status_mu_;
     struct {
@@ -155,6 +173,7 @@ struct Session {
             stream_.join();
     }
     bool request(int, oa2dp_avdtp_event &) {
+        REQUIRE(tr_.wakes > 0 && !control_cancel_); // wake precedes outgoing START
         ++starts;
         av_.sep.state = OA2DP_SEP_STREAMING;
         return true;
@@ -179,6 +198,32 @@ bool Session::finish_endpoint_setup() {
 }
 
 int main() {
+    for (bool wake_ok : {false, true}) {
+        Session s;
+        s.tr_.wake_result = wake_ok ? ERROR_SUCCESS : ERROR_NOT_SUPPORTED;
+        REQUIRE(s.start_stream()); // a failed optional wake preserves START fallback
+        REQUIRE(s.tr_.wakes == 1 && s.starts == 1);
+        REQUIRE(s.tr_.wake_binding.Kind == Oa2dpChannelMedia &&
+                s.tr_.wake_binding.Generation == s.media_generation_ &&
+                s.tr_.wake_binding.ConnectionGeneration == s.sig_generation_);
+        REQUIRE(s.start_stream() && s.tr_.wakes == 1); // already streaming: no extra wake
+    }
+    {
+        Session s;
+        s.tr_.during_wake = [&] { s.control_cancel_ = true; };
+        REQUIRE(!s.start_stream() && s.tr_.wakes == 1 && s.starts == 0);
+        REQUIRE(!s.streaming_ && s.workers == 0);
+    }
+    {
+        Session s;
+        s.stopping_ = true;
+        REQUIRE(!s.start_stream() && !s.tr_.wakes && !s.starts);
+    }
+    for (DWORD failure : {ERROR_NETNAME_DELETED,ERROR_DEVICE_NOT_CONNECTED,ERROR_OPERATION_ABORTED,ERROR_CANCELLED}) {
+        Session s;
+        s.tr_.wake_result = failure;
+        REQUIRE(!s.start_stream() && !s.starts && !s.workers);
+    }
     for (int state : {0, OA2DP_SEP_OPEN, 5}) {
         Session s;
         s.av_.sep.state = state;

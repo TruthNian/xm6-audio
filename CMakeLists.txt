@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(XM6Audio VERSION 0.4.6 LANGUAGES C CXX)
+project(XM6Audio VERSION 0.4.7 LANGUAGES C CXX)
 
 # The loaded binary's version must agree with the configured project and INF.
 # Generate resources in the build tree rather than keeping a stale copy.
@@ -252,6 +252,10 @@ if(OA2DP_BUILD_TESTS)
     target_include_directories(test_profile_retry PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
     target_link_libraries(test_profile_retry PRIVATE oa2dp_core Threads::Threads)
     add_test(NAME profile_retry COMMAND test_profile_retry)
+    xm6_test_body(driver/oa2dp/l2cap.c "static EVT_WDF_REQUEST_COMPLETION_ROUTINE WakeLinkDone;" "" link-wake)
+    add_executable(test_link_wake tools/test-link-wake.cpp)
+    target_include_directories(test_link_wake PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
+    add_test(NAME link_wake COMMAND test_link_wake)
     xm6_test_body(service/src/driver_io.cpp "bool DriverHandle::open("
         "\nDWORD DriverHandle::ioctl(" handle-lifetime)
     add_executable(test_handle_lifetime tools/test-handle-lifetime.cpp)
@@ -273,6 +277,7 @@ if(OA2DP_BUILD_TESTS)
         "\n// ---------------------------------------------------------------------------\n// Helper threads" control-policy)
     xm6_test_body(service/src/session.cpp "bool Session::pump("
         "\nbool Session::request(" control-pump)
+    xm6_test_body(service/src/driver_io.cpp "DWORD Transport::wake_link(" "\nbool Transport::send(" control-wake)
     add_executable(test_control_cancel tools/test-control-cancel.cpp)
     target_include_directories(test_control_cancel PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
     add_test(NAME control_cancel COMMAND test_control_cancel)

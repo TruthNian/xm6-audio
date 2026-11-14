@@ -81,7 +81,7 @@ endpoint formats.
 
 Windows shared mode supplies a mixed stream. The driver cannot infer the original format of each contributing file. Exclusive mode can supply a supported player-selected stream format. Unsupported rate changes do not become a falsely labeled fixed-rate success.
 
-Driver/service ABI 11 registers a referenced PCM data-ready event at the actual encoder block threshold. The consumer rechecks the ring before waiting and can be woken by PCM, format changes or stream/service cancellation. Committed format epochs survive coalesced A -> B -> A changes. The encoder no longer polls with Sleep(2); the virtual WaveRT position timer remains a separate software hardware-emulation mechanism.
+Driver/service ABI 12 retains the referenced PCM data-ready event at the actual encoder block threshold and adds a cancellable, generation-bound ACL wake before START. The consumer rechecks the ring before waiting and can be woken by PCM, format changes or stream/service cancellation. Committed format epochs survive coalesced A -> B -> A changes. The encoder no longer polls with Sleep(2); the virtual WaveRT position timer remains a separate software hardware-emulation mechanism.
 
 Media completion waits preserve pending OVERLAPPED/buffer ownership on cancellation, and retirement has one shared realtime drain budget. Outgoing OPEN forwards the caller's original request, removing a separate request allocation and cancellation bridge. Final destruction still waits for the kernel to release outstanding I/O. Registry status publication runs on the existing session thread, outside the encoder's lock and realtime work. Optional ETW probes and their measurement limits are described in the [lifecycle review](LIFECYCLE-REVIEW.md).
 

@@ -198,6 +198,13 @@ bool Transport::close_channel(OA2DP_CHANNEL_KIND kind, ULONG connection, ULONG *
     return ok;
 }
 
+DWORD Transport::wake_link(const OA2DP_SEND_IN &binding, HANDLE cancel)
+{
+    OA2DP_SEND_IN in = binding;
+    return dev_.ioctl(IOCTL_OA2DP_WAKE_LINK, &in, sizeof(in), nullptr, 0, nullptr,
+                      2000, cancel);
+}
+
 bool Transport::send(const OA2DP_SEND_IN &binding, const uint8_t *data, size_t len, HANDLE cancel)
 {
     OA2DP_SEND_IN in = binding;
