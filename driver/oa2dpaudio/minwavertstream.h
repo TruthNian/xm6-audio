@@ -56,6 +56,7 @@ public:
     friend EXT_CALLBACK TimerNotifyRT;
 
 private:
+    NTSTATUS PrepareConsumer(); // PASSIVE_LEVEL; requires an allocated audio buffer
     // All below with m_PositionSpinLock held.
     ULONGLONG RunningHns(_In_ LARGE_INTEGER Qpc);
     VOID UpdatePosition(_In_ LARGE_INTEGER Qpc);

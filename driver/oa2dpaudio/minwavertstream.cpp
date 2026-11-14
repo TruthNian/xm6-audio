@@ -197,7 +197,6 @@ CMiniportWaveRTStream::AllocateBufferWithNotification
 )
 {
 
-    ULONG packetSize;
     ULONG size;
     KIRQL oldIrql;
     BYTE *buffer;
@@ -207,19 +206,17 @@ CMiniportWaveRTStream::AllocateBufferWithNotification
         return STATUS_UNSUCCESSFUL;
     }
 
-    if ((NotificationCount_ == 0) || (RequestedSize_ % NotificationCount_ != 0))
+    if ((NotificationCount_ != 1 && NotificationCount_ != 2) ||
+        m_ulBlockAlign > MAXULONG / NotificationCount_)
     {
         return STATUS_INVALID_PARAMETER;
     }
 
-    // Whole frames per packet, so packet boundaries are frame boundaries.
-    packetSize = RequestedSize_ / NotificationCount_;
-    packetSize -= packetSize % m_ulBlockAlign;
-    if (packetSize == 0)
-    {
-        return STATUS_INVALID_PARAMETER;
-    }
-    size = packetSize * NotificationCount_;
+    // Whole frames per packet, and never less than the engine requested.
+    // Rounding down can make an otherwise valid WASAPI stream fail creation.
+    const ULONG alignment = m_ulBlockAlign * NotificationCount_;
+    if (RequestedSize_ > MAXULONG - (alignment - 1)) return STATUS_INVALID_PARAMETER;
+    size = ((RequestedSize_ + alignment - 1) / alignment) * alignment;
 
     PHYSICAL_ADDRESS highAddress;
     highAddress.HighPart = 0;
@@ -244,7 +241,16 @@ CMiniportWaveRTStream::AllocateBufferWithNotification
     m_pDmaBuffer = buffer;
     m_ulNotificationsPerBuffer = NotificationCount_;
     m_ulDmaBufferSize = size;
+    const BOOLEAN prepare = m_KsState == KSSTATE_PAUSE;
     KeReleaseSpinLock(&m_PositionSpinLock, oldIrql);
+
+    if (prepare) {
+        const NTSTATUS status = PrepareConsumer();
+        if (!NT_SUCCESS(status)) {
+            FreeAudioBuffer(pBufferMdl, size);
+            return status;
+        }
+    }
 
     *AudioBufferMdl_ = pBufferMdl;
     *ActualSize_ = size;
@@ -445,7 +451,8 @@ CMiniportWaveRTStream::AllocateAudioBuffer
         return STATUS_UNSUCCESSFUL;
     }
 
-    RequestedSize_ -= RequestedSize_ % m_ulBlockAlign;
+    if (RequestedSize_ > MAXULONG - (m_ulBlockAlign - 1)) return STATUS_INVALID_PARAMETER;
+    RequestedSize_ = ((RequestedSize_ + m_ulBlockAlign - 1) / m_ulBlockAlign) * m_ulBlockAlign;
 
     PHYSICAL_ADDRESS highAddress;
     highAddress.HighPart = 0;
@@ -468,7 +475,16 @@ CMiniportWaveRTStream::AllocateAudioBuffer
     m_pDmaBuffer = buffer;
     m_ulDmaBufferSize = RequestedSize_;
     m_ulNotificationsPerBuffer = 0;
+    const BOOLEAN prepare = m_KsState == KSSTATE_PAUSE;
     KeReleaseSpinLock(&m_PositionSpinLock, oldIrql);
+
+    if (prepare) {
+        const NTSTATUS status = PrepareConsumer();
+        if (!NT_SUCCESS(status)) {
+            FreeAudioBuffer(pBufferMdl, RequestedSize_);
+            return status;
+        }
+    }
 
     *AudioBufferMdl_ = pBufferMdl;
     *ActualSize_ = RequestedSize_;
@@ -774,6 +790,40 @@ CMiniportWaveRTStream::GetPacketCount
 
 //=============================================================================
 #pragma code_seg()
+NTSTATUS CMiniportWaveRTStream::PrepareConsumer()
+{
+    KIRQL oldIrql;
+    KeAcquireSpinLock(&m_PositionSpinLock, &oldIrql);
+    // A format-probing PAUSE pin without a DMA allocation is not a playback
+    // reservation and must not reconfigure the headset.
+    // Either allocation order is supported: the second of PAUSE/allocation
+    // performs preparation before a later RUN can commit its deadline.
+    if (!m_pDmaBuffer || !m_ulDmaBufferSize) {
+        KeReleaseSpinLock(&m_PositionSpinLock, oldIrql);
+        return STATUS_SUCCESS;
+    }
+    if (m_NeedsPcmEpoch) {
+        if (!Oa2dpRingBeginStream(&m_Device->Ring, &m_Format, &m_PcmSequence)) {
+            KeReleaseSpinLock(&m_PositionSpinLock, oldIrql);
+            return STATUS_INVALID_DEVICE_STATE;
+        }
+        m_NeedsPcmEpoch = FALSE;
+    }
+    const ULONG sequence = m_PcmSequence;
+    KeReleaseSpinLock(&m_PositionSpinLock, oldIrql);
+    const LARGE_INTEGER preparationStart = KeQueryPerformanceCounter(NULL);
+    Oa2dpReportStream(m_Device, &m_Format, FALSE, sequence, TRUE);
+    const NTSTATUS status = Oa2dpRingWaitConsumer(&m_Device->Ring, sequence);
+    LARGE_INTEGER elapsed = KeQueryPerformanceCounter(NULL);
+    elapsed.QuadPart -= preparationStart.QuadPart;
+    TraceLoggingWrite(g_Oa2dpAudioTrace, "StreamPreparation", TraceLoggingLevel(5),
+        TraceLoggingUInt32(sequence, "PcmSequence"), TraceLoggingNTStatus(status, "Status"),
+        TraceLoggingUInt64(KSCONVERT_PERFORMANCE_TIME(m_PerfFrequency.QuadPart, elapsed), "DurationHns"));
+    if (!NT_SUCCESS(status))
+        Oa2dpReportStream(m_Device, &m_Format, FALSE, sequence, FALSE);
+    return status;
+}
+
 STDMETHODIMP_(NTSTATUS)
 CMiniportWaveRTStream::SetState
 (
@@ -791,6 +841,7 @@ CMiniportWaveRTStream::SetState
     }
     TraceLoggingWrite(g_Oa2dpAudioTrace, "StreamStateRequest", TraceLoggingLevel(5),
         TraceLoggingUInt32(m_PcmSequence, "PcmSequence"),
+        TraceLoggingUInt32(m_ulDmaBufferSize, "BufferBytes"),
         TraceLoggingUInt32(m_KsState, "PreviousState"), TraceLoggingUInt32(State_, "State"));
 
     switch (State_)
@@ -828,31 +879,9 @@ CMiniportWaveRTStream::SetState
             }
             else if (m_KsState != KSSTATE_PAUSE)
             {
-                if (m_NeedsPcmEpoch) {
-                    // PAUSE prepares the consumer before Windows commits its
-                    // render deadline. No source clock or timer is running.
-                    if (!Oa2dpRingBeginStream(&m_Device->Ring, &m_Format, &m_PcmSequence)) {
-                        KeReleaseSpinLock(&m_PositionSpinLock, oldIrql);
-                        return STATUS_INVALID_DEVICE_STATE;
-                    }
-                    m_NeedsPcmEpoch = FALSE;
-                }
-                // Retain this preparation through PAUSE/RUN. ACQUIRE/STOP
-                // releases it; no per-application warmup is required.
-                const ULONG sequence = m_PcmSequence;
                 KeReleaseSpinLock(&m_PositionSpinLock, oldIrql);
-                const LARGE_INTEGER preparationStart = KeQueryPerformanceCounter(NULL);
-                Oa2dpReportStream(m_Device, &m_Format, FALSE, sequence, TRUE);
-                const NTSTATUS prepared = Oa2dpRingWaitConsumer(&m_Device->Ring, sequence);
-                LARGE_INTEGER preparationElapsed = KeQueryPerformanceCounter(NULL);
-                preparationElapsed.QuadPart -= preparationStart.QuadPart;
-                TraceLoggingWrite(g_Oa2dpAudioTrace, "StreamPreparation", TraceLoggingLevel(5),
-                    TraceLoggingUInt32(sequence, "PcmSequence"), TraceLoggingNTStatus(prepared, "Status"),
-                    TraceLoggingUInt64(KSCONVERT_PERFORMANCE_TIME(m_PerfFrequency.QuadPart, preparationElapsed), "DurationHns"));
-                if (!NT_SUCCESS(prepared)) {
-                    Oa2dpReportStream(m_Device, &m_Format, FALSE, sequence, FALSE);
-                    return prepared;
-                }
+                const NTSTATUS prepared = PrepareConsumer();
+                if (!NT_SUCCESS(prepared)) return prepared;
                 KeAcquireSpinLock(&m_PositionSpinLock, &oldIrql);
             }
             break;
@@ -863,7 +892,7 @@ CMiniportWaveRTStream::SetState
                 // RUN is a real-time commit, never a Bluetooth RPC. If the
                 // consumer or profile was lost, fail promptly without moving
                 // the DMA clock or falsely acknowledging usable playback.
-                if (m_KsState != KSSTATE_PAUSE || m_NeedsPcmEpoch ||
+                if (m_KsState != KSSTATE_PAUSE || !m_pDmaBuffer || m_NeedsPcmEpoch ||
                     !Oa2dpRingConsumerReady(&m_Device->Ring, m_PcmSequence)) {
                     TraceLoggingWrite(g_Oa2dpAudioTrace, "StreamRunUnavailable", TraceLoggingLevel(5),
                         TraceLoggingUInt32(m_PcmSequence, "PcmSequence"));
@@ -880,6 +909,7 @@ CMiniportWaveRTStream::SetState
     }
 
     m_KsState = State_;
+    const BOOLEAN prepared = m_pDmaBuffer && (State_ == KSSTATE_PAUSE || State_ == KSSTATE_RUN);
     TraceLoggingWrite(g_Oa2dpAudioTrace, "StreamStateCommit", TraceLoggingLevel(5),
         TraceLoggingUInt32(m_PcmSequence, "PcmSequence"), TraceLoggingUInt32(State_, "State"),
         TraceLoggingUInt64(m_ullPumpedFrames, "PumpedFrames"),
@@ -891,8 +921,7 @@ CMiniportWaveRTStream::SetState
     {
         ExCancelTimer(m_pNotificationTimer, NULL);
     }
-    Oa2dpReportStream(m_Device, &m_Format, State_ == KSSTATE_RUN, m_PcmSequence,
-        State_ == KSSTATE_PAUSE || State_ == KSSTATE_RUN);
+    Oa2dpReportStream(m_Device, &m_Format, State_ == KSSTATE_RUN, m_PcmSequence, prepared);
     if (!wasRunning && State_ == KSSTATE_RUN)
     {
         // 1 ms software hardware-emulation timer; notification cadence comes

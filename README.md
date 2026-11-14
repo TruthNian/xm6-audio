@@ -8,7 +8,7 @@
 
 English · [简体中文](README.zh-CN.md)
 
-> **Short-clip defect under correction:** the owner reported incomplete Shici pronunciation and Windows notification sounds. The installed 0.4.4 trial failed acceptance; it is not a stable fix. The 0.4.5 source candidate moves Bluetooth preparation out of the real-time RUN transition and retains it while Windows holds the stream in PAUSE. It is not yet deployed or acoustically accepted. See the [source review and validation limits](docs/SHORT-CLIP-REVIEW.md).
+> **Short-clip defect under correction:** the owner reported incomplete Shici pronunciation and Windows notification sounds. The 0.4.4 trial failed acceptance. The installed 0.4.5 separates transport preparation from real-time RUN; automated notification/short-clip traces no longer reported the observed Windows scheduling glitches. Acoustic acceptance remains open. The 0.4.6 source candidate additionally excludes bufferless format probes from preparation and corrects buffer allocation boundaries. See the [source review and validation limits](docs/SHORT-CLIP-REVIEW.md).
 
 XM6 Audio adds an A2DP profile driver and a WaveRT render endpoint while Windows continues to own the Bluetooth radio, pairing, volume UI and AVRCP media-control stack. The WH-1000XM6 is the initial hardware acceptance target.
 

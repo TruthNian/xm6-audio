@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(XM6Audio VERSION 0.4.5 LANGUAGES C CXX)
+project(XM6Audio VERSION 0.4.6 LANGUAGES C CXX)
 
 # The loaded binary's version must agree with the configured project and INF.
 # Generate resources in the build tree rather than keeping a stale copy.
@@ -179,6 +179,10 @@ if(OA2DP_BUILD_TESTS)
     xm6_test_body(driver/oa2dpaudio/minwavertstream.cpp "STDMETHODIMP_(VOID)\nCMiniportWaveRTStream::FreeAudioBuffer"
         "\n//=============================================================================\n#pragma code_seg()\nSTDMETHODIMP_(NTSTATUS)\nCMiniportWaveRTStream::AllocateAudioBuffer" wavert-free)
     xm6_test_body(driver/oa2dpaudio/minwavertstream.cpp "void\nTimerNotifyRT\n(" "" wavert-timer)
+    xm6_test_body(driver/oa2dpaudio/minwavertstream.cpp "STDMETHODIMP_(NTSTATUS)\nCMiniportWaveRTStream::AllocateBufferWithNotification"
+        "\n//=============================================================================\n#pragma code_seg()\nSTDMETHODIMP_(VOID)\nCMiniportWaveRTStream::FreeBufferWithNotification" wavert-allocate-notification)
+    xm6_test_body(driver/oa2dpaudio/minwavertstream.cpp "STDMETHODIMP_(NTSTATUS)\nCMiniportWaveRTStream::AllocateAudioBuffer"
+        "\n//=============================================================================\n// Position bookkeeping" wavert-allocate-polled)
     add_executable(test_wavert_clock tools/test-wavert-clock.cpp)
     target_include_directories(test_wavert_clock PRIVATE "${CMAKE_CURRENT_BINARY_DIR}" core/include)
     add_test(NAME wavert_clock COMMAND test_wavert_clock)

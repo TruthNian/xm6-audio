@@ -1,4 +1,4 @@
-# Short-clip pipeline review (0.4.1–0.4.5)
+# Short-clip pipeline review (0.4.1–0.4.6)
 
 On 2026-11-12, the owner reported missing beginnings of pronunciation clips
 in the Shici Windows application on the 0.4.0 native driver. This concrete bug
@@ -204,7 +204,7 @@ radio cycle, without a computer reboot or new certificate trust. The owner then
 reported incomplete Windows notification sounds. This is failed acceptance,
 not a stable correction.
 
-## 0.4.5 source candidate: prepare before the render deadline
+## 0.4.5: prepare before the render deadline
 
 A subsequent trace included the Windows Audio provider and real Shici process,
 in addition to Media Foundation and native transport events. The initial KS RUN
@@ -245,8 +245,42 @@ previous observability gap without recording audio content.
 The candidate builds locally and the 36-check suite passes, including actual
 production state/ring/service bodies, codec input preservation, pacing, profile
 cancellation, source formats and native metadata. These are source and host-side
-checks. The candidate has not been deployed; audible completeness remains
-unaccepted. No stable tag, main merge or hardware-completeness claim follows.
+checks. The exact candidate was subsequently deployed, with both loaded kernel
+images and the service verified at 0.4.5. An automated capture covered two
+standard Windows notification sounds and three 500 ms Media Engine diagnostic
+clips, including replay after a 4.5-second pause. It recorded no Windows buffer
+glitch or missed-pump-deadline events, no failed media sends, no ring overruns,
+and no lost ETW events. The diagnostic graph starts took approximately
+1.1/0.4/0.5 ms and source render intervals were contiguous from timestamp zero
+through approximately 500 ms. This was a diagnostic process, not another real
+Shici listening acceptance. Cold Bluetooth preparation still took about two
+seconds before the first notification. No stable tag, main merge or
+hardware-completeness claim follows.
+
+## 0.4.6 source candidate: distinguish preparation from format probing
+
+The activation trace also exposed 34 zero-source encoder instances during
+Windows endpoint format discovery. The unconditional PAUSE preparation admitted
+format probes as though they reserved a playback buffer. A production-body
+fixture independently reproduces this for PAUSE without a DMA allocation:
+0.4.5 changes the source epoch and waits for Bluetooth despite having no buffer.
+
+Preparation now requires both PAUSE and an allocated audio buffer. The second
+operation performs the same preparation helper, supporting either ordering and
+both event-driven and polled allocation APIs. Bufferless probes do not change
+the source epoch or request a codec; RUN still never waits for a remote START.
+If preparation fails after allocation, the buffer is unmapped and freed before
+the failed allocation returns. Tests execute the real allocation and state
+bodies for both orderings, failure cleanup, reuse and immediate RUN.
+
+The allocation review also found that both methods rounded buffer sizes down.
+The WaveRT contract requires an actual size at least as large as the requested
+size. Both now round up to full frames (and complete notification packets),
+with overflow rejection. Tests exercise nonaligned sizes and maximum-size
+overflow. Notification count is limited to the documented one or two per cycle.
+These are source-level corrections; the candidate is not deployed yet.
+See Microsoft's [AllocateAudioBuffer contract](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/portcls/nf-portcls-iminiportwavertstream-allocateaudiobuffer)
+and [AllocateBufferWithNotification contract](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/portcls/nf-portcls-iminiportwavertstreamnotification-allocatebufferwithnotification).
 
 The Windows contracts require a nominal packet clock and distinguish DMA
 transfer position from downstream presentation position:

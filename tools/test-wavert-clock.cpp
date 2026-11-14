@@ -30,6 +30,7 @@
 #undef ULONG_MAX
 #endif
 #define ULONG_MAX UINT32_MAX
+#define MAXULONG UINT32_MAX
 using NTSTATUS = int32_t;
 #define NT_SUCCESS(s) ((s) >= 0)
 using ULONG = uint32_t;
@@ -50,6 +51,9 @@ constexpr NTSTATUS STATUS_SUCCESS = 0, STATUS_NOT_SUPPORTED = -1, STATUS_INVALID
 constexpr NTSTATUS STATUS_DATA_LATE_ERROR = -3, STATUS_DATA_OVERRUN = -4,
                    STATUS_INVALID_PARAMETER = -5;
 constexpr NTSTATUS STATUS_DEVICE_NOT_READY = -6;
+constexpr NTSTATUS STATUS_UNSUCCESSFUL = -7, STATUS_INSUFFICIENT_RESOURCES = -8;
+enum MEMORY_CACHING_TYPE {MmCached};
+struct PHYSICAL_ADDRESS {LONG HighPart;ULONG LowPart;};
 constexpr ULONGLONG OA2DP_HNS_PER_SECOND = 10000000, OA2DP_HNS_PER_MS = 10000;
 constexpr DWORD KSSTREAM_HEADER_OPTIONSF_ENDOFSTREAM = 0x200;
 enum KSSTATE : int { KSSTATE_STOP, KSSTATE_ACQUIRE, KSSTATE_PAUSE, KSSTATE_RUN };
@@ -172,8 +176,15 @@ static void Oa2dpRingPump(FakeRing *, const BYTE *, ULONG bytes, ULONG pos, ULON
     REQUIRE(frames <= bytes / (f->Channels * (f->BitsPerSample / 8)));
     pumped.push_back({pos, frames});
 }
+static BYTE buffer[7680]; // 20 ms, 48 kHz stereo float32
 struct FakePort {
     unsigned Unmapped = 0, Freed = 0;
+    PMDL AllocatePagesForMdl(PHYSICAL_ADDRESS,ULONG size) {
+        REQUIRE(!locked && !mapped && size<=sizeof(buffer));return this;
+    }
+    BYTE *MapAllocatedPages(PMDL, MEMORY_CACHING_TYPE) {
+        REQUIRE(!locked && !mapped);mapped=true;return buffer;
+    }
     void UnmapAllocatedPages(BYTE *, PMDL) {
         REQUIRE(!locked && mapped);
         mapped = false;
@@ -197,6 +208,9 @@ class CMiniportWaveRTStream {
     NTSTATUS GetOutputStreamPresentationPosition(KSAUDIO_PRESENTATION_POSITION *);
     NTSTATUS GetPacketCount(ULONG *);
     NTSTATUS SetState(KSSTATE);
+    NTSTATUS PrepareConsumer();
+    NTSTATUS AllocateBufferWithNotification(ULONG,ULONG,PMDL *,ULONG *,ULONG *,MEMORY_CACHING_TYPE *);
+    NTSTATUS AllocateAudioBuffer(ULONG,PMDL *,ULONG *,ULONG *,MEMORY_CACHING_TYPE *);
     VOID FreeAudioBuffer(PMDL, ULONG);
     OA2DP_AUDIO_DEVICE *m_Device;
     FakePort *m_pPortStream;
@@ -225,8 +239,9 @@ class CMiniportWaveRTStream {
 #include "wavert-methods-under-test.inc"
 #include "wavert-free-under-test.inc"
 #include "wavert-timer-under-test.inc"
+#include "wavert-allocate-notification-under-test.inc"
+#include "wavert-allocate-polled-under-test.inc"
 // clang-format on
-static BYTE buffer[7680]; // 20 ms, 48 kHz stereo float32
 static FakeEvent notification;
 static NotificationListEntry entry;
 static FakeTimer timer;
@@ -267,6 +282,40 @@ static void reset(CMiniportWaveRTStream &s, KSSTATE state = KSSTATE_RUN) {
 }
 int main() {
     CMiniportWaveRTStream s;
+    reset(s, KSSTATE_ACQUIRE);
+    s.m_pDmaBuffer = nullptr;
+    s.m_ulDmaBufferSize = 0;
+    s.m_NeedsPcmEpoch = true;
+    preparation_delay = 900 * OA2DP_HNS_PER_MS;
+    REQUIRE(s.SetState(KSSTATE_PAUSE) == STATUS_SUCCESS);
+    REQUIRE(now == 0 && !device.Ring.Prepared && device.Ring.Epochs == 0);
+    REQUIRE(s.SetState(KSSTATE_RUN) == STATUS_DEVICE_NOT_READY);
+    // Both legal allocation orders, for event-driven and polled clients.
+    for (bool pause_first : {false,true}) for (bool notified : {false,true}) {
+        reset(s,KSSTATE_ACQUIRE);
+        s.m_pDmaBuffer=nullptr;s.m_ulDmaBufferSize=0;s.m_NeedsPcmEpoch=true;mapped=false;
+        preparation_delay=900*OA2DP_HNS_PER_MS;
+        if(pause_first) REQUIRE(s.SetState(KSSTATE_PAUSE)==STATUS_SUCCESS && now==0);
+        PMDL mdl=nullptr;ULONG bytes=0,offset=99;MEMORY_CACHING_TYPE cache=MmCached;
+        REQUIRE((notified ? s.AllocateBufferWithNotification(2,sizeof(buffer)-1,&mdl,&bytes,&offset,&cache)
+                          : s.AllocateAudioBuffer(sizeof(buffer)-1,&mdl,&bytes,&offset,&cache))==STATUS_SUCCESS);
+        if(!pause_first) REQUIRE(s.SetState(KSSTATE_PAUSE)==STATUS_SUCCESS);
+        REQUIRE(now==900*OA2DP_HNS_PER_MS && device.Ring.Prepared && !device.Ring.Running);
+        REQUIRE(bytes==sizeof(buffer) && offset==0 && mdl==&port && device.Ring.Epochs==1);
+        REQUIRE(s.SetState(KSSTATE_RUN)==STATUS_SUCCESS && now==900*OA2DP_HNS_PER_MS);
+        s.FreeAudioBuffer(mdl,bytes);
+        REQUIRE(!mapped && !device.Ring.Prepared && port.Unmapped==1 && port.Freed==1);
+    }
+    // Failure after allocation must return no buffer and release its pages.
+    reset(s,KSSTATE_PAUSE);
+    s.m_pDmaBuffer=nullptr;s.m_ulDmaBufferSize=0;s.m_NeedsPcmEpoch=true;mapped=false;
+    preparation_result=STATUS_DEVICE_NOT_READY;
+    PMDL failed_mdl=nullptr;ULONG failed_size=0,failed_offset=0;MEMORY_CACHING_TYPE failed_cache=MmCached;
+    REQUIRE(s.AllocateBufferWithNotification(2,sizeof(buffer),&failed_mdl,&failed_size,&failed_offset,&failed_cache)==STATUS_DEVICE_NOT_READY);
+    REQUIRE(!failed_mdl && !mapped && port.Freed==1 && !device.Ring.Prepared);
+    REQUIRE(s.AllocateAudioBuffer(UINT32_MAX,&failed_mdl,&failed_size,&failed_offset,&failed_cache)==STATUS_INVALID_PARAMETER);
+    REQUIRE(s.AllocateBufferWithNotification(2,UINT32_MAX,&failed_mdl,&failed_size,&failed_offset,&failed_cache)==STATUS_INVALID_PARAMETER);
+    REQUIRE(s.AllocateBufferWithNotification(3,7680,&failed_mdl,&failed_size,&failed_offset,&failed_cache)==STATUS_INVALID_PARAMETER);
     // Windows schedules the first render deadline before calling RUN. A cold
     // Bluetooth handshake must finish during PAUSE, never consume that budget.
     reset(s, KSSTATE_ACQUIRE);
