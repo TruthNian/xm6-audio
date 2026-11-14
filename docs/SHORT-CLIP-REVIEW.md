@@ -322,7 +322,7 @@ The deployed source fixes and these automatic checks do not close acoustic
 acceptance. The user has not accepted 0.4.6 listening behavior, and no further
 listening request was sent. No stable tag or main-branch merge follows.
 
-## 0.4.7 candidate: wake the ACL before START
+## 0.4.7: wake the ACL before START
 
 Further decoding of the existing 0.4.6 trace located the cold-start wait.
 After the idle SUSPEND, Windows negotiated Sniff mode with a 997.5 ms interval.
@@ -332,7 +332,7 @@ that reply, when media began, did Windows issue EXIT_SNIFF_MODE and report the
 link active. Host HCI timestamps distinguish this from encoder creation time;
 they do not measure over-air timing or isolate radio and headset processing.
 
-The candidate asks Windows to enter active mode **before** sending START,
+The service asks Windows to enter active mode **before** sending START,
 using the documented [BRB_ACL_ENTER_ACTIVE_MODE](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/bthddi/ns-bthddi-_brb_acl_enter_active_mode).
 It does not replace Windows link policy or keep an idle stream continuously
 transmitting. The request carries the current media/signalling generations,
@@ -348,9 +348,34 @@ wake operation. The native build and 37-check suite pass. Additional production-
 body cases cover wake-before-START, unsupported-wake fallback, cancellation,
 old connections, HFP/power/disconnect gates, allocation failure and inline versus
 deferred completion ownership. The wake-order regression fails with the actual
-0.4.6 START body and passes with the candidate. Native metadata events now expose
-wake and START timing without packet payloads. This source candidate has not yet
-been deployed or shown to reduce measured host latency; 0.4.6 remains installed.
+0.4.6 START body and passes with the correction. Native metadata events now expose
+wake and START timing without packet payloads.
+
+The exact `dad069a5ec72336dc69af1d75e98146445ad074d` package passed
+[CI](https://github.com/TruthNian/xm6-audio/actions/runs/43554684356) and was locally
+test-signed and deployed on 2026-11-14. Both loaded drivers and the running
+service were verified at 0.4.7; endpoint identity, defaults, mix, volume and mute
+were preserved. Initial endpoint verification preceded completion of Windows
+endpoint discovery and did not pass; a subsequent check after discovery passed
+without another installation or radio cycle. No computer reboot or new trust
+was introduced.
+
+Activation metadata recorded 35 successful link wakes and 35 accepted STARTs.
+START negotiation took 31–94 ms (approximately 57 ms mean); these initialization
+starts are not a matched cold-start comparison. The follow-up automatic check
+completed two Windows notifications and three 500 ms diagnostic clips, including
+replay after a pause. It recorded no Windows glitches or missed deadlines,
+unavailable RUN, failed media completion, ring overrun or ETW loss. Diagnostic
+graph-start durations were approximately 1.0/0.4/0.4 ms.
+
+QQ Music was already paused when that follow-up check recorded its baseline,
+and retained an audio-device reservation. The link did not enter idle SUSPEND
+during the bounded wait, so the intended cold-start precondition was absent.
+The check preserved the application's paused state. It does **not** demonstrate
+a reduction of the 1,938 ms cold START exchange, nor acoustic completeness.
+The allocated discovery-probe overhead and short-clip listening acceptance
+also remain open. Routine captures now use Windows audio/MF and native metadata;
+verbose BTHPORT packet payloads are not needed for the new wake/START events.
 
 The Windows contracts require a nominal packet clock and distinguish DMA
 transfer position from downstream presentation position:
