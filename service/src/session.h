@@ -134,7 +134,7 @@ private:
     oa2dp_codec_caps config_{};
     oa2dp_codec_caps remote_caps_{};  // capabilities of the peer SEP we use
     bool have_remote_caps_ = false;
-    bool audio_running_ = false;
+    bool audio_requested_ = false;
     bool connection_enabled_ = true;
     bool suspend_requested_ = false;
     ULONG suspend_serial_ = 0;

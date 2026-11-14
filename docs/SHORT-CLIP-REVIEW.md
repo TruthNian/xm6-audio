@@ -1,4 +1,4 @@
-# Short-clip pipeline review (0.4.1–0.4.3)
+# Short-clip pipeline review (0.4.1–0.4.5)
 
 On 2026-11-12, the owner reported missing beginnings of pronunciation clips
 in the Shici Windows application on the 0.4.0 native driver. This concrete bug
@@ -173,7 +173,7 @@ over-air link power state and headset firmware. In particular, a sniff-mode
 explanation is still unproven. No link-policy tweak, arbitrary pre-roll, further
 driver deployment or claim of Shici acceptance follows from this trace.
 
-## 0.4.4 source candidate: preparation cancellation
+## 0.4.4: preparation cancellation, failed acceptance
 
 Review of the new preparation wait found a separate cancellation defect. PnP
 stop and mapping loss woke the waiter, but a user disconnect or HFP suspension
@@ -197,9 +197,56 @@ waiter still fails. This prevents a normal cancellation from being misreported
 to the service as an encoder/transport failure requiring link teardown.
 
 Production-body checks cover disconnect, HFP suspension, fast re-enable, a late
-RUN, retained encoder readiness and a new wait after recovery. The source builds
-as 0.4.4; it has not been signed, staged or deployed. The installed unified 0.4.3
-trial remains unchanged, and real Shici listening acceptance is still pending.
+RUN, retained encoder readiness and a new wait after recovery. The exact 0.4.4
+package was subsequently test-signed and deployed on 2026-11-14; both loaded
+kernel images and the running service matched it. Activation used one Bluetooth
+radio cycle, without a computer reboot or new certificate trust. The owner then
+reported incomplete Windows notification sounds. This is failed acceptance,
+not a stable correction.
+
+## 0.4.5 source candidate: prepare before the render deadline
+
+A subsequent trace included the Windows Audio provider and real Shici process,
+in addition to Media Foundation and native transport events. The initial KS RUN
+call occupied approximately 109 ms. Immediately after it returned, the Windows
+audio engine recorded a missed pump deadline and two buffer glitch reports at
+stream byte positions 15,360 and 23,040. The native encoder recorded no ring
+overruns or failed media completions in that trace. These are distinct stages:
+clean native transport counters cannot rule out upstream engine data loss.
+They do not identify the exact audible syllable, nor prove every reported
+notification failure has the same cause.
+
+The remaining design error was putting a remote Bluetooth transaction inside
+RUN. Finishing that transaction before advancing the driver's own clock was
+insufficient: Windows had already committed its render scheduling deadline.
+The candidate prepares the consumer during the transition into PAUSE. RUN only
+checks current availability and commits the clock; it cannot wait for START.
+A production-body regression with a 900 ms handshake failed on the previous
+implementation because PAUSE did not prepare anything. The revised path spends
+that budget before RUN and leaves packet zero untouched until actual playback.
+
+Prepared transport ownership is now separate from actual rendering. The service
+retains the encoder and paced silence while Windows keeps the pin in PAUSE,
+instead of retiring the consumer after three seconds and forcing the next RUN
+to wait again. ACQUIRE/STOP, buffer release and stream destruction relinquish
+the request. The existing tail-drain grace then applies. This trades radio work
+while a client deliberately retains a paused pin for immediate, complete resume;
+it does not keep transport running after the pin releases its resources.
+HFP and disconnect still override availability and cancel pending preparation.
+PAUSE can relinquish actual RUN during that cancellation without falsely
+reporting playback. A retained request can be reconciled after profile recovery.
+
+The ready check includes mapping and cancellation state. Buffer release resets
+the source timeline, so reuse cannot inherit a stale DMA offset. Protocol 5 and
+the expanded format-state reply reject mixed driver/service packages. Opt-in
+state-request, preparation, state-commit and unavailable-RUN events cover the
+previous observability gap without recording audio content.
+
+The candidate builds locally and the 36-check suite passes, including actual
+production state/ring/service bodies, codec input preservation, pacing, profile
+cancellation, source formats and native metadata. These are source and host-side
+checks. The candidate has not been deployed; audible completeness remains
+unaccepted. No stable tag, main merge or hardware-completeness claim follows.
 
 The Windows contracts require a nominal packet clock and distinguish DMA
 transfer position from downstream presentation position:

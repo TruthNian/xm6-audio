@@ -23,6 +23,7 @@
 #define STDMETHODIMP_(t) t
 #define UNREFERENCED_PARAMETER(x) (void)(x)
 #define ASSERT(x) REQUIRE(x)
+#define TraceLoggingWrite(...) ((void)0)
 #define CONTAINING_RECORD(p, type, field)                                                          \
     reinterpret_cast<type *>(reinterpret_cast<char *>(p) - offsetof(type, field))
 #ifdef ULONG_MAX
@@ -48,6 +49,7 @@ constexpr bool TRUE = true, FALSE = false;
 constexpr NTSTATUS STATUS_SUCCESS = 0, STATUS_NOT_SUPPORTED = -1, STATUS_INVALID_DEVICE_STATE = -2;
 constexpr NTSTATUS STATUS_DATA_LATE_ERROR = -3, STATUS_DATA_OVERRUN = -4,
                    STATUS_INVALID_PARAMETER = -5;
+constexpr NTSTATUS STATUS_DEVICE_NOT_READY = -6;
 constexpr ULONGLONG OA2DP_HNS_PER_SECOND = 10000000, OA2DP_HNS_PER_MS = 10000;
 constexpr DWORD KSSTREAM_HEADER_OPTIONSF_ENDOFSTREAM = 0x200;
 enum KSSTATE : int { KSSTATE_STOP, KSSTATE_ACQUIRE, KSSTATE_PAUSE, KSSTATE_RUN };
@@ -79,7 +81,7 @@ struct FakeTimer {
 using PEX_TIMER = FakeTimer *;
 struct FakeRing {
     unsigned Epochs = 0;
-    bool Running = false;
+    bool Running = false, Prepared = false;
     bool Ready = true, Ended = false;
 };
 struct OA2DP_AUDIO_DEVICE {
@@ -130,9 +132,10 @@ static void ExSetTimer(PEX_TIMER t, LONGLONG due, ULONGLONG period, void *) {
     t->Active = true;
     ++t->Sets;
 }
-static void Oa2dpReportStream(OA2DP_AUDIO_DEVICE *d, const OA2DP_FORMAT *, bool running, ULONG) {
+static void Oa2dpReportStream(OA2DP_AUDIO_DEVICE *d, const OA2DP_FORMAT *, bool running, ULONG, bool prepared = false) {
     REQUIRE(!locked);
     d->Ring.Running = running;
+    d->Ring.Prepared = prepared;
     d->Reports.push_back(running);
 }
 static bool Oa2dpRingBeginStream(FakeRing *ring, const OA2DP_FORMAT *, ULONG *sequence) {
@@ -153,6 +156,7 @@ static NTSTATUS Oa2dpRingWaitConsumer(FakeRing *ring, ULONG) {
     if (preparation_result == STATUS_SUCCESS) ring->Ready = true;
     return preparation_result;
 }
+static bool Oa2dpRingConsumerReady(FakeRing *ring, ULONG) { REQUIRE(locked); return ring->Ready; }
 static void Oa2dpRingEndSource(FakeRing *ring, ULONG) { REQUIRE(locked); ring->Ended = true; }
 static ULONG Oa2dpLatencyUs(OA2DP_AUDIO_DEVICE *) {
     REQUIRE(!locked);
@@ -263,6 +267,16 @@ static void reset(CMiniportWaveRTStream &s, KSSTATE state = KSSTATE_RUN) {
 }
 int main() {
     CMiniportWaveRTStream s;
+    // Windows schedules the first render deadline before calling RUN. A cold
+    // Bluetooth handshake must finish during PAUSE, never consume that budget.
+    reset(s, KSSTATE_ACQUIRE);
+    s.m_NeedsPcmEpoch = true;
+    preparation_delay = 900 * OA2DP_HNS_PER_MS;
+    REQUIRE(s.SetState(KSSTATE_PAUSE) == STATUS_SUCCESS);
+    REQUIRE(now == 900 * OA2DP_HNS_PER_MS && device.Ring.Prepared && !device.Ring.Running);
+    const auto run_deadline = now + 10 * OA2DP_HNS_PER_MS;
+    REQUIRE(s.SetState(KSSTATE_RUN) == STATUS_SUCCESS);
+    REQUIRE(now < run_deadline && timer.Active && pumped.empty());
     reset(s);
     now = 30 * OA2DP_HNS_PER_MS;
     ULONG packets = 99;
@@ -359,11 +373,12 @@ int main() {
             s.SetState(KSSTATE_PAUSE) == STATUS_SUCCESS);
     now = 3 * OA2DP_HNS_PER_MS;
     REQUIRE(s.SetState(KSSTATE_RUN) == STATUS_SUCCESS && timer.Active && device.Ring.Running);
+    const auto reports = device.Reports.size();
     REQUIRE(s.SetState(KSSTATE_RUN) == STATUS_SUCCESS && timer.Sets == 1 &&
-            device.Reports.size() == 1);
+            device.Reports.size() == reports);
     now = 8 * OA2DP_HNS_PER_MS;
     REQUIRE(s.GetPosition(&position) == STATUS_SUCCESS && s.m_ullLinearFrames == 240);
-    REQUIRE(s.SetState(KSSTATE_PAUSE) == STATUS_SUCCESS && !timer.Active && !device.Ring.Running);
+    REQUIRE(s.SetState(KSSTATE_PAUSE) == STATUS_SUCCESS && !timer.Active && !device.Ring.Running && device.Ring.Prepared);
     now = 108 * OA2DP_HNS_PER_MS;
     TimerNotifyRT(&timer, &s);
     REQUIRE(s.m_ullLinearFrames == 240 && s.SetState(KSSTATE_RUN) == STATUS_SUCCESS);
@@ -380,7 +395,7 @@ int main() {
             !device.Ring.Running);
     REQUIRE(s.SetState(static_cast<KSSTATE>(99)) == STATUS_INVALID_PARAMETER &&
             s.m_KsState == KSSTATE_STOP);
-    REQUIRE(device.Reports == std::vector<bool>({true, false, true, false}));
+    REQUIRE(!device.Ring.Prepared); // resource release includes prepared transport
     REQUIRE(device.Ring.Epochs == 0 && s.m_NeedsPcmEpoch); // PAUSE retained epoch; STOP retires it
     REQUIRE(s.SetState(KSSTATE_ACQUIRE) == STATUS_SUCCESS && s.SetState(KSSTATE_PAUSE) == STATUS_SUCCESS);
     REQUIRE(s.SetState(KSSTATE_RUN) == STATUS_SUCCESS && device.Ring.Epochs == 1 && !s.m_NeedsPcmEpoch);
@@ -446,8 +461,8 @@ int main() {
         REQUIRE(presentation.u64PositionInBlocks == 2640);
         REQUIRE(presentation.u64QPCPosition == static_cast<UINT64>(now)); // KS uses raw QPC ticks
     }
-    // Preparation belongs to the state transition. Acknowledged RUN always
-    // advances at nominal rate; a renderer never sees a frozen running clock.
+    // Preparation belongs to PAUSE, before Windows schedules RUN. Acknowledged
+    // RUN advances at nominal rate without a blocking handshake.
     reset(s, KSSTATE_STOP);
     s.m_NeedsPcmEpoch = true;
     preparation_delay = 900 * OA2DP_HNS_PER_MS;
@@ -456,23 +471,29 @@ int main() {
         KSAUDIO_POSITION p{};
         REQUIRE(current->GetPosition(&p) == STATUS_SUCCESS && p.PlayOffset == 0);
     };
-    REQUIRE(s.SetState(KSSTATE_RUN) == STATUS_SUCCESS && device.Ring.Ready);
+    REQUIRE(s.SetState(KSSTATE_PAUSE) == STATUS_SUCCESS && device.Ring.Ready);
+    REQUIRE(s.SetState(KSSTATE_RUN) == STATUS_SUCCESS);
     REQUIRE(pumped.empty() && s.m_ullLinearFrames == 0 && s.m_llPacketCounter == 0);
     now = 905 * OA2DP_HNS_PER_MS;
     REQUIRE(s.GetPosition(&position) == STATUS_SUCCESS && s.m_ullLinearFrames == 240);
     REQUIRE(pumped.size() == 1 && pumped[0].Position == 0 && pumped[0].Frames == 240);
     REQUIRE(s.SetState(KSSTATE_PAUSE) == STATUS_SUCCESS);
-    device.Ring.Ready = false; // idle SUSPEND retired the encoder during pause
     now = 2000 * OA2DP_HNS_PER_MS;
-    during_preparation = [] { REQUIRE(current->m_KsState == KSSTATE_PAUSE && !timer.Active); };
+    during_preparation = [] { REQUIRE(false); }; // retained PAUSE must never repeat preparation
     REQUIRE(s.SetState(KSSTATE_RUN) == STATUS_SUCCESS);
     REQUIRE(s.GetPosition(&position) == STATUS_SUCCESS && s.m_ullLinearFrames == 240);
-    now = 2905 * OA2DP_HNS_PER_MS;
+    now = 2005 * OA2DP_HNS_PER_MS;
     REQUIRE(s.GetPosition(&position) == STATUS_SUCCESS && s.m_ullLinearFrames == 480);
-    reset(s, KSSTATE_PAUSE);
+    REQUIRE(s.SetState(KSSTATE_PAUSE) == STATUS_SUCCESS);
+    device.Ring.Ready = false; // profile loss, not an idle timeout
+    const auto lost_time = now;
+    REQUIRE(s.SetState(KSSTATE_RUN) == STATUS_DEVICE_NOT_READY && now == lost_time);
+    REQUIRE(s.m_KsState == KSSTATE_PAUSE && !timer.Active);
+    device.Ring.Ready = true; // the retained request is restored after profile recovery
+    REQUIRE(s.SetState(KSSTATE_RUN) == STATUS_SUCCESS && now == lost_time);
+    reset(s, KSSTATE_ACQUIRE);
     preparation_result = STATUS_INVALID_DEVICE_STATE;
-    REQUIRE(s.SetState(KSSTATE_RUN) == STATUS_INVALID_DEVICE_STATE);
-    REQUIRE(s.m_KsState == KSSTATE_PAUSE && !timer.Active && !device.Ring.Running);
-    REQUIRE(device.Reports == std::vector<bool>({true, false}));
-    std::puts("production WaveRT clock/packet/presentation and synchronous RUN preparation checks passed (OS APIs fake)");
+    REQUIRE(s.SetState(KSSTATE_PAUSE) == STATUS_INVALID_DEVICE_STATE);
+    REQUIRE(s.m_KsState == KSSTATE_ACQUIRE && !timer.Active && !device.Ring.Running && !device.Ring.Prepared);
+    std::puts("production WaveRT clock/packet/presentation, PAUSE preparation and nonblocking RUN checks passed (OS APIs fake)");
 }

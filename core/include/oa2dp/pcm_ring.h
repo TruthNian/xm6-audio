@@ -19,7 +19,7 @@ extern "C" {
 #endif
 
 #define OA2DP_RING_MAGIC 0x4D435041u /* "APCM" */
-#define OA2DP_RING_VERSION 4
+#define OA2DP_RING_VERSION 5
 
 #define OA2DP_RING_FMT_FLOAT32 0 /* interleaved IEEE float, nominal [-1, 1] */
 #define OA2DP_RING_FMT_S32 1     /* interleaved int32, 24-bit values */

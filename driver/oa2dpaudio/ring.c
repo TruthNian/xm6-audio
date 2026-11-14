@@ -208,7 +208,8 @@ BOOLEAN Oa2dpRingConsumerReady(OA2DP_AUDIO_RING *r, ULONG sequence)
     KIRQL irql;
     BOOLEAN ready;
     KeAcquireSpinLock(&r->Lock, &irql);
-    ready = r->Ring && r->Ring->format_sequence == sequence && oa2dp_ring_consumer_ready(r->Ring);
+    ready = r->Ring && r->ConsumerMapped && !r->ConsumerCancelled &&
+        r->Ring->format_sequence == sequence && oa2dp_ring_consumer_ready(r->Ring);
     KeReleaseSpinLock(&r->Lock, irql);
     return ready;
 }
@@ -231,9 +232,8 @@ NTSTATUS Oa2dpRingSignalConsumer(OA2DP_AUDIO_RING *r, ULONG sequence)
     return status;
 }
 
-/* PASSIVE_LEVEL, with no position/device/control lock held. A RUN transition
- * must complete preparation before exposing a running hardware clock. Freezing
- * that clock afterwards breaks the renderer's real-time timing contract. */
+/* PASSIVE_LEVEL, with no position/device/control lock held. Preparation belongs
+ * to PAUSE, before the Windows engine commits its RUN scheduling deadline. */
 NTSTATUS Oa2dpRingWaitConsumer(OA2DP_AUDIO_RING *r, ULONG sequence)
 {
     const ULONGLONG deadline = KeQueryInterruptTime() + 5ULL * 10000000;

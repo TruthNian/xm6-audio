@@ -71,6 +71,7 @@ typedef struct _OA2DP_AUDIO_DEVICE {
     OA2DP_FORMAT Current;       /* format of the open (or last) stream */
     ULONG PcmSequence;          /* ring epoch committed with Current */
     BOOLEAN Running;
+    BOOLEAN Prepared;
     BOOLEAN ConnectionEnabled;
     BOOLEAN SuspendRequested;
     ULONG ConnectionSerial;
@@ -139,7 +140,7 @@ BOOLEAN Oa2dpControlOwns(_In_ OA2DP_AUDIO_DEVICE *dev, _In_ PIRP irp);
 NTSTATUS Oa2dpControlDispatch(_Inout_ OA2DP_AUDIO_DEVICE *dev, _Inout_ PIRP irp);
 /* Stream state for WAIT_FORMAT (F4.3); callable up to DISPATCH_LEVEL. */
 VOID Oa2dpReportStream(_Inout_ OA2DP_AUDIO_DEVICE *dev, _In_ const OA2DP_FORMAT *format,
-                       _In_ BOOLEAN running, ULONG sequence);
+                       _In_ BOOLEAN running, ULONG sequence, _In_ BOOLEAN prepared);
 /* Snapshot of the format list; callable up to DISPATCH_LEVEL. */
 VOID Oa2dpGetFormats(_In_ OA2DP_AUDIO_DEVICE *dev, _Out_ OA2DP_FORMAT_LIST *out);
 BOOLEAN Oa2dpFormatListed(_In_ const OA2DP_FORMAT_LIST *list, _In_ const OA2DP_FORMAT *f);

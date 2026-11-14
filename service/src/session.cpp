@@ -478,7 +478,7 @@ bool Session::ensure_audio_endpoint()
         connection_serial_ = state.ConnectionSerial;
         audio_format_ = state.Format;
         pcm_sequence_ = state.PcmSequence;
-        audio_running_ = state.Running != 0;
+        audio_requested_ = state.Running != 0 || state.Prepared != 0;
         {
             // Initialize from the reopened endpoint before its waiter can
             // deliver newer snapshots. Do not retain an old disconnect latch.
@@ -630,7 +630,7 @@ void Session::reconfigure_rate(uint32_t rate)
         }
     };
     auto resume = [&] {
-        if (!rate_resume_pending_ || !audio_running_) return;
+        if (!rate_resume_pending_ || !audio_requested_) return;
         start_stream();
         oa2dp_avdtp_sep *s = current();
         if (s && s->state == OA2DP_SEP_STREAMING)
@@ -728,7 +728,7 @@ void Session::reconcile_peer_configuration()
     // Otherwise an unchanged PCM stream can remain at 96 kHz while the peer's
     // 48 kHz configuration permanently prevents local encoder admission.
     if (setup_audio_endpoint() && !stopping_ && !suspend_requested_ && have_remote_caps_ &&
-        settings_.follow_source_rate && audio_running_)
+        settings_.follow_source_rate && audio_requested_)
         reconfigure_rate(audio_format_.SampleRate);
 }
 
@@ -884,7 +884,7 @@ void Session::handle(const Command &c)
         }
         if (!connection_enabled_) {
             audio_format_ = c.format.Format;
-            audio_running_ = c.format.Running != 0;
+            audio_requested_ = c.format.Running != 0 || c.format.Prepared != 0;
             teardown("Windows requested disconnect");
             if (!teardown_pending_)
                 publish(publication_pending_ ? "state-update-pending" : "user-disconnected");
@@ -899,7 +899,7 @@ void Session::handle(const Command &c)
         // to this producer epoch without SUSPEND/START or a receiver restart.
         approved_pcm_sequence_ = pcm_sequence_;
         if (audio_.data_event()) SetEvent(audio_.data_event());
-        audio_running_ = c.format.Running != 0;
+        audio_requested_ = c.format.Running != 0 || c.format.Prepared != 0;
         if (teardown_pending_ || transport_suspended_) break;
         if (suspend_requested_) {
             suspend_stream();
@@ -908,7 +908,7 @@ void Session::handle(const Command &c)
                 update_suspend_state();
             break;
         }
-        if (audio_running_) {
+        if (audio_requested_) {
             idle_since_ = 0;
             if (settings_.follow_source_rate)
                 reconfigure_rate(c.format.Format.SampleRate);
@@ -926,7 +926,7 @@ void Session::handle(const Command &c)
     case Cmd::AudioUnavailable:
         LOGW("audio endpoint wait failed: %lu; releasing the old endpoint", c.error);
         end_streaming();
-        audio_running_ = false;
+        audio_requested_ = false;
         audio_ready_ = false;
         audio_.close();
         audio_wait_failed_ = false;
@@ -1090,16 +1090,16 @@ void Session::main_loop()
             init_deadline_ = 0;
             if (!configure_as_initiator())
                 teardown("configuration failed");
-            else if (audio_running_)
+            else if (audio_requested_)
                 start_stream();
         }
-        if (streaming_ && !audio_running_ && idle_since_ &&
+        if (streaming_ && !audio_requested_ && idle_since_ &&
             is_after(GetTickCount(), idle_since_ + kIdleSuspendMs))
             suspend_stream();
 
         if (media_drain_pending_ && tr_.drain_media(0)) {
             media_drain_pending_ = false;
-            if (audio_running_ && connection_enabled_ && !suspend_requested_ && !transport_suspended_)
+            if (audio_requested_ && connection_enabled_ && !suspend_requested_ && !transport_suspended_)
                 start_stream();
         }
 
@@ -1187,7 +1187,7 @@ void Session::begin_streaming()
     if (stopping_) // stop may have arrived during the synchronous publication
         return;
     streaming_ = true;
-    if (!audio_running_ && !idle_since_) idle_since_ = GetTickCount();
+    if (!audio_requested_ && !idle_since_) idle_since_ = GetTickCount();
     ResetEvent(stream_stop_event_);
     if (++stream_generation_ == 0) ++stream_generation_;
     context.generation = stream_generation_;

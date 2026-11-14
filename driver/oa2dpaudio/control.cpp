@@ -284,6 +284,7 @@ static VOID SnapshotStateLocked(_In_ const OA2DP_AUDIO_DEVICE *dev,
     ev->Format = dev->Current;
     ev->PcmSequence = dev->PcmSequence;
     ev->Running = dev->Running ? 1 : 0;
+    ev->Prepared = dev->Prepared ? 1 : 0;
     ev->ConnectionEnabled = dev->ConnectionEnabled ? 1 : 0;
     ev->ConnectionSerial = dev->ConnectionSerial;
     ev->SuspendRequested = dev->SuspendRequested ? 1 : 0;
@@ -313,24 +314,26 @@ static VOID FailWaits(_Inout_ OA2DP_AUDIO_DEVICE *dev, _In_opt_ PFILE_OBJECT fo,
     }
 }
 
-/* Called by the WaveRT stream on a new format and on RUN / leaving RUN. The
+/* Called by the WaveRT stream on preparation, RUN and resource release. The
  * latest state wins if the service has not picked up the previous one. */
 extern "C" VOID Oa2dpReportStream(_Inout_ OA2DP_AUDIO_DEVICE *dev, _In_ const OA2DP_FORMAT *format,
-                                  _In_ BOOLEAN running, ULONG sequence)
+                                  _In_ BOOLEAN running, ULONG sequence, _In_ BOOLEAN prepared)
 {
     OA2DP_FORMAT_CHANGE ev;
     KIRQL irql;
     PIRP irp;
 
     KeAcquireSpinLock(&dev->Lock, &irql);
-    if (running) {
+    if (prepared || running) {
         const BOOLEAN available = dev->Started && !dev->Removed && dev->Connected &&
             dev->ConnectionEnabled && !dev->SuspendRequested;
         Oa2dpRingSetConsumerAvailable(&dev->Ring, available);
-        if (!available) {
+        if (!available && running) {
             KeReleaseSpinLock(&dev->Lock, irql);
             return; // a late RUN must not undo disconnect, HFP policy or PnP stop
         }
+        // PAUSE may relinquish RUN during HFP/disconnect. Retain its request
+        // without granting availability; a preparation wait still cancels.
     }
     // Commit format and epoch together. A GET_STATE between RingBeginStream and
     // this report must retain the old epoch, so the encoder defers starting.
@@ -358,6 +361,7 @@ extern "C" VOID Oa2dpReportStream(_Inout_ OA2DP_AUDIO_DEVICE *dev, _In_ const OA
     KeReleaseSpinLockFromDpcLevel(&dev->Ring.Lock);
     dev->Current = *format;
     dev->Running = running;
+    dev->Prepared = prepared;
     SnapshotStateLocked(dev, &ev);
     irp = dev->Started && dev->ControlFile
         ? IoCsqRemoveNextIrp(&dev->WaitCsq, dev->ControlFile) : NULL;
@@ -465,6 +469,7 @@ extern "C" VOID Oa2dpControlStop(_Inout_ OA2DP_AUDIO_DEVICE *dev)
     KeAcquireSpinLock(&dev->Lock, &irql);
     dev->Started = FALSE;
     dev->Running = FALSE;
+    dev->Prepared = FALSE;
     dev->EventPending = FALSE;
     KeReleaseSpinLock(&dev->Lock, irql);
     Oa2dpRingCancelConsumer(&dev->Ring);

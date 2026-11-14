@@ -132,7 +132,7 @@ static void Oa2dpRingPump(OA2DP_AUDIO_RING *r,const UCHAR *p,ULONG bytes,ULONG p
 struct OA2DP_FORMAT_CHANGE {
     OA2DP_FORMAT Format{};
     ULONG PcmSequence = 0;
-    bool Running = false;
+    bool Running = false, Prepared = false;
 };
 using PIRP = void *;
 struct OA2DP_AUDIO_DEVICE {
@@ -140,7 +140,7 @@ struct OA2DP_AUDIO_DEVICE {
     OA2DP_AUDIO_RING Ring;
     OA2DP_FORMAT Current{};
     ULONG PcmSequence = 0;
-    bool Running = false, Started = true, Removed = false, EventPending = false;
+    bool Running = false, Prepared = false, Started = true, Removed = false, EventPending = false;
     bool ConnectionEnabled = true, SuspendRequested = false;
     LONG Connected = 1;
     ULONG SuspendSerial = 0, ConnectionSerial = 0;
@@ -154,12 +154,16 @@ struct OA2DP_AUDIO_DEVICE {
 static void SnapshotStateLocked(OA2DP_AUDIO_DEVICE *dev, OA2DP_FORMAT_CHANGE *ev) {
     REQUIRE(locked && !nested_ring_lock);
     ev->Format = dev->Current; ev->PcmSequence = dev->PcmSequence; ev->Running = dev->Running;
+    ev->Prepared = dev->Prepared;
 }
 static PIRP IoCsqRemoveNextIrp(int *, void *) { REQUIRE(locked); return nullptr; }
 static void CompleteWait(PIRP, const OA2DP_FORMAT_CHANGE *) { REQUIRE(!locked); }
 static void PrepareWait(PIRP, const OA2DP_FORMAT_CHANGE *) { REQUIRE(!locked); }
 #include "pcm-report-under-test.inc"
 #include "policy-apply-under-test.inc"
+static void Oa2dpReportStream(OA2DP_AUDIO_DEVICE *d,const OA2DP_FORMAT *f,bool running,ULONG sequence) {
+    Oa2dpReportStream(d,f,running,sequence,running);
+}
 static void Oa2dpReportStream(OA2DP_AUDIO_DEVICE *d,const OA2DP_FORMAT *f,bool running) {
     Oa2dpReportStream(d,f,running,d->Ring.Ring->format_sequence);
 }
@@ -321,7 +325,16 @@ static void obsolete_producer() {
     oa2dp_ring_format snapshot{};
     REQUIRE(oa2dp_ring_snapshot(d.Ring.Ring,&snapshot)==0);
     REQUIRE(oa2dp_ring_admit(d.Ring.Ring,&snapshot)==0);
+    REQUIRE(!Oa2dpRingConsumerReady(&d.Ring,current)); // admission cannot undo cancellation
+    d.Ring.ConsumerMapped = true;
+    Oa2dpRingSetConsumerAvailable(&d.Ring,TRUE);
     REQUIRE(Oa2dpRingConsumerReady(&d.Ring,current) && !Oa2dpRingConsumerReady(&d.Ring,old));
+    d.Started = true;
+    Oa2dpReportStream(&d,&f,false,current,true);
+    REQUIRE(d.Prepared && !d.Running && d.Event.Prepared && !d.Event.Running);
+    REQUIRE(!(d.Ring.Ring->flags & OA2DP_RING_FLAG_RUNNING));
+    Oa2dpReportStream(&d,&f,false,current,false);
+    REQUIRE(!d.Prepared && !d.Event.Prepared);
 }
 static OA2DP_AUDIO_RING *waiting_ring;
 static OA2DP_AUDIO_DEVICE *waiting_device;
@@ -366,6 +379,8 @@ static void policy_cancels_preparation() {
     REQUIRE(Oa2dpRingWaitConsumer(&d.Ring,d.Ring.Ring->format_sequence)==STATUS_SUCCESS);
     // A coalesced profile reversal must not retire the still-running encoder.
     REQUIRE(Oa2dpApplyPolicy(&d,true,true,3,&completion)==STATUS_SUCCESS);
+    Oa2dpReportStream(&d,&format,false,d.Ring.Ring->format_sequence,true);
+    REQUIRE(!d.Running && d.Prepared && d.Ring.ConsumerCancelled);
     REQUIRE(oa2dp_ring_consumer_ready(d.Ring.Ring));
     REQUIRE(Oa2dpRingSignalConsumer(&d.Ring,d.Ring.Ring->format_sequence)==STATUS_SUCCESS);
     REQUIRE(Oa2dpRingWaitConsumer(&d.Ring,d.Ring.Ring->format_sequence)==STATUS_DEVICE_NOT_READY);

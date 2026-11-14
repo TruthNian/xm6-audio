@@ -57,7 +57,7 @@ struct FakeEvent {
     bool Signaled = true;
 };
 struct OA2DP_FORMAT_CHANGE {
-    ULONG Format, PcmSequence, Running, ConnectionEnabled, ConnectionSerial;
+    ULONG Format, PcmSequence, Running, Prepared, ConnectionEnabled, ConnectionSerial;
     ULONG SuspendRequested, SuspendSerial;
 };
 struct FakeFile {
@@ -91,7 +91,7 @@ struct OA2DP_AUDIO_DEVICE {
     PFILE_OBJECT ControlFile = &primary_file;
     int Ring = 0;
     IO_CSQ WaitCsq;
-    bool Started = false, Removed = false, Running = false;
+    bool Started = false, Removed = false, Running = false, Prepared = false;
     bool Connected = true;
     bool ConnectionEnabled = true, SuspendRequested = false, EventPending = false;
     ULONG Current = 42, PcmSequence = 2, ConnectionSerial = 0, SuspendSerial = 0;

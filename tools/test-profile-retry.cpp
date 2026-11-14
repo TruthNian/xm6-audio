@@ -136,7 +136,7 @@ struct Session {
     ULONG pcm_sequence_ = 0, media_generation_ = 2, sig_generation_ = 1;
     ULONG stream_generation_ = 0, suspend_serial_ = 1;
     std::atomic<ULONG> approved_pcm_sequence_{0};
-    bool audio_running_ = true;
+    bool audio_requested_ = true;
     DWORD idle_since_ = 0;
     USHORT media_mtu_ = 1000;
     bool stream_stop_ = true;
@@ -475,7 +475,7 @@ int main() {
     }
     {
         Session s;
-        s.audio_running_ = false;
+        s.audio_requested_ = false;
         s.av_.sep.state = OA2DP_SEP_STREAMING;
         s.begin_streaming();
         REQUIRE(s.streaming_ && s.idle_since_ == GetTickCount());

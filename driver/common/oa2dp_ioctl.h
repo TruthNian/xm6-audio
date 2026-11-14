@@ -122,7 +122,7 @@ typedef struct _OA2DP_TX_STATE {
 #define IOCTL_OA2DP_AUDIO_SET_DATA_EVENT OA2DP_CTL(41, METHOD_BUFFERED)
 #define IOCTL_OA2DP_AUDIO_CONSUMER_READY OA2DP_CTL(42, METHOD_BUFFERED)
 /* The service admits this PCM epoch only after START and encoder preparation.
- * A successful reply wakes a pending KS RUN transition; it is not audio data. */
+ * A successful reply wakes a pending KS PAUSE preparation; it is not audio data. */
 typedef struct _OA2DP_CONSUMER_READY_IN {
     ULONG PcmSequence;
     ULONG Reserved;
@@ -171,6 +171,7 @@ typedef struct _OA2DP_FORMAT_CHANGE {
     OA2DP_FORMAT Format;
     ULONG PcmSequence;        /* distinguishes A -> B -> A even if events coalesce */
     ULONG Running;            /* 1 = stream started, 0 = stopped */
+    ULONG Prepared;           /* PAUSE/RUN owns prepared transport; not audible playback */
     ULONG ConnectionEnabled;  /* Windows one-shot disconnect suppresses retries */
     ULONG ConnectionSerial;   /* distinguishes an explicit reconnect request */
     ULONG SuspendRequested;   /* native multi-profile manager pauses A2DP for SCO */

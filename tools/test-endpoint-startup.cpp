@@ -49,7 +49,7 @@ namespace admission {
 #define LOGE(...) ((void)0)
 struct OA2DP_FORMAT_CHANGE {
     unsigned ConnectionEnabled = 1, SuspendRequested = 0, SuspendSerial = 0;
-    unsigned ConnectionSerial = 0, PcmSequence = 0, Running = 0, Format = 0;
+    unsigned ConnectionSerial = 0, PcmSequence = 0, Running = 0, Prepared = 0, Format = 0;
 };
 struct Audio {
     bool name_ok = true; unsigned opens = 0, closes = 0, maps = 0, names = 0;
@@ -62,7 +62,7 @@ struct Audio {
 };
 struct Session {
     bool audio_ready_ = false, stopping_ = false, connection_enabled_ = false;
-    bool suspend_requested_ = false, audio_running_ = false;
+    bool suspend_requested_ = false, audio_requested_ = false;
     unsigned suspend_serial_ = 0, connection_serial_ = 0, audio_format_ = 0, pcm_sequence_ = 0;
     int stop_event_ = 0, control_cancel_event_ = 1;
     struct { unsigned RemoteAddress = 1; } info_;

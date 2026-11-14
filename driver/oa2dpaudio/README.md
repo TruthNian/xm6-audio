@@ -63,7 +63,7 @@ generator, file saving, KMDF.
    Format/RUN changes also wake it; unmap/cleanup release the event reference.
    The service has independent stop events and no Sleep(2) PCM polling loop.
 4. **Format change.** The ring is allocated once for 2 channels and never
-   moves. Ring protocol v2 keeps the two-channel storage stride fixed, even
+   moves. Ring protocol v5 keeps the two-channel storage stride fixed, even
    for mono PCM. A format transaction updates rate/channels/representation,
    an atomic sequence and the first position of the new format. Source
    container/valid-bit changes also start an epoch even if this normalized
@@ -74,11 +74,13 @@ generator, file saving, KMDF.
    rejects a sequence change before publishing the block to the encoder.
    A format update also sets
    `OA2DP_RING_FLAG_FORMAT_CHANGED` and completes a pending
-   `IOCTL_OA2DP_AUDIO_WAIT_FORMAT`. WAIT_FORMAT also completes on RUN
-   (`Running = 1`) and when leaving RUN (`Running = 0`), which the service
-   uses to connect on play and to suspend when idle. The latest state wins
-   if the service has not picked up the previous one; a new control handle
-   starts with the current state if a stream is running.
+   `IOCTL_OA2DP_AUDIO_WAIT_FORMAT`. `Prepared` reserves the consumer during
+   PAUSE before Windows commits its RUN deadline; `Running` describes actual
+   WaveRT rendering independently. A PAUSE lease retains the transport for
+   immediate resume. ACQUIRE/STOP and buffer/stream release relinquish it;
+   profile suspension and disconnect override availability. The latest state
+   wins if the service has not picked up the previous one, and a new control
+   handle receives the current request. Protocol 5 rejects mixed packages.
 5. **Latency.** The local virtual WaveRT path has no hardware FIFO, chipset
    or DAC delay, so `KSRTAUDIO_HWLATENCY` reports zero for those fields.
    Windows validates that local delay against its cyclic buffer size;
@@ -86,8 +88,9 @@ generator, file saving, KMDF.
    Downstream `TransportUs + DeviceUs`, supplied by
    `IOCTL_OA2DP_AUDIO_SET_LATENCY`, is instead subtracted from transferred
    frames to estimate `KSPROPERTY_RTAUDIO_PRESENTATION_POSITION`. The committed
-   estimate never decreases within a stream epoch, freezes at PAUSE and resets
-   on STOP; updated delay cannot undo an already reported position. The KS
+   estimate never decreases within a stream epoch, drains up to the submitted
+   boundary during PAUSE and resets on STOP; updated delay cannot undo an
+   already reported position. The KS
    timestamp retains raw QPC ticks. End-to-end video timing still needs hardware
    testing because this estimate does not observe the receiver's actual output.
 6. **Control interface.** Deviation from the earlier plan (a KMDF

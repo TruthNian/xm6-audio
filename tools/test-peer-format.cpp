@@ -66,7 +66,7 @@ struct Session {
     bool control_cancelled_ = false;
     const bool *control_cancel_event_ = &control_cancelled_;
     bool sig_open_ = true, rx_failed_ = false;
-    bool have_remote_caps_ = false, peer_configuration_pending_ = false, audio_running_ = true;
+    bool have_remote_caps_ = false, peer_configuration_pending_ = false, audio_requested_ = true;
     bool rate_resume_pending_ = false;
     DWORD next_peer_configuration_retry_ = 0;
     DWORD next_profile_retry_ = 0;
@@ -343,11 +343,11 @@ int main() {
         s.rejected_signal = OA2DP_AVDTP_RECONFIGURE;
         s.rejections = 1;
         s.reconfigure_rate(48000);
-        s.audio_running_ = false; // player paused during the failed transition
+        s.audio_requested_ = false; // player paused during the failed transition
         now = 1100;
         s.reconcile_peer_configuration();
         CHECK(!s.streaming_ && !s.starts);
-        s.audio_running_ = true;
+        s.audio_requested_ = true;
         s.reconfigure_rate(48000);
         CHECK(s.streaming_ && !s.rate_resume_pending_);
     }

@@ -34,6 +34,7 @@ Abstract:
 
 #include "minwavert.h"
 #include "minwavertstream.h"
+#include "trace.h"
 
 static ULONGLONG HnsToFrames(_In_ ULONGLONG Hns, _In_ ULONG Rate)
 {
@@ -61,6 +62,8 @@ CMiniportWaveRTStream::~CMiniportWaveRTStream
         );
         m_pNotificationTimer = NULL;
     }
+    if (m_Device)
+        Oa2dpReportStream(m_Device, &m_Format, FALSE, m_PcmSequence, FALSE);
 
     while (!IsListEmpty(&m_NotificationList))
     {
@@ -131,7 +134,7 @@ CMiniportWaveRTStream::Init
     }
 
 
-    // Merely opening/probing a pin is not playback. Publish its epoch at RUN,
+    // Merely opening/probing a pin is not preparation. Publish its epoch at PAUSE,
     // before any sample is pumped, so an unused pin cannot retire live audio.
 
     return STATUS_SUCCESS;
@@ -398,6 +401,7 @@ CMiniportWaveRTStream::FreeAudioBuffer
 )
 {
     UNREFERENCED_PARAMETER(Size_);
+    (void)SetState(KSSTATE_STOP); // reset the timeline before this allocation can be reused
 
     KIRQL oldIrql;
     BYTE *buffer;
@@ -407,6 +411,7 @@ CMiniportWaveRTStream::FreeAudioBuffer
     m_pDmaBuffer = NULL;
     m_ulDmaBufferSize = 0;
     m_ulNotificationsPerBuffer = 0;
+    m_NeedsPcmEpoch = TRUE;
     KeReleaseSpinLock(&m_PositionSpinLock, oldIrql);
 
     if (Mdl_ != NULL)
@@ -780,6 +785,13 @@ CMiniportWaveRTStream::SetState
     const ULONG latencyUs = Oa2dpLatencyUs(m_Device);
     KeAcquireSpinLock(&m_PositionSpinLock, &oldIrql);
     const BOOLEAN wasRunning = (m_KsState == KSSTATE_RUN);
+    if (State_ == m_KsState) {
+        KeReleaseSpinLock(&m_PositionSpinLock, oldIrql);
+        return STATUS_SUCCESS;
+    }
+    TraceLoggingWrite(g_Oa2dpAudioTrace, "StreamStateRequest", TraceLoggingLevel(5),
+        TraceLoggingUInt32(m_PcmSequence, "PcmSequence"),
+        TraceLoggingUInt32(m_KsState, "PreviousState"), TraceLoggingUInt32(State_, "State"));
 
     switch (State_)
     {
@@ -814,34 +826,50 @@ CMiniportWaveRTStream::SetState
                 m_ullPausePresentationFrames = m_ullPresentationFrames;
                 m_hnsRunBase = RunningHns(qpc);
             }
-            break;
-
-        case KSSTATE_RUN:
-            if (!wasRunning)
+            else if (m_KsState != KSSTATE_PAUSE)
             {
                 if (m_NeedsPcmEpoch) {
-                    // A reused STOPped stream starts a new clip. Do this under
-                    // the pump lock, before RUN makes any new samples visible.
+                    // PAUSE prepares the consumer before Windows commits its
+                    // render deadline. No source clock or timer is running.
                     if (!Oa2dpRingBeginStream(&m_Device->Ring, &m_Format, &m_PcmSequence)) {
                         KeReleaseSpinLock(&m_PositionSpinLock, oldIrql);
                         return STATUS_INVALID_DEVICE_STATE;
                     }
                     m_NeedsPcmEpoch = FALSE;
                 }
-                // Request preparation while this stream is still PAUSE/STOP.
-                // Never acknowledge RUN and then freeze its hardware clock:
-                // Media Foundation may already advance/drop source timestamps.
+                // Retain this preparation through PAUSE/RUN. ACQUIRE/STOP
+                // releases it; no per-application warmup is required.
                 const ULONG sequence = m_PcmSequence;
                 KeReleaseSpinLock(&m_PositionSpinLock, oldIrql);
-                Oa2dpReportStream(m_Device, &m_Format, TRUE, sequence);
+                const LARGE_INTEGER preparationStart = KeQueryPerformanceCounter(NULL);
+                Oa2dpReportStream(m_Device, &m_Format, FALSE, sequence, TRUE);
                 const NTSTATUS prepared = Oa2dpRingWaitConsumer(&m_Device->Ring, sequence);
+                LARGE_INTEGER preparationElapsed = KeQueryPerformanceCounter(NULL);
+                preparationElapsed.QuadPart -= preparationStart.QuadPart;
+                TraceLoggingWrite(g_Oa2dpAudioTrace, "StreamPreparation", TraceLoggingLevel(5),
+                    TraceLoggingUInt32(sequence, "PcmSequence"), TraceLoggingNTStatus(prepared, "Status"),
+                    TraceLoggingUInt64(KSCONVERT_PERFORMANCE_TIME(m_PerfFrequency.QuadPart, preparationElapsed), "DurationHns"));
                 if (!NT_SUCCESS(prepared)) {
-                    Oa2dpReportStream(m_Device, &m_Format, FALSE, sequence);
+                    Oa2dpReportStream(m_Device, &m_Format, FALSE, sequence, FALSE);
                     return prepared;
                 }
                 KeAcquireSpinLock(&m_PositionSpinLock, &oldIrql);
-                // PortCls orders state transitions. Consumer preparation took
-                // place without the position lock or an active timer.
+            }
+            break;
+
+        case KSSTATE_RUN:
+            if (!wasRunning)
+            {
+                // RUN is a real-time commit, never a Bluetooth RPC. If the
+                // consumer or profile was lost, fail promptly without moving
+                // the DMA clock or falsely acknowledging usable playback.
+                if (m_KsState != KSSTATE_PAUSE || m_NeedsPcmEpoch ||
+                    !Oa2dpRingConsumerReady(&m_Device->Ring, m_PcmSequence)) {
+                    TraceLoggingWrite(g_Oa2dpAudioTrace, "StreamRunUnavailable", TraceLoggingLevel(5),
+                        TraceLoggingUInt32(m_PcmSequence, "PcmSequence"));
+                    KeReleaseSpinLock(&m_PositionSpinLock, oldIrql);
+                    return STATUS_DEVICE_NOT_READY;
+                }
                 m_RunStartQpc = KeQueryPerformanceCounter(&m_PerfFrequency);
                 UpdatePausedPresentationPosition(m_RunStartQpc);
             }
@@ -852,15 +880,20 @@ CMiniportWaveRTStream::SetState
     }
 
     m_KsState = State_;
+    TraceLoggingWrite(g_Oa2dpAudioTrace, "StreamStateCommit", TraceLoggingLevel(5),
+        TraceLoggingUInt32(m_PcmSequence, "PcmSequence"), TraceLoggingUInt32(State_, "State"),
+        TraceLoggingUInt64(m_ullPumpedFrames, "PumpedFrames"),
+        TraceLoggingUInt64(m_ullLinearFrames, "ClockFrames"));
     KeReleaseSpinLock(&m_PositionSpinLock, oldIrql);
     // PortCls calls ordered transitions at PASSIVE_LEVEL. Keep state under
     // the timer's lock, but publish/complete control IRPs only after unlocking.
     if (wasRunning && State_ != KSSTATE_RUN)
     {
         ExCancelTimer(m_pNotificationTimer, NULL);
-        Oa2dpReportStream(m_Device, &m_Format, FALSE, m_PcmSequence);
     }
-    else if (!wasRunning && State_ == KSSTATE_RUN)
+    Oa2dpReportStream(m_Device, &m_Format, State_ == KSSTATE_RUN, m_PcmSequence,
+        State_ == KSSTATE_PAUSE || State_ == KSSTATE_RUN);
+    if (!wasRunning && State_ == KSSTATE_RUN)
     {
         // 1 ms software hardware-emulation timer; notification cadence comes
         // from actual packet progress, including intervening position queries.
